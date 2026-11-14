@@ -38,12 +38,12 @@ Each successful generation reports `generation_wall_seconds`, `real_time_factor`
 
 ## Sound scene generation (experimental procedural mixing)
 
-The \`scene\` command and \`POST /v1/scenes\` can position up to eight DSP sound
+The `scene` command and `POST /v1/scenes` can position up to eight DSP sound
 layers on a 30-second timeline with per-layer fades, start time, seed and gain.
 
-\`\`\`bash
+```bash
 sonumio scene examples/forest_storm_scene.json --output outputs/forest_storm.wav
-\`\`\`
+```
 
 See [scene documentation](docs/SCENES.md). This is an audio mixing feature, not
 neural sound generation.
@@ -55,11 +55,11 @@ An initial **trainable waveform diffusion** experiment now synthesizes very shor
 by Sonumio's procedural engine. This is an experimental neural generator, **not
 Sonumio-1** and not production-quality prompt-driven audio.
 
-\`\`\`bash
+```bash
 python -m pip install -e '.[research,test]'
 python -m research.wave_diffusion train --steps 50 --output checkpoints/wave-diffusion
 python -m research.wave_diffusion sample --checkpoint checkpoints/wave-diffusion --prompt rain --output outputs/research-wave.wav
-\`\`\`
+```
 
 See [diffusion research limitations](docs/DIFFUSION_EXPERIMENT.md). Locally trained
 weights are excluded from Git, and no weights, releases or pre-releases are authorized.
