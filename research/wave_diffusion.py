@@ -202,15 +202,30 @@ def load_checkpoint(path: Path) -> tuple[TinyWaveDenoiser, DiffusionSchedule, di
 
 
 def train(*, steps: int = 50, seed: int = 9, output: Path | None = None,
-          diffusion_steps: int = DEFAULT_DIFFUSION_STEPS, channels: int = 32) -> dict:
+          diffusion_steps: int = DEFAULT_DIFFUSION_STEPS, channels: int = 32,
+          manifest: Path | None = None, audio_root: Path | None = None,
+          clips_per_asset: int = 2) -> dict:
     if not 1 <= steps <= 50_000:
         raise ValueError("training steps must be 1..50000")
     if not 0 <= seed < 2 ** 32:
         raise ValueError("seed must be in [0, 2**32)")
     torch.manual_seed(seed)
     model, schedule = TinyWaveDenoiser(channels), DiffusionSchedule(diffusion_steps)
-    x, labels, fingerprint = dataset()
-    eval_x, eval_labels, eval_fingerprint = dataset((101, 102))
+    if (manifest is None) != (audio_root is None):
+        raise ValueError("--manifest and --audio-root must be provided together")
+    ingestion_report = None
+    if manifest is not None:
+        from research.audio_dataset import load_reviewed_splits
+        loaded, ingestion_report = load_reviewed_splits(manifest, audio_root, clips_per_asset=clips_per_asset)
+        x = torch.from_numpy(loaded["train"].clips)
+        labels = torch.from_numpy(loaded["train"].labels)
+        eval_x = torch.from_numpy(loaded["validation"].clips)
+        eval_labels = torch.from_numpy(loaded["validation"].labels)
+        fingerprint = loaded["train"].fingerprint
+        eval_fingerprint = loaded["validation"].fingerprint
+    else:
+        x, labels, fingerprint = dataset()
+        eval_x, eval_labels, eval_fingerprint = dataset((101, 102))
     optimizer = torch.optim.AdamW(model.parameters(), lr=0.001)
     started = perf_counter()
     losses = []
@@ -231,6 +246,8 @@ def train(*, steps: int = 50, seed: int = 9, output: Path | None = None,
         "purpose": "experimental conditional waveform DDPM trained exclusively on DSP samples",
         "model_generation": None, "not_production_ready": True,
         "training_examples": len(x), "heldout_examples": len(eval_x),
+        "data_source": "rights-declared-local-wav" if manifest is not None else "sonumio-synthetic-dsp",
+        "data_ingestion": ingestion_report,
         "training_fingerprint": fingerprint, "heldout_fingerprint": eval_fingerprint,
         "steps": steps, "seed": seed, "initial_step_noise_mse": losses[0],
         "last_step_noise_mse": losses[-1], "heldout_noise_mse": heldout,
@@ -250,6 +267,9 @@ def main() -> None:
     training.add_argument("--steps", type=int, default=50)
     training.add_argument("--seed", type=int, default=9)
     training.add_argument("--output", type=Path, default=Path("checkpoints/wave-diffusion"))
+    training.add_argument("--manifest", type=Path, help="Rights-reviewed JSONL manifest")
+    training.add_argument("--audio-root", type=Path, help="Local directory containing manifest WAV paths")
+    training.add_argument("--clips-per-asset", type=int, default=2)
     sampling = commands.add_parser("sample")
     sampling.add_argument("--checkpoint", required=True, type=Path)
     sampling.add_argument("--prompt", choices=CATEGORIES, required=True)
@@ -258,7 +278,9 @@ def main() -> None:
     sampling.add_argument("--output", type=Path, default=Path("outputs/research-wave.wav"))
     args = parser.parse_args()
     if args.command == "train":
-        print(json.dumps(train(steps=args.steps, seed=args.seed, output=args.output), indent=2))
+        print(json.dumps(train(steps=args.steps, seed=args.seed, output=args.output,
+                               manifest=args.manifest, audio_root=args.audio_root,
+                               clips_per_asset=args.clips_per_asset), indent=2))
     else:
         model, schedule, _ = load_checkpoint(args.checkpoint)
         wave = schedule.sample(model, CATEGORIES.index(args.prompt), seed=args.seed,

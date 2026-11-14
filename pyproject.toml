@@ -13,7 +13,7 @@ authors = [{name = "Sonumio contributors"}]
 dependencies = ["numpy>=1.26,<3", "fastapi>=0.110,<1", "uvicorn>=0.29,<1"]
 
 [project.optional-dependencies]
-research = ["torch>=2.2", "transformers>=4.45,<5", "accelerate>=0.26", "safetensors>=0.4"]
+research = ["torch>=2.2", "scipy>=1.12,<2", "transformers>=4.45,<5", "accelerate>=0.26", "safetensors>=0.4"]
 test = ["pytest>=8", "httpx>=0.27"]
 
 [project.scripts]

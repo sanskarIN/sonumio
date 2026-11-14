@@ -63,3 +63,18 @@ python -m research.wave_diffusion sample --checkpoint checkpoints/wave-diffusion
 
 See [diffusion research limitations](docs/DIFFUSION_EXPERIMENT.md). Locally trained
 weights are excluded from Git, and no weights, releases or pre-releases are authorized.
+
+## Rights-gated local WAV training (experimental)
+
+The research loader verifies local WAV SHA256, PCM headers, declared permissions,
+and recording-group-disjoint train/validation splits. Anti-aliased 8 kHz crops
+can replace synthetic DSP examples for the tiny six-category diffusion experiment.
+The loader is NOT independent copyright verification or voice detection.
+
+~~~bash
+python -m pip install -e '.[research,test]'
+python -m research.wave_diffusion train --steps 50 --manifest /path/to/manifest.jsonl --audio-root /path/to/rights-reviewed-wavs --output checkpoints/reviewed-private
+~~~
+
+See [dataset ingestion requirements](docs/DATASET_INGESTION.md).
+No GitHub release, pre-release, or model weight publication is authorized.

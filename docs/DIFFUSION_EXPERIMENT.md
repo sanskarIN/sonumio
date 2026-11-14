@@ -41,3 +41,12 @@ release gate and the checkpoints must not be published.
 5. Audit memorization and speech/voice misuse before any deployment or weight release.
 
 The numerical training loss is noise-prediction MSE, not perceived audio fidelity.
+
+## Local WAV training research
+
+The optional rights-gated WAV training path is documented in
+[DATASET_INGESTION.md](DATASET_INGESTION.md). Passing --manifest together
+with --audio-root trains from declared, checksum-verified local PCM recordings.
+It retains 0.256-second 8 kHz clips and single-category conditioning.
+A human must independently verify rights and that recordings contain no voices.
+No checkpoints are published.
