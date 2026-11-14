@@ -78,3 +78,18 @@ python -m research.wave_diffusion train --steps 50 --manifest /path/to/manifest.
 
 See [dataset ingestion requirements](docs/DATASET_INGESTION.md).
 No GitHub release, pre-release, or model weight publication is authorized.
+
+## Experimental two-sound neural research (not Sonumio-1)
+
+The synthetic-only diffusion experiment now supports optional multi-label
+conditioning for one or two fixed sound-effect categories in a limited
+English/Hindi keyword vocabulary. It is learned class conditioning, not
+open-vocabulary language understanding.
+
+~~~bash
+python -m research.wave_diffusion train --steps 50 --mixed-synthetic --output checkpoints/mixed-private
+python -m research.wave_diffusion sample --checkpoint checkpoints/mixed-private --prompt "rain and thunder" --output outputs/mixed.wav
+~~~
+
+See [multi-sound research limitations](docs/MULTI_CONDITION_EXPERIMENT.md).
+Keep checkpoints private; releases and pre-releases remain prohibited.

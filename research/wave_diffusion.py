@@ -69,13 +69,29 @@ class TinyWaveDenoiser(nn.Module):
     def forward(self, audio: torch.Tensor, timestep: torch.Tensor, label: torch.Tensor) -> torch.Tensor:
         if audio.ndim != 3 or audio.shape[1] != 1:
             raise ValueError("audio must have shape [batch, 1, frames]")
-        if timestep.shape != label.shape or label.ndim != 1 or label.numel() != audio.shape[0]:
-            raise ValueError("timestep and class label must have shape [batch]")
+        if timestep.ndim != 1 or timestep.numel() != audio.shape[0]:
+            raise ValueError("timestep must have shape [batch]")
+        if label.ndim == 1:
+            if label.shape != timestep.shape:
+                raise ValueError("class label must have shape [batch]")
+            label_features = self.embedding(label)
+        elif label.ndim == 2:
+            if label.shape != (audio.shape[0], self.classes):
+                raise ValueError("multi-label conditions must have shape [batch, classes]")
+            if not torch.isfinite(label).all() or not ((label == 0) | (label == 1)).all():
+                raise ValueError("multi-label conditions must contain only finite binary values")
+            count = label.sum(dim=1, keepdim=True)
+            if (count > 2).any():
+                raise ValueError("a maximum of two sound categories is supported")
+            combined = (label.to(self.embedding.weight.dtype) @ self.embedding.weight[:self.classes]) / count.clamp(min=1).sqrt()
+            label_features = torch.where(count > 0, combined, self.embedding.weight[self.classes].unsqueeze(0))
+        else:
+            raise ValueError("invalid sound-condition tensor")
         half = self.channels // 2
         frequencies = torch.exp(-math.log(10_000) * torch.arange(half, device=audio.device) / max(half - 1, 1))
         angles = timestep.float()[:, None] * frequencies[None]
         time_features = torch.cat([torch.sin(angles), torch.cos(angles)], dim=-1)
-        condition = self.embedding(label) + self.time_mlp(time_features)
+        condition = label_features + self.time_mlp(time_features)
         h = self.input(audio)
         for layer in self.layers:
             h = layer(h, condition)
@@ -157,7 +173,10 @@ def training_step(model: TinyWaveDenoiser, schedule: DiffusionSchedule, x: torch
     steps = torch.randint(0, schedule.steps, (len(x),), device=x.device)
     noise = torch.randn_like(x)
     dropped = torch.rand(len(x), device=x.device) < drop_condition
-    labels = torch.where(dropped, model.classes, categories)
+    if categories.ndim == 2:
+        labels = torch.where(dropped[:, None], torch.zeros_like(categories), categories)
+    else:
+        labels = torch.where(dropped, model.classes, categories)
     return F.mse_loss(model(schedule.corrupt(x, steps, noise), steps, labels), noise)
 
 
@@ -204,7 +223,7 @@ def load_checkpoint(path: Path) -> tuple[TinyWaveDenoiser, DiffusionSchedule, di
 def train(*, steps: int = 50, seed: int = 9, output: Path | None = None,
           diffusion_steps: int = DEFAULT_DIFFUSION_STEPS, channels: int = 32,
           manifest: Path | None = None, audio_root: Path | None = None,
-          clips_per_asset: int = 2) -> dict:
+          clips_per_asset: int = 2, mixed_synthetic: bool = False) -> dict:
     if not 1 <= steps <= 50_000:
         raise ValueError("training steps must be 1..50000")
     if not 0 <= seed < 2 ** 32:
@@ -213,8 +232,14 @@ def train(*, steps: int = 50, seed: int = 9, output: Path | None = None,
     model, schedule = TinyWaveDenoiser(channels), DiffusionSchedule(diffusion_steps)
     if (manifest is None) != (audio_root is None):
         raise ValueError("--manifest and --audio-root must be provided together")
+    if mixed_synthetic and manifest is not None:
+        raise ValueError("mixed synthetic conditioning cannot be combined with real-recording manifest")
     ingestion_report = None
-    if manifest is not None:
+    if mixed_synthetic:
+        from research.multi_condition import mixed_dataset
+        x, labels, fingerprint = mixed_dataset()
+        eval_x, eval_labels, eval_fingerprint = mixed_dataset((101, 102))
+    elif manifest is not None:
         from research.audio_dataset import load_reviewed_splits
         loaded, ingestion_report = load_reviewed_splits(manifest, audio_root, clips_per_asset=clips_per_asset)
         x = torch.from_numpy(loaded["train"].clips)
@@ -246,7 +271,9 @@ def train(*, steps: int = 50, seed: int = 9, output: Path | None = None,
         "purpose": "experimental conditional waveform DDPM trained exclusively on DSP samples",
         "model_generation": None, "not_production_ready": True,
         "training_examples": len(x), "heldout_examples": len(eval_x),
-        "data_source": "rights-declared-local-wav" if manifest is not None else "sonumio-synthetic-dsp",
+        "data_source": ("sonumio-mixed-synthetic-dsp" if mixed_synthetic else
+                        "rights-declared-local-wav" if manifest is not None else "sonumio-synthetic-dsp"),
+        "conditioning_mode": "multi-label" if mixed_synthetic else "single-class",
         "data_ingestion": ingestion_report,
         "training_fingerprint": fingerprint, "heldout_fingerprint": eval_fingerprint,
         "steps": steps, "seed": seed, "initial_step_noise_mse": losses[0],
@@ -270,9 +297,10 @@ def main() -> None:
     training.add_argument("--manifest", type=Path, help="Rights-reviewed JSONL manifest")
     training.add_argument("--audio-root", type=Path, help="Local directory containing manifest WAV paths")
     training.add_argument("--clips-per-asset", type=int, default=2)
+    training.add_argument("--mixed-synthetic", action="store_true", help="Experimental one/two-category DSP composition training")
     sampling = commands.add_parser("sample")
     sampling.add_argument("--checkpoint", required=True, type=Path)
-    sampling.add_argument("--prompt", choices=CATEGORIES, required=True)
+    sampling.add_argument("--prompt", required=True, help="Single-category or supported two-sound prompt")
     sampling.add_argument("--seed", type=int, default=10)
     sampling.add_argument("--guidance", type=float, default=1.0)
     sampling.add_argument("--output", type=Path, default=Path("outputs/research-wave.wav"))
@@ -280,11 +308,19 @@ def main() -> None:
     if args.command == "train":
         print(json.dumps(train(steps=args.steps, seed=args.seed, output=args.output,
                                manifest=args.manifest, audio_root=args.audio_root,
-                               clips_per_asset=args.clips_per_asset), indent=2))
+                               clips_per_asset=args.clips_per_asset,
+                               mixed_synthetic=args.mixed_synthetic), indent=2))
     else:
-        model, schedule, _ = load_checkpoint(args.checkpoint)
-        wave = schedule.sample(model, CATEGORIES.index(args.prompt), seed=args.seed,
-                               guidance=args.guidance)
+        model, schedule, manifest = load_checkpoint(args.checkpoint)
+        mode = manifest.get("training_report", {}).get("conditioning_mode", "single-class")
+        if mode == "multi-label":
+            from research.multi_condition import sample_mixed
+            wave = sample_mixed(schedule, model, args.prompt, seed=args.seed, guidance=args.guidance)
+        elif args.prompt in CATEGORIES:
+            wave = schedule.sample(model, CATEGORIES.index(args.prompt), seed=args.seed,
+                                   guidance=args.guidance)
+        else:
+            raise ValueError("This checkpoint only supports one of: " + ", ".join(CATEGORIES))
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_bytes(encode_wav(wave.numpy(), SAMPLE_RATE))
         print(f"Experimental 8 kHz, {len(wave) / SAMPLE_RATE:.3f}s sample: {args.output}")
