@@ -93,3 +93,18 @@ python -m research.wave_diffusion sample --checkpoint checkpoints/mixed-private 
 
 See [multi-sound research limitations](docs/MULTI_CONDITION_EXPERIMENT.md).
 Keep checkpoints private; releases and pre-releases remain prohibited.
+
+## React audio studio (local development only)
+
+A new [React + TypeScript web interface](web/README.md) provides a sound-prompt
+workspace, a bounded scene-layer editor, API status, model provenance,
+playback and WAV download for the procedural baseline. It **does not**
+claim to run Sonumio-1 or a trained neural text-to-audio model.
+
+Start `sonumio serve` from the repository root. In a second terminal, run
+`cd web && npm install && npm run dev`, then open
+`http://127.0.0.1:5173`. The Vite dev proxy uses loopback `/v1` and
+`/health` endpoints. For checks, run `npm run typecheck`, `npm test` and
+`npm run build` from `web/`. This is not hardened for public deployment.
+
+No GitHub releases or pre-releases are authorized.
