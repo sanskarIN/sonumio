@@ -7,3 +7,6 @@
 - **v1.0.0 eventual stable gate**: measurable audio quality, security, reproducibility, model provenance and broad platform QA requirements satisfied.
 
 No GitHub release, pre-release or weights will be published without explicit approval.
+
+## Research infrastructure implemented in this prototype
+A synthetic-data neural-training smoke experiment and data-manifest validation tool are available and locally tested. This is preparation for, not delivery of, a future Sonumio-1 model.
