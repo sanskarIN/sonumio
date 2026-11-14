@@ -30,3 +30,7 @@ Evaluate a compact latent diffusion/flow-matching network against codec-token Tr
 
 ## Not currently implemented
 Original neural training or weights, realistic open-vocabulary sound effects, speech, multi-track editing, audio extension, streaming and audio-to-audio.
+
+## Implemented research scaffolding
+- `research/spectral_smoke.py`: optional PyTorch experiment using Sonumio-owned synthetic DSP examples. Measures train and held-out seed MSE and stores local NPZ weights (not published). **Does not generate audio.**
+- `research/dataset_manifest.py`: JSONL validation of source metadata and rights declarations, split group integrity, duplicates and voice-data exclusion. Human rights verification is still mandatory.
