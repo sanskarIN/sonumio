@@ -13,3 +13,7 @@ checkpoints/
 *.safetensors
 *.pt
 *.pth
+
+# Local reviewed audio recordings must never be committed.
+recordings/
+private-data/
