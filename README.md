@@ -1,0 +1,24 @@
+# Sonumio
+
+**Imagine it. Hear it.** Open-source generative audio platform for creating speech, music, and sound effects from text prompts, powered by evolving AI models.
+
+> Experimental development: the default procedural DSP synthesizer generates actual WAV audio, but is NOT an AI model. Original Sonumio-1 does NOT exist yet.
+
+## Setup
+Python 3.11+:
+1. `python -m venv .venv`
+2. Activate the environment; on Windows run `.venv\Scripts\activate`
+3. `python -m pip install -e '.[test]'`
+4. `sonumio generate "Rain and thunder in a forest" --seconds 3 --output outputs/rain.wav`
+5. `python -m pytest -q`
+6. `sonumio serve` then open http://127.0.0.1:8000/docs
+
+The procedural baseline supports rain, thunder, wind, birds, water and ambient tones in English/Hindi. Unsupported prompts raise an error. Sample format: 24 kHz mono PCM WAV.
+
+The optional Meta MusicGen-small adapter is a THIRD-PARTY pretrained text-to-music model, research-only, disabled by default. Meta weights are CC-BY-NC-4.0 and not covered by Sonumio's Apache-2.0 source license; you must read and respect the upstream terms and separately install research dependencies. Set `SONUMIO_ENABLE_MUSICGEN=1` to enable. This adapter has NOT undergone real model weight/GPU validation in this prototype.
+
+API: `GET /health`, `GET /v1/models`, `POST /v1/generations` and `GET /v1/generations/{id}/audio`. Do not expose the local server publicly without authentication, quotas, rate limits and cleanup.
+
+Original Sonumio-1 and later model generations are research goals, NOT software version numbers or existing trained weights. See `docs/` for architecture, evaluation and roadmap. All releases/model weight publications need owner approval.
+
+Source license: Apache-2.0. External weights and datasets retain their own terms.
