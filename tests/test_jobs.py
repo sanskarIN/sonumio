@@ -194,3 +194,24 @@ def test_api_expiry_removes_generated_audio(client, monkeypatch):
     monkeypatch.setattr(jobs, 'monotonic', lambda: real_clock() + 3)
     assert client.get('/v1/jobs/' + created.json()['id']).status_code == 404
     assert client.get(audio_url).status_code == 404
+
+def test_many_cancelled_pending_jobs_do_not_accumulate_queue_entries():
+    queue = jobs.LocalJobQueue(max_active=2, max_history=4)
+    started = threading.Event()
+    release = threading.Event()
+    def blocked():
+        started.set()
+        assert release.wait(timeout=5)
+        return {"ok": True}
+    try:
+        current = queue.submit("generation", blocked, lambda _: None)
+        assert started.wait(timeout=2)
+        for _ in range(120):
+            pending = queue.submit("scene", lambda: {"unexpected": True}, lambda _: None)
+            assert queue.cancel(pending["id"])["status"] == "cancelled"
+            assert not queue._pending
+        release.set()
+        assert wait_for(queue, current["id"], {"succeeded"})["result"] == {"ok": True}
+    finally:
+        release.set()
+        queue.shutdown()

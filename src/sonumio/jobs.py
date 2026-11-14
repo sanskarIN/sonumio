@@ -164,7 +164,9 @@ class LocalJobQueue:
                 task.status = "cancelled"
                 task.finished_at = _utc()
                 task.finished_clock = monotonic()
-                # The worker will skip the tombstone when it reaches it.
+                # Remove the pending ID now: cancellation must not leave an
+                # unbounded deque of tombstones while a renderer is blocked.
+                self._pending.remove(job_id)
             else:
                 task.status = "cancelling"
             self._cv.notify_all()
