@@ -35,3 +35,31 @@ The MusicGen adapter uses a pinned upstream revision with safetensors loading an
 ## Development-only performance measurements
 
 Each successful generation reports `generation_wall_seconds`, `real_time_factor`, peak/RMS dBFS and the hard-clipping fraction. Run `python benchmarks/latency.py` after installing the package. The benchmark measures **procedural CPU synthesis**, not pretrained or original neural model latency.
+
+## Sound scene generation (experimental procedural mixing)
+
+The \`scene\` command and \`POST /v1/scenes\` can position up to eight DSP sound
+layers on a 30-second timeline with per-layer fades, start time, seed and gain.
+
+\`\`\`bash
+sonumio scene examples/forest_storm_scene.json --output outputs/forest_storm.wav
+\`\`\`
+
+See [scene documentation](docs/SCENES.md). This is an audio mixing feature, not
+neural sound generation.
+
+## Original generative-model research experiment
+
+An initial **trainable waveform diffusion** experiment now synthesizes very short,
+8 kHz waveforms from six category conditions. Its training examples are created
+by Sonumio's procedural engine. This is an experimental neural generator, **not
+Sonumio-1** and not production-quality prompt-driven audio.
+
+\`\`\`bash
+python -m pip install -e '.[research,test]'
+python -m research.wave_diffusion train --steps 50 --output checkpoints/wave-diffusion
+python -m research.wave_diffusion sample --checkpoint checkpoints/wave-diffusion --prompt rain --output outputs/research-wave.wav
+\`\`\`
+
+See [diffusion research limitations](docs/DIFFUSION_EXPERIMENT.md). Locally trained
+weights are excluded from Git, and no weights, releases or pre-releases are authorized.
