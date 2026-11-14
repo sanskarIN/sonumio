@@ -20,6 +20,8 @@ def test_real_wav_generation(prompt):
         assert wav.getnframes() == 30_000
         assert np.frombuffer(wav.readframes(30_000), dtype="<i2").std() > 0
     assert generated.metrics["clipping_fraction"] == 0.0
+    assert generated.metrics["generation_wall_seconds"] >= 0
+    assert generated.metrics["real_time_factor"] >= 0
 
 def test_deterministic_output():
     a = generate_audio("rain storm", 0.5, seed=17)
