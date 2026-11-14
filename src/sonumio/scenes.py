@@ -53,7 +53,8 @@ def _validate_layer(layer: SceneLayer, total: float) -> None:
         raise GenerationError("seed must be an integer in [0, 2**32)")
 
 
-def compose_scene(layers: Sequence[SceneLayer], duration_seconds: float) -> Generated:
+def validate_scene_plan(layers: Sequence[SceneLayer], duration_seconds: float) -> None:
+    """Reject invalid scene requests before placing expensive work on the queue."""
     total = _valid_number(duration_seconds, 0.5, MAX_SCENE_SECONDS, "scene duration_seconds")
     if not 1 <= len(layers) <= MAX_LAYERS:
         raise GenerationError(f"A scene must contain 1..{MAX_LAYERS} layers")
@@ -61,6 +62,13 @@ def compose_scene(layers: Sequence[SceneLayer], duration_seconds: float) -> Gene
         if not isinstance(layer, SceneLayer):
             raise GenerationError("Expected SceneLayer elements")
         _validate_layer(layer, total)
+        from .validation import validate_request
+        validate_request(layer.prompt, layer.duration_seconds)
+
+
+def compose_scene(layers: Sequence[SceneLayer], duration_seconds: float) -> Generated:
+    validate_scene_plan(layers, duration_seconds)
+    total = float(duration_seconds)
     start = perf_counter()
     frames = round(total * SAMPLE_RATE)
     mix = np.zeros(frames, dtype=np.float64)

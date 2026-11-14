@@ -103,3 +103,87 @@ def audio(generation_id: str):
     if not path.is_file():
         raise HTTPException(status_code=404, detail="Audio not found")
     return FileResponse(path, media_type="audio/wav", filename="sonumio.wav")
+
+# ---------------------------------------------------------------------------
+# Development-only, bounded in-process jobs. These endpoints deliberately do
+# not expose multi-user/public inference, arbitrary model paths or voice tasks.
+# The queue owns one background worker, not a thread per request.
+# ---------------------------------------------------------------------------
+from .jobs import LocalJobQueue, JobNotFoundError, JobConflictError, QueueFullError
+from .scenes import validate_scene_plan
+from .validation import validate_request
+from .engines.procedural import recognized_sound_classes
+
+JOBS = LocalJobQueue(max_active=4, max_history=32, ttl_seconds=1800)
+
+
+def _cleanup_job_audio(result: dict, root: Path) -> None:
+    """Remove only locally generated, ID-validated WAV outputs."""
+    identifier = result.get("id")
+    if isinstance(identifier, str) and re.fullmatch(
+        r"[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}", identifier
+    ):
+        (root / f"{identifier}.wav").unlink(missing_ok=True)
+
+
+def _queue_response(job: dict) -> dict:
+    return {
+        **job,
+        "status_url": f"/v1/jobs/{job['id']}",
+        "cancel_url": f"/v1/jobs/{job['id']}",
+        "disclaimer": "Local development queue; active work cannot be forcibly interrupted",
+    }
+
+
+def _enqueue(kind: str, callback) -> dict:
+    # Keep the output path fixed per task so later config changes do not delete
+    # unrelated files when a cancelled/expired job is cleaned up.
+    output_root = OUTPUT_DIR
+    try:
+        task = JOBS.submit(kind, callback,
+                           lambda result: _cleanup_job_audio(result, output_root))
+    except QueueFullError as exc:
+        raise HTTPException(status_code=429, detail=str(exc)) from exc
+    return _queue_response(task)
+
+
+@app.post("/v1/jobs/generations", status_code=202)
+def enqueue_generation(request: GenerationRequest) -> dict:
+    if request.model_id != "procedural-sfx-v0":
+        raise HTTPException(status_code=422, detail="The local job queue supports procedural-sfx-v0 only")
+    try:
+        validate_request(request.prompt, request.duration_seconds)
+        recognized_sound_classes(request.prompt)
+    except GenerationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return _enqueue("generation", lambda: generate(request))
+
+
+@app.post("/v1/jobs/scenes", status_code=202)
+def enqueue_scene(request: SceneRequest) -> dict:
+    layers = [SceneLayer(**layer.model_dump()) for layer in request.layers]
+    try:
+        validate_scene_plan(layers, request.duration_seconds)
+        for layer in layers:
+            recognized_sound_classes(layer.prompt)
+    except GenerationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return _enqueue("scene", lambda: generate_scene(request))
+
+
+@app.get("/v1/jobs/{job_id}")
+def get_job(job_id: str) -> dict:
+    try:
+        return _queue_response(JOBS.get(job_id))
+    except JobNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Job not found or expired") from exc
+
+
+@app.delete("/v1/jobs/{job_id}")
+def cancel_job(job_id: str) -> dict:
+    try:
+        return _queue_response(JOBS.cancel(job_id))
+    except JobNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Job not found or expired") from exc
+    except JobConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc

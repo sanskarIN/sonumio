@@ -67,11 +67,16 @@ def _drone(t: np.ndarray) -> np.ndarray:
     lfo = 0.38 + 0.08 * np.sin(2 * np.pi * 0.4 * t)
     return (wave * lfo).astype(np.float32)
 
-def generate(prompt: str, duration_seconds: float, seed: int = 0) -> AudioResult:
+def recognized_sound_classes(prompt: str) -> list[str]:
+    """Cheap validation that shares the generator's supported vocabulary."""
     lower = prompt.lower()
     recognized = [kind for kind, words in TOKENS.items() if any(word in lower for word in words)]
     if not recognized:
         raise UnsupportedPromptError("No procedural sound matches this prompt; try rain, thunder, forest, wind, ocean, or ambient.")
+    return recognized
+
+def generate(prompt: str, duration_seconds: float, seed: int = 0) -> AudioResult:
+    recognized = recognized_sound_classes(prompt)
     rng = np.random.default_rng(seed)
     frames = round(SAMPLE_RATE * duration_seconds)
     t = np.arange(frames, dtype=np.float32) / SAMPLE_RATE

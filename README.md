@@ -108,3 +108,17 @@ Start `sonumio serve` from the repository root. In a second terminal, run
 `npm run build` from `web/`. This is not hardened for public deployment.
 
 No GitHub releases or pre-releases are authorized.
+
+## Bounded background audio jobs (experimental)
+
+The local API now includes an in-process single-worker job queue for procedural
+sound generation and scene composition. Submit `POST /v1/jobs/generations`
+or `POST /v1/jobs/scenes` and poll `GET /v1/jobs/{id}`.
+Cancel with `DELETE /v1/jobs/{id}`. The queue admits at most four active or
+waiting jobs, expires local job outputs after 30 minutes while running, and
+rejects unsupported models before dispatch. Running generation cannot be
+forcibly interrupted, and jobs do not survive a server restart.
+
+See [development job limitations](docs/LOCAL_JOBS.md). This local-only
+prototype has **no production authentication or durable model scheduling**.
+No releases, pre-releases or weight distribution are authorized.

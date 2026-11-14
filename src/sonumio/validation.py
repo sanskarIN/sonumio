@@ -12,6 +12,7 @@ MAX_SECONDS = 15.0
 VOICE_PATTERNS = (
     r"\b(?:clone|imitate|impersonate)\s+(?:the\s+)?(?:voice|speaker|person)\b",
     r"\b(?:voice\s+of|sound\s+like|make\s+\w+\s+say)\b",
+    r"\b(?:copy|recreate|mimic|replicate)\s+(?:(?:\w+)\s+){0,3}voice\b",
     r"\b(?:speech|spoken|narrate|narration|text.to.speech|tts)\b",
     r"(?:आवाज़|आवाज)\s+(?:की\s+)?(?:नकल|क्लोन)",
 )
