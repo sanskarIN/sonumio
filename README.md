@@ -22,3 +22,12 @@ API: `GET /health`, `GET /v1/models`, `POST /v1/generations` and `GET /v1/genera
 Original Sonumio-1 and later model generations are research goals, NOT software version numbers or existing trained weights. See `docs/` for architecture, evaluation and roadmap. All releases/model weight publications need owner approval.
 
 Source license: Apache-2.0. External weights and datasets retain their own terms.
+
+## Original-model research scaffolding (development only)
+
+From the repository root, after installing the optional PyTorch research dependencies:
+
+- `python -m research.spectral_smoke --steps 40 --seed 7`: trains a tiny synthetic-spectrum regression network, records held-out error and saves a local NPZ checkpoint. This is **not** a neural waveform generator and not Sonumio-1.
+- `python -m research.dataset_manifest path/to/manifest.jsonl`: checks data-rights declarations, voice exclusions, recording/checksum duplicates and group-isolated evaluation splits. This cannot verify legal rights without human review.
+
+The MusicGen adapter uses a pinned upstream revision with safetensors loading and remote code disabled. Actual neural checkpoint execution is still unverified.
