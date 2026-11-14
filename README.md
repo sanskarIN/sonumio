@@ -122,3 +122,31 @@ forcibly interrupted, and jobs do not survive a server restart.
 See [development job limitations](docs/LOCAL_JOBS.md). This local-only
 prototype has **no production authentication or durable model scheduling**.
 No releases, pre-releases or weight distribution are authorized.
+
+## New learned-text neural audio research (NOT Sonumio-1)
+
+The isolated `research/text_audio.py` experiment combines a **trainable
+UTF-8 text Transformer** with an original conditional waveform diffusion
+denoiser. It accepts English and Hindi text without hard-coded category IDs
+inside the neural forward/sampling path. However, its **synthetic training**
+still covers only six DSP sound categories and 15 two-sound pairs, with
+template-based bilingual captions and 0.256-second 8 kHz outputs.
+
+Local smoke test (not a usable creator model):
+
+```bash
+python -m pip install -e '.[research,test]'
+python -m research.text_audio train --steps 50 --channels 16 --diffusion-steps 8 --output checkpoints/private-text-experiment
+python -m research.text_audio sample --checkpoint checkpoints/private-text-experiment --prompt 'बारिश और हवा' --output outputs/text-experiment.wav
+python -m pytest -q tests/test_text_audio.py
+```
+
+The experiment also supports **rights-declared local WAV captions**, preserving
+recording-group-isolated train/validation splits through the existing validator.
+Passing metadata gates is NOT independent permission or voice verification.
+Numerical/JSON checkpoints are SHA256-checked and remain private. Research
+reports include a matched-versus-shuffled-caption diagnostic, **not**
+perceptual sound quality or meaningful instruction-following scores.
+
+See [limitations and methodology](docs/TEXT_CONDITIONING_EXPERIMENT.md).
+No model weights, tags, GitHub pre-releases or releases are authorized.
