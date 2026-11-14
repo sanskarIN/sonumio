@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import {
-  generate, generateScene, getHealth, getModels, validateScene,
+  submitGenerationJob, submitSceneJob, awaitJob, cancelJob, getHealth, getModels, validateScene,
+  type JobStatus,
   type GeneratedAudio, type ModelEntry, type SceneLayer,
 } from './api';
 
@@ -26,9 +27,11 @@ export function App() {
   const [models, setModels] = useState<ModelEntry[]>([]);
   const [connected, setConnected] = useState<boolean | null>(null);
   const [busy, setBusy] = useState(false);
+  const [jobStatus, setJobStatus] = useState<JobStatus>('queued');
   const [error, setError] = useState('');
   const [result, setResult] = useState<GeneratedAudio | null>(null);
   const controller = useRef<AbortController | null>(null);
+  const jobId = useRef<string | null>(null);
 
   useEffect(() => {
     const pending = new AbortController();
@@ -50,15 +53,23 @@ export function App() {
     const next = new AbortController();
     controller.current = next;
     setBusy(true);
+    setJobStatus('queued');
     try {
-      const response = mode === 'sound'
-        ? await generate({ prompt, duration_seconds: duration, seed, model_id: 'procedural-sfx-v0' }, next.signal)
-        : await generateScene({ duration_seconds: sceneDuration, layers }, next.signal);
+      const task = mode === 'sound'
+        ? await submitGenerationJob({ prompt, duration_seconds: duration, seed, model_id: 'procedural-sfx-v0' }, next.signal)
+        : await submitSceneJob({ duration_seconds: sceneDuration, layers }, next.signal);
+      jobId.current = task.id;
+      setJobStatus(task.status);
+      const response = await awaitJob(task.id, next.signal, setJobStatus);
       if (!next.signal.aborted) setResult(response);
     } catch (problem) {
       if (!next.signal.aborted) setError(problem instanceof Error ? problem.message : 'Audio generation failed.');
     } finally {
-      if (controller.current === next) { controller.current = null; setBusy(false); }
+      if (controller.current === next) {
+        controller.current = null;
+        jobId.current = null;
+        setBusy(false);
+      }
     }
   }
   function switchMode(value: 'sound' | 'scene') {
@@ -68,10 +79,14 @@ export function App() {
     setLayers(previous => previous.map((layer, i) => i === index ? { ...layer, [key]: value } : layer));
   }
   function cancel() {
+    const identifier = jobId.current;
     controller.current?.abort();
     controller.current = null;
+    jobId.current = null;
+    if (identifier) void cancelJob(identifier).catch(() => {});
     setBusy(false);
-    setError('Request cancelled in your browser; server-side generation may continue.');
+    setJobStatus('cancelling');
+    setError('Cancellation requested. Active rendering cannot stop immediately and may finish before cancellation takes effect.');
   }
   return <div className="shell">
     <header className="topbar">
@@ -124,7 +139,7 @@ export function App() {
               {sceneError && <p role="status" className="warning">{sceneError}</p>}
             </>}
             <button className="primary-button" type="submit" disabled={busy || connected !== true || (mode === 'scene' && Boolean(sceneError))}>
-              {busy ? 'Generating audio…' : mode === 'sound' ? '✦ Generate sound' : '✦ Render sound scene'} <span>↗</span>
+              {busy ? (jobStatus === 'queued' ? 'Waiting in local queue…' : 'Generating audio…') : mode === 'sound' ? '✦ Generate sound' : '✦ Render sound scene'} <span>↗</span>
             </button>
             {busy && <button type="button" className="cancel" onClick={cancel}>Cancel request</button>}
             <p className="footnote">Local Sonumio API. Audio is not uploaded to an external provider.</p>
@@ -143,8 +158,8 @@ export function App() {
               <p className="hint">{result.disclaimer}</p>
             </div> : <div className="empty" aria-live="polite">
               <div className="wave" aria-hidden="true">{Array.from({length: 19}, (_, i) => <i key={i} style={{height: (16 + Math.abs(Math.sin(i * 1.3)) * 74) + '%'}}/>)}</div>
-              <h3>{busy ? 'Creating your sound…' : 'Your next sound starts here.'}</h3>
-              <p>{busy ? 'Processing your request locally.' : 'Describe a sound, generate, listen and download your WAV.'}</p>
+              <h3>{busy ? (jobStatus === 'queued' ? 'Waiting for the renderer…' : 'Creating your sound…') : 'Your next sound starts here.'}</h3>
+              <p>{busy ? 'Queued jobs are processed one at a time on this device.' : 'Describe a sound, generate, listen and download your WAV.'}</p>
             </div>}
           </section>
           <section className="panel provenance" aria-labelledby="provenance-heading">

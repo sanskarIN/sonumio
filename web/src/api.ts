@@ -95,3 +95,72 @@ export function validateScene(scene: SceneInput): string | null {
   }
   return null;
 }
+
+/** Bounded, development-only background audio tasks. */
+export type JobStatus = 'queued' | 'running' | 'cancelling' | 'succeeded' | 'failed' | 'cancelled';
+export type AudioJob = {
+  id: string; kind: 'generation' | 'scene'; status: JobStatus;
+  status_url: string; cancel_url: string;
+  result: GeneratedAudio | null; error: string | null;
+};
+
+function jobPath(jobId: string): string {
+  if (!/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/.test(jobId)) {
+    throw new Error('Invalid local job identifier');
+  }
+  return '/v1/jobs/' + jobId;
+}
+function validateJob(job: AudioJob): AudioJob {
+  if (job.status_url !== jobPath(job.id) || job.cancel_url !== jobPath(job.id)) {
+    throw new Error('API returned an invalid local job URL');
+  }
+  if (!['queued', 'running', 'cancelling', 'succeeded', 'failed', 'cancelled'].includes(job.status)) {
+    throw new Error('API returned an unknown job status');
+  }
+  return job;
+}
+export async function submitGenerationJob(input: GenerationInput, signal?: AbortSignal): Promise<AudioJob> {
+  return validateJob(await request<AudioJob>('/v1/jobs/generations', {
+    method: 'POST', body: JSON.stringify(input), signal,
+  }));
+}
+export async function submitSceneJob(input: SceneInput, signal?: AbortSignal): Promise<AudioJob> {
+  return validateJob(await request<AudioJob>('/v1/jobs/scenes', {
+    method: 'POST', body: JSON.stringify(input), signal,
+  }));
+}
+export async function getJob(jobId: string, signal?: AbortSignal): Promise<AudioJob> {
+  return validateJob(await request<AudioJob>(jobPath(jobId), { signal }));
+}
+export async function cancelJob(jobId: string): Promise<AudioJob> {
+  return validateJob(await request<AudioJob>(jobPath(jobId), { method: 'DELETE' }));
+}
+function pause(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    if (signal.aborted) { reject(new DOMException('Cancelled', 'AbortError')); return; }
+    const onAbort = () => { clearTimeout(timer); reject(new DOMException('Cancelled', 'AbortError')); };
+    const timer = setTimeout(() => {
+      signal.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+    signal.addEventListener('abort', onAbort, { once: true });
+  });
+}
+/** Poll at most five minutes, providing transparent queue status to the UI. */
+export async function awaitJob(jobId: string, signal: AbortSignal,
+                               onUpdate?: (status: JobStatus) => void): Promise<GeneratedAudio> {
+  for (let attempt = 0; attempt < 600; attempt++) {
+    if (signal.aborted) throw new DOMException('Cancelled', 'AbortError');
+    const job = await getJob(jobId, signal);
+    onUpdate?.(job.status);
+    if (job.status === 'succeeded') {
+      if (!job.result) throw new Error('Completed job has no audio result');
+      validateAudioPath(job.result.audio_url);
+      return job.result;
+    }
+    if (job.status === 'failed') throw new Error(job.error || 'Audio generation failed.');
+    if (job.status === 'cancelled') throw new Error('Audio generation was cancelled.');
+    await pause(500, signal);
+  }
+  throw new Error('Job status timed out after five minutes. The server may still be working.');
+}
