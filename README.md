@@ -31,3 +31,7 @@ From the repository root, after installing the optional PyTorch research depende
 - `python -m research.dataset_manifest path/to/manifest.jsonl`: checks data-rights declarations, voice exclusions, recording/checksum duplicates and group-isolated evaluation splits. This cannot verify legal rights without human review.
 
 The MusicGen adapter uses a pinned upstream revision with safetensors loading and remote code disabled. Actual neural checkpoint execution is still unverified.
+
+## Development-only performance measurements
+
+Each successful generation reports `generation_wall_seconds`, `real_time_factor`, peak/RMS dBFS and the hard-clipping fraction. Run `python benchmarks/latency.py` after installing the package. The benchmark measures **procedural CPU synthesis**, not pretrained or original neural model latency.
