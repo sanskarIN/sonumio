@@ -144,3 +144,39 @@ def test_training_with_reviewed_files_isolation_and_checkpoint(tmp_path):
 def test_training_requires_both_manifest_and_root(tmp_path):
     with pytest.raises(ValueError, match='together'):
         train(steps=1, manifest=tmp_path / 'manifest.jsonl')
+
+
+def test_caption_changes_affect_fingerprint_without_changing_audio(tmp_path):
+    manifest, root = make_dataset(tmp_path)
+    first, report = load_reviewed_splits(manifest, root)
+    assert first["train"].captions == ("rain", "rain")
+    rows = [json.loads(line) for line in manifest.read_text(encoding="utf-8").splitlines()]
+    rows[0]["caption"] = "gentle rain"
+    manifest.write_text("\n".join(json.dumps(r, ensure_ascii=False) for r in rows) + "\n", encoding="utf-8")
+    revised, new_report = load_reviewed_splits(manifest, root)
+    assert np.array_equal(first["train"].clips, revised["train"].clips)
+    assert revised["train"].labels.tolist() == first["train"].labels.tolist()
+    assert revised["train"].captions == ("gentle rain", "gentle rain")
+    assert first["train"].fingerprint != revised["train"].fingerprint
+    assert report["declaration"]["manifest_fingerprint"] != new_report["declaration"]["manifest_fingerprint"]
+
+
+def test_ingestion_uses_single_snapshot_even_if_manifest_changes(tmp_path, monkeypatch):
+    from research import audio_dataset
+    manifest, root = make_dataset(tmp_path)
+    original = audio_dataset.load_manifest_snapshot
+    calls = []
+
+    def change_manifest_after_snapshot(path):
+        result = original(path)
+        calls.append(True)
+        rows = [json.loads(line) for line in manifest.read_text(encoding="utf-8").splitlines()]
+        rows[0]["caption"] = "thunder instead"
+        manifest.write_text("\n".join(json.dumps(r, ensure_ascii=False) for r in rows) + "\n", encoding="utf-8")
+        return result
+
+    monkeypatch.setattr(audio_dataset, "load_manifest_snapshot", change_manifest_after_snapshot)
+    loaded, _ = load_reviewed_splits(manifest, root)
+    assert len(calls) == 1
+    assert loaded["train"].captions == ("rain", "rain")
+    assert loaded["train"].labels.tolist() == [0, 0]

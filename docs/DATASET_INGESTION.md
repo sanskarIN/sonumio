@@ -55,3 +55,20 @@ ownership, confirm CC0 licenses, obtain consent, or detect voices in recordings.
 Human source-level review is mandatory. Denoising MSE is not perceptual
 quality, and the present 8 kHz 0.256-second fixed-category DDPM is still a
 small exploratory model, not ready for useful real-world sound generation.
+
+## Snapshot integrity for reproducible experiments
+
+The manifest is read **once** into a bounded, validated in-memory snapshot
+(maximum 32 MiB, 10,000 records, and 16 KiB per JSONL line). The validator
+rejects duplicate JSON keys, non-finite durations and malformed typed fields;
+the report fingerprint hashes the **exact manifest file bytes** consumed.
+
+Per-split fingerprints incorporate the exact caption wording, source metadata,
+verified WAV checksum and crop settings. Each loaded WAV clip retains its
+caption from the same in-memory snapshot; the bilingual text-training path
+never reopens the manifest after decoding audio. Editing a caption without
+changing any WAV bytes therefore changes the research split fingerprint.
+
+This prevents accidental silent caption changes between validation and text
+training. **It does not verify whether declarations are truthful**, nor does
+it make future filesystem modifications or unreviewed recordings safe.

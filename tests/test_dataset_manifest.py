@@ -47,3 +47,35 @@ def test_group_leakage_and_duplicate_checks(tmp_path):
         validate_manifest(write(tmp_path, [
             row(), row(asset_id="sample-b", sha256="a" * 64),
         ]))
+
+
+@pytest.mark.parametrize("changes", [
+    {"duration_seconds": float("nan")}, {"duration_seconds": float("inf")},
+    {"duration_seconds": -float("inf")}, {"duration_seconds": True},
+    {"split": {"unexpected": "object"}}, {"language": ["en"]},
+    {"source_kind": ["cc0"]}, {"caption": "a" * 801},
+])
+def test_reject_nonfinite_or_wrong_typed_manifest_metadata(tmp_path, changes):
+    with pytest.raises(ManifestError):
+        validate_manifest(write(tmp_path, [row(**changes)]))
+
+
+def test_reject_duplicate_json_keys_and_keep_original_line_numbers(tmp_path):
+    invalid = tmp_path / "duplicate.jsonl"
+    valid = json.dumps(row())
+    invalid.write_text("\n" + valid[:-1] + ', "split": "test"}\n', encoding="utf-8")
+    with pytest.raises(ManifestError, match="line 2: invalid or duplicate-key JSON"):
+        validate_manifest(invalid)
+
+
+def test_manifest_snapshot_fingerprint_binds_exact_file_bytes(tmp_path):
+    from hashlib import sha256
+    from research.dataset_manifest import load_manifest_snapshot
+
+    path = write(tmp_path, [row()])
+    records, report = load_manifest_snapshot(path)
+    assert records[0][0] == 1
+    assert records[0][1]["caption"] == "light rain"
+    assert report["manifest_fingerprint"] == sha256(path.read_bytes()).hexdigest()
+    path.write_text(path.read_text() + "\n", encoding="utf-8")
+    assert validate_manifest(path)["manifest_fingerprint"] != report["manifest_fingerprint"]

@@ -219,19 +219,17 @@ def reviewed_captioned_dataset(manifest: Path, audio_root: Path, *,
     """
     from research.audio_dataset import load_reviewed_splits
     loaded, report = load_reviewed_splits(manifest, audio_root, clips_per_asset=clips_per_asset)
-    captions: dict[str, list[str]] = {key: [] for key in loaded}
-    with Path(manifest).open('r', encoding='utf-8') as handle:
-        for line in handle:
-            if line.strip():
-                row = json.loads(line)
-                captions[row['split']].extend([row['caption']] * clips_per_asset)
     tokenizer = ByteTextTokenizer()
     output = {}
     for split, item in loaded.items():
         if len(item.clips):
+            # Captions and audio originate from the same validated snapshot;
+            # no second manifest read that could silently swap training text.
+            if len(item.captions) != len(item.clips):
+                raise ValueError('Verified clip/caption counts are inconsistent')
             output[split] = CaptionedClips(torch.from_numpy(item.clips.copy()),
-                                          tokenizer.encode(captions[split]),
-                                          item.fingerprint, len(captions[split]))
+                                          tokenizer.encode(list(item.captions)),
+                                          item.fingerprint, len(item.captions))
     return output, report
 
 

@@ -308,3 +308,21 @@ def test_caption_alignment_probe_uses_matching_noisy_inputs():
 def test_nonstring_prompt_fails_cleanly():
     with pytest.raises(ValueError, match='Prompt must be text'):
         ByteTextTokenizer().encode([None])
+
+
+def test_text_ingestion_does_not_reread_manifest_after_verified_audio(tmp_path, monkeypatch):
+    from research import audio_dataset
+    manifest, root = _rights_fixture(tmp_path)
+    original = audio_dataset.load_reviewed_splits
+    def mutate_after_verified_load(*args, **kwargs):
+        output = original(*args, **kwargs)
+        rows = [json.loads(line) for line in manifest.read_text(encoding='utf-8').splitlines()]
+        rows[0]['caption'] = 'wind after verification'
+        manifest.write_text('\n'.join(json.dumps(r, ensure_ascii=False) for r in rows) + '\n', encoding='utf-8')
+        return output
+
+    monkeypatch.setattr(audio_dataset, 'load_reviewed_splits', mutate_after_verified_load)
+    splits, _ = reviewed_captioned_dataset(manifest, root, clips_per_asset=2)
+    expected = ByteTextTokenizer().encode(['Gentle rain falling'] * 2)
+    assert torch.equal(splits['train'].tokens, expected)
+    assert splits['train'].examples == 2

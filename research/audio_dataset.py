@@ -18,7 +18,7 @@ import wave
 
 import numpy as np
 
-from research.dataset_manifest import ManifestError, validate_manifest
+from research.dataset_manifest import ManifestError, load_manifest_snapshot
 from research.wave_diffusion import CATEGORIES, CLIP_FRAMES, SAMPLE_RATE
 from sonumio.engines.procedural import TOKENS
 
@@ -35,6 +35,7 @@ class LoadedSplit:
     labels: np.ndarray  # int64, shape [N]
     asset_count: int
     fingerprint: str
+    captions: tuple[str, ...]  # same order as decoded clips; taken from validated snapshot
 
 
 def caption_category(caption: str) -> int:
@@ -129,19 +130,16 @@ def load_reviewed_splits(manifest: str | Path, audio_root: str | Path, *,
     root = Path(audio_root).resolve()
     if not root.is_dir():
         raise ManifestError("audio root must be an existing local directory")
-    declaration = validate_manifest(manifest)
+    records, declaration = load_manifest_snapshot(manifest)
     if declaration["records"] > MAX_ASSETS:
         raise ManifestError("audio manifest exceeds the bounded asset limit")
     clips: dict[str, list[np.ndarray]] = {split: [] for split in ("train", "validation", "test")}
     labels: dict[str, list[int]] = {split: [] for split in clips}
+    captions: dict[str, list[str]] = {split: [] for split in clips}
     fingerprints = {split: sha256() for split in clips}
     counts = {split: 0 for split in clips}
 
-    with manifest.open("r", encoding="utf-8") as handle:
-        for line_no, line in enumerate(handle, 1):
-            if not line.strip():
-                continue
-            row = json.loads(line)
+    for line_no, row in records:
             try:
                 path = _confined_path(root, row.get("local_path"))
                 if path.suffix.lower() != ".wav":
@@ -157,9 +155,16 @@ def load_reviewed_splits(manifest: str | Path, audio_root: str | Path, *,
                 split = row["split"]
                 clips[split].extend(pieces)
                 labels[split].extend([label] * len(pieces))
+                captions[split].extend([row["caption"]] * len(pieces))
                 counts[split] += 1
-                fingerprints[split].update((row["asset_id"] + ":" + row["sha256"] + ":" +
-                                            str(label) + ":" + str(clips_per_asset)).encode("utf-8"))
+                # The exact validated caption, rights declarations and clip
+                # count must affect the training/evaluation provenance key.
+                record_identity = json.dumps(
+                    {"record": row, "clips_per_asset": clips_per_asset},
+                    sort_keys=True, ensure_ascii=False, separators=(",", ":"),
+                ).encode("utf-8")
+                fingerprints[split].update(len(record_identity).to_bytes(4, "little"))
+                fingerprints[split].update(record_identity)
             except ManifestError as exc:
                 raise ManifestError(f"line {line_no}: {exc}") from exc
     if not counts["train"] or not counts["validation"]:
@@ -169,7 +174,7 @@ def load_reviewed_splits(manifest: str | Path, audio_root: str | Path, *,
         split: LoadedSplit(np.stack(clips[split])[:, None].astype(np.float32)
                            if clips[split] else np.empty((0, 1, CLIP_FRAMES), dtype=np.float32),
                            np.asarray(labels[split], dtype=np.int64), counts[split],
-                           fingerprints[split].hexdigest())
+                           fingerprints[split].hexdigest(), tuple(captions[split]))
         for split in clips
     }
     report = {

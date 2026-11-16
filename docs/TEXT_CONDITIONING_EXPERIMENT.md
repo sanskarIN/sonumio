@@ -162,3 +162,12 @@ allocates any tensor: exact expected member names (no duplicates), declared
 uncompressed byte budgets, finite bounded model dimensions, and NumPy header
 shapes/dtypes. A SHA-256 checksum alone is not a guarantee that a checkpoint
 is safe to deserialize; **checkpoints remain local and unpublished**.
+
+### Captions and audio use one manifest snapshot
+
+For rights-declared WAVs, the audio loader validates one bounded manifest
+byte snapshot, verifies local WAV hashes, and returns captions in the same
+order as cropped waveforms. The text encoder consumes those saved captions
+instead of rereading a possibly changed JSONL file. A caption-only edit now
+changes both the manifest hash and split fingerprint. This is an integrity
+measure, **not** independent evidence of consent or licensing.
