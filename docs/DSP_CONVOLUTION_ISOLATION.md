@@ -87,3 +87,16 @@ semantics, audio fidelity, license compliance of future datasets,
 or production readiness. Keep velocity-prediction experiments,
 the original corpus and the private draft PR intact. **Do not
 publish WAVs, neural weights, tags, prereleases or stable releases.**
+
+
+## Verified convolution isolation outcome
+
+The [measured cross-CPU report](DSP_CONVOLUTION_RESULTS.md)
+confirmed original float32 source inputs and convolution kernels
+match byte-for-byte on all tested CPUs; on AMD EPYC 7763,
+**NumPy convolution outputs differ** for 180/140/60-tap rain,
+thunder and wind processing. Water's 12-tap control remains
+exact. Independent selected \`math.fsum\` reference hashes also
+match; scalar value discrepancies are on the order of 10⁻⁸
+at sampled positions. The particular CPU instruction or
+numerical kernel is not isolated. Original DSP data are unchanged.

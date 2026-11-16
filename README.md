@@ -327,3 +327,13 @@ water and ambient source hashes matched. A
 [targeted convolution study](docs/DSP_CONVOLUTION_ISOLATION.md)
 now checks the original float32 random inputs, 12/60/140/180-tap
 kernels and outputs without changing model-training audio.
+
+
+**Verified original DSP numerical root:** the
+[matched convolution investigation](docs/DSP_CONVOLUTION_RESULTS.md)
+showed identical original float32 input/kernel bytes but differing
+NumPy convolution output bytes on AMD EPYC 7763 for rain (180 taps),
+thunder (140) and wind (60). The 12-tap water control and the
+independent selected \`math.fsum\` references matched. No original
+audio recipe or neural training outputs were modified; full-audio
+perceptual relevance of ~1e-8 sampled differences is untested.

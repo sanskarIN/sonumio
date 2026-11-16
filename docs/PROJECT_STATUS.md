@@ -228,3 +228,18 @@ matched each other. A [targeted source-convolution diagnostic](DSP_CONVOLUTION_I
 now tests RNG inputs, float32 kernel construction and
 NumPy convolution outputs for 60/140/180 versus 12 taps,
 without modifying the training corpus or neural models.
+
+
+### Convolution arithmetic is the first observed host-specific divergence
+
+The [cross-host convolution report](DSP_CONVOLUTION_RESULTS.md)
+isolated the earlier EPYC 7763 source-fingerprint difference:
+original rain, thunder and wind input arrays and kernels had
+identical exact hashes across tested hosts, but NumPy
+60/140/180-tap **convolution output** SHA256s differed.
+Water's 12-tap control and scalar \`math.fsum\` references matched.
+This is a numerical-reproducibility finding, not proof of audible
+differences or an exact low-level CPU instruction. Do not rewrite
+the original corpus; if bitwise cross-host data is required,
+first design and independently evaluate an explicitly versioned
+reproducible recipe.

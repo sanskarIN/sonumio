@@ -133,3 +133,17 @@ now isolates original seeded input arrays, kernels, individual
 convolution outputs and scalar reference calculations without
 changing source DSP or writing WAV files. Its cross-host
 results must be inspected separately before causal conclusions.
+
+
+## Follow-up probe measurement
+
+The [successful 4-host convolution experiment](DSP_CONVOLUTION_RESULTS.md)
+confirmed this hypothesis at the operation boundary: original
+long-kernel seeded float32 inputs and kernels match, but the
+NumPy convolution output hashes differ on AMD EPYC 7763.
+The water 12-tap control and independent selected scalar
+reference hashes match. The cause is now localized to
+host-specific convolution arithmetic or its implementation,
+**not** to different random seeds or source-layer kernels.
+Do not claim a specific machine instruction or audible-quality
+effect from SHA differences alone.

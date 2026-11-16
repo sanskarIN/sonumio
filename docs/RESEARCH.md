@@ -194,3 +194,15 @@ The [convolution isolation protocol](DSP_CONVOLUTION_ISOLATION.md)
 compares actual seeded inputs, kernels, convolution outputs and
 scalar \`math.fsum\` references. This is a diagnostic of the
 unchanged original DSP only, not proof of end-user audio quality.
+
+
+## Confirmed original DSP stage-level numerical source
+
+The [measured NumPy convolution isolation](DSP_CONVOLUTION_RESULTS.md)
+identified the first changed operation on EPYC 7763:
+rain, thunder and wind use identical original float32 inputs
+and kernels across hosts, yet their convolution results differ.
+Water's shorter convolution control matches, and independent
+sampled \`math.fsum\` references agree. The original dataset
+is preserved; cross-host deterministic replacements require a
+separately versioned and quality-validated research recipe.
