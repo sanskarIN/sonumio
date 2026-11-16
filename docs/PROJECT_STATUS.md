@@ -135,3 +135,15 @@ train/evaluation recordings, optimizer updates, model widths and
 audio-generation numerical controls. Prior metrics cannot be interpreted
 as proof the alternative improves audible quality. This study is explicitly
 for diagnosing raw output clipping and weak latent prompt variation.
+
+
+### Experiment outcome — cosine does not improve audio health
+
+The [measured schedule-ablation report](SCHEDULE_ABLATION_RESULTS.md)
+shows original linear-schedule generated audio clipping at **13.71% raw /
+0% latent**, versus **94.62% raw / 63.86% latent** under the eight-step
+cosine schedule after matched training. All three matched seeds had
+higher clipping for cosine. The original linear schedule remains default
+only for research compatibility, not because it is production quality.
+A stable velocity-prediction objective and pre-clamp diagnostics must be
+evaluated before any schedule promotion.

@@ -251,3 +251,11 @@ source combinations and actual generated-waveform diagnostics fixed while
 testing whether near-zero terminal noise reduces the previously measured
 clipping. Results must be checked before claiming any improvement. Neither
 noise-MSE reduction nor waveform prompt sensitivity by itself proves quality.
+
+
+**Measured schedule result:** the
+[paired three-seed ablation](docs/SCHEDULE_ABLATION_RESULTS.md)
+found that the experimental cosine schedule made generated waveforms
+dramatically **more clipped** (raw 13.7% → 94.6%; latent 0% → 63.9%).
+The cosine schedule is **not** recommended or selected. Numerical CI
+success and lower terminal SNR do not certify generated audio.

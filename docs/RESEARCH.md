@@ -124,3 +124,15 @@ test whether the eight-step terminal-prior mismatch identified in
 the generation pilot contributes to clipping. The default linear
 schedule and previously recorded research results remain unchanged.
 The experiment makes no release, listener-quality or model-selection claim.
+
+
+## Negative cosine-schedule result
+
+The [actual paired-seed schedule ablation results](SCHEDULE_ABLATION_RESULTS.md)
+show the near-zero-terminal-SNR cosine profile substantially **increased
+hard-clipping** in both raw and latent diffusion arms, despite fixing the
+terminal-noise diagnostic. This falsifies a simplistic assumption that
+reducing terminal SNR alone solves Sonumio's short-model generation
+problems. The model remains research-only; v-prediction/posterior
+sampling and pre-clamp saturation diagnostics are the next testable
+engineering hypothesis.

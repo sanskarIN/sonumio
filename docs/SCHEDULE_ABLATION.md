@@ -123,3 +123,15 @@ The workflow asserts all 3 matched seeds and both schedule profiles.
 
 **Maintain draft PR #1; do not merge or publish weights, prereleases,
 stable releases or tags without separate explicit owner approval.**
+
+
+## Verified outcome — negative result
+
+The full [three-seed paired schedule experiment](SCHEDULE_ABLATION_RESULTS.md)
+**completed successfully**. Despite a near-zero cumulative terminal
+alpha, the cosine-plus-epsilon candidate severely worsened clipping:
+raw-model clipping increased from 13.71% to 94.62%, and latent-model
+clipping from 0% to 63.86%. All matched seeds were worse. Accordingly
+**do not select** this cosine schedule for normal inference; it
+remains an experimental failure control. The next research question
+is stable velocity-prediction DDPM sampling, not amplitude hiding.
