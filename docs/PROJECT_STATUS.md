@@ -1,0 +1,64 @@
+# Sonumio development status and research gates
+
+**Date:** 16 November 2026. **Branch:** `feat/initial-audio-platform`
+(PR #1, **DRAFT, not merged**). Public `main` contains the Apache-2.0
+license and the project README, while the much larger prototype remains in
+development. **No stable release, pre-release, tag or model weights have been
+authorized or published.** Research results are not production quality.
+
+## Delivered source and infrastructure (draft PR unless noted)
+
+| Area | Implemented and testable | Not yet complete |
+| --- | --- | --- |
+| Public identity | Permanent name Sonumio, tagline “Imagine it. Hear it.”, Apache-2.0; concise README and license on `main` | A polished public documentation/deployment site and governance |
+| Local generation | Procedural DSP baseline: rain, thunder, wind, forest, ocean, ambient; short offline WAV generation | Realistic open-domain neural sound generation |
+| Product scaffolding | Python CLI, FastAPI service, React/TypeScript studio prototype | Product-level UX, accessibility, usability study and distribution |
+| Async workflow | In-process queued jobs, task state and cancellation tests | Persistent queue, quotas, recovery, lifecycle and storage hardening |
+| Original neural experiments | Spectral regression, class-conditional short waveform DDPM, English/Hindi byte-conditioned waveform DDPM, two-source conditioning, trainable codec + 1.024 s latent DDPM | Independently proven realistic quality, high-rate/long-form architecture, original Sonumio-1 |
+| Data handling | Rights-declared local WAV manifests, bounded snapshot parsing, SHA256 file verification, session-group split validation and no declared voice data | Independent source/license review, consent auditing, verified diverse long-term dataset and non-speech detection |
+| Checkpoints | Private numeric NPZ+JSON, SHA checks, archive shape/type/size preflight | Audited persistence, retention, distribution controls and model cards |
+| Evaluation | Synthetic seed-isolated data, caption hard negatives, codec identity/silence/DSP controls, waveform/spectral metrics, cluster bootstrap, research CI | Real-world held-out tests, FAD/CLAP, blind listening, listening demographics, cross-source generalization and memorization audit |
+| Architecture study | Same 8-kHz 1.024-second recordings for raw-vs-latent text-conditioned DDPM diagnostic, per-arm controls and parameter/timing reports | Fair matched-FLOP/parameter trials, meaningful convergence runs, multi-seed comparisons, independent sampling preference tests |
+| Tests | Python core, web UI, CPU research GitHub Actions | Large-scale integration, GPU training, packaging, security review, release qualification |
+
+The architecture comparison is **controlled on data, clip length,
+minibatch indices, schedule and step count**, but it is **not
+compute- or capacity-matched**. Its raw and latent noise MSE values are not
+directly comparable quality statistics. No winner is claimed.
+
+## Remaining engineering gates (prioritized)
+
+1. **Real corpus with evidence.** Build a small, independently human-reviewed
+   non-voice sound-effects dataset, with verified ownership, permitted training
+   use, source records, attribution, deduplication and session-level holdouts.
+   Current declarations alone cannot prove legal rights.
+2. **Realistic model quality.** Establish 16–32 kHz and multi-second audio
+   reconstruction and neural generation benchmarks. Run multi-seed training
+   with known resource usage; improve the codec/latent architecture based on
+   measured failures, not just reduced loss.
+3. **Scientific comparison.** Compare raw, spectral and latent approaches under
+   honest matched compute/parameter budgets, separate codec overhead, and
+   independently record quality, latency and VRAM.
+4. **Listening and safety studies.** Run blinded perceptual evaluation; probe
+   long-tail prompts, English/Hindi natural wording, copyright/memorization
+   and safety/privacy failure modes. Restrict voice data until consent policy
+   and safety gates are met.
+5. **Production backend and storage.** Harden queues, request quotas,
+   cancellability, output retention, failure recovery, per-user isolation,
+   logging privacy and offline model provenance.
+6. **UI/UX and creator workflow.** Polish studio accessibility, progress,
+   editing, audio previews, error handling and install experience.
+   Music/TTS/long-form SFX remain research goals, not ready features.
+7. **Reproducible packaging.** Introduce security audit, reproducible
+   dependency locks and isolated builds, versioned API/docs, license/NOTICE
+   review, compatibility testing and external contributor onboarding.
+8. **Explicit release authorization.** The project owner must separately
+   approve a release, tag, published weights or draft PR merge when justified.
+   Passing CI alone is not authorization.
+
+## Current acceptance rule
+
+Keep PR #1 as a draft and develop/tests there. Merge only after explicit
+approval and release-readiness gates; never publish model weights, tags,
+pre-releases or stable artifacts by implication. Synthetic procedural audio is
+a development test substrate, not proof of Sonumio's final capability.

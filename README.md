@@ -180,3 +180,17 @@ The draft latent-audio work includes a separate
 that checks all unique held-out synthetic recordings against silence,
 identity and moving-average DSP controls. These numerical diagnostics do not
 show that generated sound is natural, prompt-aligned or release-ready.
+
+
+### Shared-data raw-vs-latent architecture study
+
+The draft research branch also includes an isolated
+[architecture comparison](docs/ARCHITECTURE_COMPARISON.md) that runs the
+raw-waveform and latent text-conditioned DDPM prototypes on the same
+1.024-second, 8 kHz synthetic recordings. It records caption-conditioned
+noise diagnostics, parameter counts, separate codec cost and CPU timings.
+The two branches are **not** matched on FLOPs or parameter count, and their
+absolute noise MSE values **must not** be ranked against each other.
+
+See the [project development status and remaining gates](docs/PROJECT_STATUS.md).
+No audio model weights or release artifacts are created by this benchmark.

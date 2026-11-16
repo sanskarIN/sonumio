@@ -62,3 +62,14 @@ silence, exact identity and moving-average controls; an exact-byte
 train/evaluation leakage check; and group-level exploratory bootstrap
 intervals. A separate generator health scan records finite/clipped/silent
 waveform statistics **without labeling them subjective sound quality**.
+
+
+## Same-data raw waveform vs latent DDPM benchmark
+
+An isolated [controlled architecture study](ARCHITECTURE_COMPARISON.md)
+trains both original English/Hindi-conditioned denoisers on the same
+1.024-second synthetic clips, schedule, minibatch indices and update count.
+It reports per-arm paired/wrong/blank caption errors against a zero-noise
+predictor control, separate codec overhead, parameter counts and raw/latent
+CPU timings. **It is not parameter/FLOP matched and does not allow
+cross-domain numerical MSE ranking or claims about perceptual quality.**
