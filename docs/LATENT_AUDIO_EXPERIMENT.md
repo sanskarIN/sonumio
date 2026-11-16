@@ -116,3 +116,60 @@ recordings are required.
   claiming any original Sonumio model generation.
 
 **No trained Sonumio-1 model exists. Keep research checkpoints private.**
+
+
+## Objective reconstruction and model-health evaluation
+
+~~~bash
+python -m research.latent_quality \
+  --checkpoint checkpoints/private-latent-experiment \
+  --bootstrap-iterations 200 \
+  --output checkpoints/private-latent-experiment/quality.json
+
+python -m pytest -q tests/test_latent_quality.py
+~~~
+
+This command loads a **private** numeric-only checkpoint. It evaluates the
+**codec reconstruction**, *not* DDPM generation quality, on all 42 unique
+recordings from validation seeds 101/102, across 6 single categories and
+15 pairs. Each recording is counted **once**, although the text dataset
+intentionally pairs it with separate English and Hindi captions.
+
+A new mandatory exact-waveform collision check compares validation bytes with
+the fixed training seeds 0/1, and rejects duplicate evaluation recordings.
+This catches accidental duplicate waveforms, but does not prevent semantically
+similar or related DSP content across splits.
+
+### Metrics and controls
+
+| Statistic | Meaning | Better |
+| --- | --- | --- |
+| Waveform MAE/RMSE | Sample-aligned absolute/squared errors | Lower |
+| Log-spectral L1 | Mean difference of log1p magnitude STFT at 128/512/1024 bins | Lower |
+| Spectral convergence | Normalized Frobenius norm of magnitude difference | Lower |
+| Signal-to-noise ratio | Paired waveform energy/error ratio in dB; **not** scale-invariant | Higher |
+
+The codec is directly compared with a **silent waveform**, an **unchanged
+identity waveform** (perfect-reconstruction ceiling), and a fixed **9-tap
+moving-average DSP** control. Those are sanity checks, **not a matched-parameter
+raw waveform DDPM or a state-of-the-art audio model**.
+
+Metrics are reported overall, by number of sound sources, and by category
+membership (some two-source clips appear in multiple category breakouts).
+A seeded bootstrap resamples the 21 source-combination groups, instead of
+incorrectly treating paired English/Hindi captions as independent clips.
+Its exploratory 95% interval **does not imply generalization outside the
+tiny shared procedural audio family** and is not a population-confidence
+claim. No significance threshold automatically triggers promotion or release.
+
+The same command checks DDPM-generated audio only for **finite samples,
+clipping, RMS, peaks, duration and deterministic wave hashes**. It does not
+evaluate real audible quality or whether a prompt matches what is heard.
+Independent listening tests remain a separate required gate.
+
+The training report also now evaluates **all 42 unique validation waveforms**
+for codec reconstruction and **all 84 validation caption pairs** for
+noise-prediction loss (in bounded batches). Previously it reported just the
+first English/Hindi pair of a single recording as its held-out result.
+This was misleading about validation coverage; older reports should not be
+compared as though they used the corrected protocol.

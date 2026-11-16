@@ -339,10 +339,20 @@ def train(*, ae_steps: int = 10, diffusion_steps: int = 10,
             optimizer.step()
             ae_losses.append(float(loss.detach()))
         model.codec.eval()
+        # Bilingual captions share each underlying waveform. Evaluate the
+        # entire 42-recording validation set once, not the first EN/HI pair.
+        # Encode in small chunks to avoid holding long STFT graphs in RAM.
         with torch.no_grad():
-            val_codec_loss = float(reconstruction_loss(val_set.waves[:2], model.codec(val_set.waves[:2])))
+            unique_validation_waves = val_set.waves[::2]
+            codec_weighted_error = 0.0
+            for start in range(0, len(unique_validation_waves), 4):
+                batch = unique_validation_waves[start:start + 4]
+                codec_weighted_error += (
+                    float(reconstruction_loss(batch, model.codec(batch))) * len(batch)
+                )
+            val_codec_loss = codec_weighted_error / len(unique_validation_waves)
             train_latents = model.codec.encode(train_set.waves).detach()
-            val_latents = model.codec.encode(val_set.waves[:2]).detach()
+            val_latents = model.codec.encode(val_set.waves).detach()
         optimizer = torch.optim.AdamW(model.denoiser.parameters(), lr=0.0005)
         diffusion_losses = []
         model.denoiser.train()
@@ -359,15 +369,26 @@ def train(*, ae_steps: int = 10, diffusion_steps: int = 10,
         model.eval()
         with torch.no_grad():
             torch.manual_seed(seed + 1)
-            heldout = float(latent_noise_loss(model.denoiser, schedule, val_latents,
-                                             val_set.tokens[:2], drop_condition=0.0))
+            heldout_weighted_error = 0.0
+            for start in range(0, len(val_latents), 4):
+                group = val_latents[start:start + 4]
+                captions = val_set.tokens[start:start + 4]
+                heldout_weighted_error += (
+                    float(latent_noise_loss(model.denoiser, schedule, group,
+                                            captions, drop_condition=0.0)) * len(group)
+                )
+            heldout = heldout_weighted_error / len(val_latents)
         report = {
             'purpose': 'one-second 8kHz bilingual latent audio diffusion research only',
             'model_generation': None, 'not_production_ready': True,
             'data_source': 'Sonumio-owned synthetic procedural DSP',
             'data_recipe': DATA_RECIPE, 'train_fingerprint': train_set.fingerprint,
             'validation_fingerprint': val_set.fingerprint, 'train_examples': train_set.examples,
-            'validation_examples': val_set.examples, 'sample_rate': SAMPLE_RATE,
+            'validation_examples': val_set.examples,
+            'heldout_unique_recordings': len(unique_validation_waves),
+            'heldout_caption_noise_examples': len(val_latents),
+            'validation_protocol': 'all-unique-recordings-for-codec_all-captions-for-noise',
+            'sample_rate': SAMPLE_RATE,
             'audio_frames': FRAMES, 'latent_frames': LATENT_FRAMES,
             'latent_channels': LATENT_CHANNELS, 'seed': seed, 'channels': channels,
             'codec_steps': ae_steps, 'denoiser_steps': diffusion_steps,

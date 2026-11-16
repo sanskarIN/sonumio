@@ -50,3 +50,15 @@ This is *not* an effective compression ratio for shipping audio files, not
 long-form audio generation, and not evidence of subjective audio quality.
 Independent listening/evaluation and diverse rights-reviewed datasets remain
 unimplemented. No weights, tags or releases will be published without approval.
+
+
+## Objective reconstruction protocol (draft research)
+
+The [synthetic latent quality benchmark](LATENT_AUDIO_EXPERIMENT.md#objective-reconstruction-and-model-health-evaluation)
+now uses the full held-out source-combination/seed grid (42 unique recordings)
+rather than evaluating only the first bilingual pair. It reports aligned
+waveform error, multi-resolution log-spectrum, spectral convergence and SNR;
+silence, exact identity and moving-average controls; an exact-byte
+train/evaluation leakage check; and group-level exploratory bootstrap
+intervals. A separate generator health scan records finite/clipped/silent
+waveform statistics **without labeling them subjective sound quality**.

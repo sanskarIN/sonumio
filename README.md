@@ -171,3 +171,12 @@ python -m research.latent_alignment --checkpoint checkpoints/private-latent-expe
 
 See [isolated latent audio research methodology](docs/LATENT_AUDIO_EXPERIMENT.md).
 All checkpoints remain local. No release, pre-release or weight publication.
+
+
+### Research evaluation controls
+
+The draft latent-audio work includes a separate
+[objective reconstruction benchmark](docs/LATENT_AUDIO_EXPERIMENT.md#objective-reconstruction-and-model-health-evaluation)
+that checks all unique held-out synthetic recordings against silence,
+identity and moving-average DSP controls. These numerical diagnostics do not
+show that generated sound is natural, prompt-aligned or release-ready.
