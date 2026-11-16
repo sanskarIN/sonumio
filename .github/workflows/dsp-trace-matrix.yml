@@ -18,13 +18,17 @@ permissions:
 
 jobs:
   cpu-stage-trace:
-    name: CPU stage trace ${{ matrix.instance }}
-    runs-on: ubuntu-24.04
+    name: CPU stage trace ${{ matrix.instance }} / ${{ matrix.runner }}
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
-        instance: [1, 2, 3, 4]
+        include:
+          - { instance: 1, runner: ubuntu-24.04 }
+          - { instance: 2, runner: ubuntu-24.04 }
+          - { instance: 3, runner: ubuntu-22.04 }
+          - { instance: 4, runner: ubuntu-22.04 }
     env:
       OMP_NUM_THREADS: '2'
       MKL_NUM_THREADS: '2'
@@ -56,6 +60,7 @@ jobs:
           assert a['matches_original_renderer_exactly']
           assert not a['audio_files_saved'] and not a['model_weights_saved']
           print('CPU_TRACE_INSTANCE:', '${{ matrix.instance }}')
+          print('CPU_TRACE_RUNNER_IMAGE:', '${{ matrix.runner }}')
           print('CPU_TRACE_MODEL:', a['environment']['cpu_model'])
           print('CPU_TRACE_NUMPY:', a['environment']['numpy'])
           print('CPU_TRACE_PYTORCH:', a['environment']['torch'])

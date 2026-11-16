@@ -118,7 +118,7 @@ model weights publication is authorized.
 ## Independent hosted-CPU matrix
 
 The [independent DSP CPU pipeline trace workflow](../.github/workflows/dsp-trace-matrix.yml)
-also schedules **four separate** Ubuntu 24.04 hosted jobs on the same
+also schedules **four separate** Ubuntu 24.04/22.04 hosted jobs on the same
 GitHub commit. Each job installs the same Python/CPU research dependencies,
 runs the original 84-recording tracer twice in independent Python
 processes, strictly validates same-host byte identity, and prints the
@@ -135,3 +135,12 @@ No audio WAV, neural model weights, named models or releases are
 created. Workflow logs contain hash/CPU metadata only. The
 experiment is bounded to four parallel hosted machines and is not
 intended as ongoing large-scale CPU benchmarking.
+
+
+The [first measured four-runner results](DSP_PIPELINE_TRACE_RESULTS.md)
+showed **exact stage identity** on one AMD EPYC 9V45 and three
+Intel Xeon 6975P-C runners. The formerly divergent AMD EPYC 7763
+was not represented; therefore the earlier host-specific numerical
+difference remains unexplained, not fixed. A follow-up mixed
+Ubuntu 22.04/24.04 matrix broadens the sample without changing
+original source waveforms or training.

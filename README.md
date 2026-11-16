@@ -310,3 +310,11 @@ It checks all stages against the unmodified procedural renderer and
 records differences between CPU runners without changing the original
 dataset or publishing audio/weights. Results must be interpreted as
 numerical provenance, not audible quality.
+
+
+A [measured multi-CPU DSP study](docs/DSP_PIPELINE_TRACE_RESULTS.md)
+verified exact original-audio stage identities across one AMD EPYC
+9V45 and three Intel Xeon hosts, with independent-process checks
+on all 84 source recordings. The previously differing AMD EPYC 7763
+environment was not represented; the root cause remains open.
+A mixed Ubuntu 22.04/24.04 matrix now broadens the CPU sampling.

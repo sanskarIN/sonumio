@@ -206,3 +206,13 @@ and final 8192-sample crop. It enforces exact agreement with existing
 Sonumio DSP source output, not a newly substituted recording recipe.
 The research and training CI jobs report per-stage signatures
 from their separate CPU hosts.
+
+
+### DSP pipeline cross-CPU observations
+
+The [four-runner stage-tracing study](DSP_PIPELINE_TRACE_RESULTS.md)
+confirmed that all 20 original DSP stage aggregates and all
+12 single-source layer/crop hashes match exactly across AMD EPYC
+9V45 and Intel Xeon 6975P-C hosts. The historical AMD EPYC 7763
+mismatch remains unresolved, so a controlled older-host experiment
+is warranted before changing the original audio recipe.
