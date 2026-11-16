@@ -130,3 +130,16 @@ does not upload them.
   prompt-relevance evaluations.
 - **No draft PR merge, public model weights, tags, pre-releases or
   stable releases** without explicit later project-owner authorization.
+
+
+## Verified CI results from separate runner CPUs
+
+The [measured data reproducibility report](DATA_REPRODUCIBILITY_RESULTS.md)
+documents four passing CI workflows, including **182 CPU research tests**,
+two exactly agreeing independent Python-process datasets on a single
+runner, exact preflight-versus-actual-training corpus agreement,
+and cross-run exact SHA256 differences between AMD EPYC 9V45 and EPYC
+7763 hosts. Coarse 0.01-amplitude bucket hashes matched across both
+hosts, but cannot substitute for exact bytes, establish a sample error
+bound or confirm audible equivalence. The hardware-dependence hypothesis
+is unproven pending a controlled operation-level comparison.

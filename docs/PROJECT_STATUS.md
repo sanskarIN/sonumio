@@ -182,3 +182,15 @@ and checks independently regenerated datasets across Python processes.
 The training workflow refuses a mismatch between the separately
 regenerated dataset and the corpus actually seen by the paired trainer.
 This is a research integrity gate, not a sound-quality improvement.
+
+
+### Recording-level reproducibility evidence
+
+The [verified two-runner research comparison](DATA_REPRODUCIBILITY_RESULTS.md)
+showed that deterministic source code and seeds are insufficient to
+promise identical DSP float32 bytes on different GitHub-hosted CPU
+models. Independent processes agreed exactly **within** one runner,
+and the private training process agreed exactly with its independent
+preflight, but cross-host overall hashes differed. Neither source
+recordings nor trained weights were uploaded; model-quality research
+must continue using strict within-run data pairing.

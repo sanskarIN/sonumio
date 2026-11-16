@@ -291,3 +291,13 @@ CI checks independently regenerated data across Python processes and
 compares actual model-training source hashes with an independent preflight
 manifest. This addresses unresolved cross-run fingerprint drift without
 altering model input audio or releasing recordings/weights.
+
+
+**Observed reproducibility evidence:** the
+[CPU-run comparison](docs/DATA_REPRODUCIBILITY_RESULTS.md)
+confirmed bit-identical DSP data across independent processes on
+one runner and exact preflight/model-training agreement, while
+different AMD EPYC runner models produced **different exact dataset
+hashes**. Coarse 0.01 amplitude-bucket hashes matched, but that does
+not prove byte identity or a maximum numerical-error bound. The model
+and data recipe remain research-only and unchanged.

@@ -159,3 +159,13 @@ The latter fails CI if training silently receives different data.
 Until independently verified, **do not claim byte-identical DSP inputs
 across independent GitHub runners**, even when the paired model
 metrics appear nearly the same.
+
+
+The [subsequent measured source-data reproducibility audit](DATA_REPRODUCIBILITY_RESULTS.md)
+now shows both independently executed GitHub workflows passed exact
+within-run checks, but AMD EPYC 9V45 and 7763 runners produced
+different full float32 audio hashes despite the same source seeds and
+repository code. The 0.01-amplitude bucket aggregates matched, which
+is **not** proof of identical arrays or a maximum error bound. This
+unresolved host-linked numerical drift does not invalidate epsilon-v
+training comparisons **within each runner**.
