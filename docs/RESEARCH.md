@@ -136,3 +136,15 @@ reducing terminal SNR alone solves Sonumio's short-model generation
 problems. The model remains research-only; v-prediction/posterior
 sampling and pre-clamp saturation diagnostics are the next testable
 engineering hypothesis.
+
+
+## Coupled velocity-vs-epsilon objective research
+
+The [velocity-prediction experiment](VELOCITY_OBJECTIVE_STUDY.md)
+compares bit-identically initialized v and epsilon models on the same
+cosine schedule, same examples/timesteps/noise and same optimizer budgets.
+Its stable x0-based posterior avoids division by the extremely small
+terminal alpha factor used by the failed epsilon sampler. It records
+both pre-clamp out-of-range statistics and final clipping. Even if
+these improve, rights-cleared data and actual listening evaluation
+remain unfulfilled prerequisites.

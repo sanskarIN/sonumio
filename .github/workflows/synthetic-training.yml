@@ -37,52 +37,46 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -e '.[test]' 'scipy>=1.12,<2'
           python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
-      - name: Train matched original linear and cosine schedule experiments
+      - name: Train paired epsilon and velocity models from identical weights and noise
         run: |
-          python -m research.schedule_ablation \
+          python -m research.velocity_ablation \
             --seeds 17,29,41 \
             --codec-steps 128 --denoiser-steps 256 \
             --schedule-steps 8 --channels 16 \
-            --evaluation-combinations 21 \
-            --output checkpoints/private-research/schedule-ablation.json
-      - name: Validate paired protocol, all waveform checks, and zero artifacts
+            --output checkpoints/private-research/velocity-objective.json
+      - name: Verify coupled objective training and pre-clamp audio numerical guards
         run: |
           python - <<'PY'
-          import json
-          import math
+          import json, math
           from pathlib import Path
-
           root = Path('checkpoints')
-          report_path = root / 'private-research' / 'schedule-ablation.json'
-          report = json.loads(report_path.read_text(encoding='utf-8'))
-          assert report['protocol'] == 'paired-cosine-vs-linear-generated-audio-ablation-v1'
-          assert report['paired_seeds'] == [17, 29, 41]
-          assert report['shared_training_data']['evaluated_source_combinations'] == 21
-          assert report['shared_training_data']['evaluated_caption_pairs'] == 84
-          assert report['shared_training_data']['category_disjoint_hard_negatives']
-          settings = report['shared_configuration']
-          assert settings['codec_steps'] == 128
-          assert settings['denoiser_steps'] == 256
-          assert settings['schedule_steps'] == 8
-          assert report['linear_schedule']['profile'] == 'linear_beta_v1'
-          assert report['cosine_schedule']['profile'] == 'cosine_zero_terminal_v1'
-          assert report['linear_schedule']['terminal_alpha_bar'] > 0.9
-          assert report['cosine_schedule']['terminal_alpha_bar'] < 0.001
-          assert report['model_weights_written'] is False
-          assert report['generated_audio_written'] is False
-          assert report['release_authorized'] is False
-          assert len(report['paired_seed_metrics']) == 3
-          assert {p.name for p in root.rglob('*') if p.is_file()} == {report_path.name}
+          path = root / 'private-research' / 'velocity-objective.json'
+          report = json.loads(path.read_text(encoding='utf-8'))
+          assert report['protocol'] == 'paired-epsilon-v-objective-cosine-v1'
+          assert report['seeds'] == [17, 29, 41]
+          assert report['configuration']['codec_steps'] == 128
+          assert report['configuration']['denoiser_steps_per_arm_objective'] == 256
+          assert report['configuration']['diffusion_steps'] == 8
+          assert report['configuration']['training_recordings'] == 42
+          assert report['configuration']['evaluation_recordings'] == 42
+          assert report['configuration']['schedule_profile'] == 'cosine_zero_terminal_v1'
+          assert report['paired_model_initialization']
+          assert report['paired_batch_timesteps_noise_and_condition_dropout']
+          assert not report['model_weights_written']
+          assert not report['audio_files_written']
+          assert not report['release_authorized']
+          assert len(report['per_seed']) == 3
+          assert [p for p in root.rglob('*') if p.is_file()] == [path]
           for arm in ('raw', 'latent'):
-              for measure in ('clipping_fraction', 'rms',
-                              'spectral_centroid_hz',
-                              'rain_vs_wind_mean_absolute_difference'):
-                  stat = report['paired_schedule_difference_summary'][arm][measure]
-                  assert stat['count'] == 3
-                  assert math.isfinite(stat['mean'])
-                  print(arm, measure, 'cosine-minus-linear mean=', round(stat['mean'], 6),
-                        'positive seeds=', stat['positive_runs'], '/3',
-                        'negative seeds=', stat['negative_runs'], '/3')
-          print('Matched schedule training complete:', report['configuration_sha256'])
-          print('No neural weights, WAVs, release files or artifacts were written.')
+              for metric in ('preclip_peak','preclip_rms',
+                             'preclip_out_of_range_fraction',
+                             'postclip_clipping_fraction', 'postclip_rms',
+                             'rain_vs_wind_mae'):
+                  stat = report['within_arm_difference_summary'][arm][metric]
+                  assert stat['count'] == 3 and math.isfinite(stat['mean'])
+                  print(arm, metric, 'v_minus_eps=', round(stat['mean'], 6),
+                        'decreased_seeds=', stat['negative_runs'], '/3',
+                        'increased_seeds=', stat['positive_runs'], '/3')
+          print('Paired v-objective experiment:', report['configuration_sha256'])
+          print('Only private numeric JSON was written: no WAVs, weights, or release artifacts.')
           PY

@@ -259,3 +259,15 @@ found that the experimental cosine schedule made generated waveforms
 dramatically **more clipped** (raw 13.7% → 94.6%; latent 0% → 63.9%).
 The cosine schedule is **not** recommended or selected. Numerical CI
 success and lower terminal SNR do not certify generated audio.
+
+
+### Objective-matched velocity-prediction follow-up
+
+The draft research branch now includes a
+[velocity-versus-epsilon objective experiment](docs/VELOCITY_OBJECTIVE_STUDY.md).
+Both networks begin from identical parameter tensors, share the same
+synthetic training examples, Gaussian noise, timesteps, text dropout masks
+and cosine schedule, and differ only in target and corresponding reverse
+DDPM sampler. The experiment measures unclipped generated-waveform
+amplitudes and numerical clipping risk. **No model quality improvement
+is claimed before the actual training evidence is inspected.**

@@ -223,32 +223,40 @@ def latent_noise_loss(denoiser: TextLatentDenoiser, schedule: DiffusionSchedule,
 
 @torch.no_grad()
 def sample_latent(model: LatentResearchModel, schedule: DiffusionSchedule,
-                  caption: str, *, seed: int = 0, guidance: float = 1.0) -> torch.Tensor:
+                  caption: str, *, seed: int = 0, guidance: float = 1.0,
+                  clamp_output: bool = True) -> torch.Tensor:
     """One-second neural research sample, NOT high-quality generative output."""
     if type(seed) is not int or not 0 <= seed < 2**32:
         raise ValueError('Seed must be an unsigned 32-bit integer')
     if not math.isfinite(guidance) or not 0 <= guidance <= 4:
         raise ValueError('Guidance must be finite and in [0, 4]')
+    if type(clamp_output) is not bool:
+        raise ValueError('clamp_output must be boolean')
     device = next(model.parameters()).device
     tokens = ByteTextTokenizer().encode([caption]).to(device)
     generator = torch.Generator(device=device).manual_seed(seed)
     x = torch.randn((1, LATENT_CHANNELS, LATENT_FRAMES), generator=generator, device=device)
+    previous_mode = model.training
     model.eval()
     blank = torch.zeros_like(tokens)
-    for step in range(schedule.steps - 1, -1, -1):
-        t = torch.tensor([step], dtype=torch.long, device=device)
-        predicted = model.denoiser(x, t, tokens)
-        if guidance != 1:
-            unconditional = model.denoiser(x, t, blank)
-            predicted = unconditional + guidance * (predicted - unconditional)
-        beta, alpha, bar = schedule.betas[step], schedule.alphas[step], schedule.alpha_bars[step]
-        mean = (x - beta * predicted / (1 - bar).sqrt()) / alpha.sqrt()
-        if step:
-            variance = beta * (1 - schedule.alpha_bars[step - 1]) / (1 - bar)
-            x = mean + variance.sqrt() * torch.randn(x.shape, generator=generator, device=device)
-        else:
-            x = mean
-    return model.codec.decode(x).clamp(-1, 1)[0, 0].cpu()
+    try:
+        for step in range(schedule.steps - 1, -1, -1):
+            t = torch.tensor([step], dtype=torch.long, device=device)
+            predicted = model.denoiser(x, t, tokens)
+            if guidance != 1:
+                unconditional = model.denoiser(x, t, blank)
+                predicted = unconditional + guidance * (predicted - unconditional)
+            beta, alpha, bar = schedule.betas[step], schedule.alphas[step], schedule.alpha_bars[step]
+            mean = (x - beta * predicted / (1 - bar).sqrt()) / alpha.sqrt()
+            if step:
+                variance = beta * (1 - schedule.alpha_bars[step - 1]) / (1 - bar)
+                x = mean + variance.sqrt() * torch.randn(x.shape, generator=generator, device=device)
+            else:
+                x = mean
+    finally:
+        model.train(previous_mode)
+    waveform = model.codec.decode(x)[0, 0].cpu()
+    return waveform.clamp(-1, 1) if clamp_output else waveform
 
 
 def _save_checkpoint(path: Path, model: LatentResearchModel,

@@ -147,3 +147,13 @@ higher clipping for cosine. The original linear schedule remains default
 only for research compatibility, not because it is production quality.
 A stable velocity-prediction objective and pre-clamp diagnostics must be
 evaluated before any schedule promotion.
+
+
+### New controlled objective test, without release promotion
+
+The [coupled v-prediction experiment](VELOCITY_OBJECTIVE_STUDY.md)
+tests a mathematically paired velocity target with a corresponding stable
+reverse posterior, while keeping the severely clipped cosine+epsilon
+configuration as the negative baseline. It additionally measures
+**pre-clamp** waveform peaks and out-of-range fractions so clipping is
+not hidden. Results remain synthetic-only, research-only and private.

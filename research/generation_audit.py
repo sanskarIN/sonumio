@@ -141,7 +141,8 @@ def sampling_prior_diagnostic(schedule: DiffusionSchedule) -> dict:
 
 @torch.no_grad()
 def sample_raw_full(raw: TextWaveDenoiser, schedule: DiffusionSchedule,
-                    caption: str, *, seed: int, guidance: float = 1.0) -> torch.Tensor:
+                    caption: str, *, seed: int, guidance: float = 1.0,
+                    clamp_output: bool = True) -> torch.Tensor:
     """Sample the raw model trained on 8192-frame clips (short CLI uses 2048).
 
     An explicit torch.Generator makes the noise path seed-reproducible without
@@ -149,6 +150,8 @@ def sample_raw_full(raw: TextWaveDenoiser, schedule: DiffusionSchedule,
     """
     if type(seed) is not int or not 0 <= seed < 2**32:
         raise ValueError('Sampling seed must be an unsigned 32-bit integer')
+    if type(clamp_output) is not bool:
+        raise ValueError('clamp_output must be boolean')
     if type(guidance) not in (int, float) or not math.isfinite(guidance) or not 0 <= guidance <= 4:
         raise ValueError('Guidance must be finite within [0, 4]')
     if type(schedule.steps) is not int or not 8 <= schedule.steps <= 256:
@@ -179,7 +182,8 @@ def sample_raw_full(raw: TextWaveDenoiser, schedule: DiffusionSchedule,
                 wave = mean
     finally:
         raw.train(training)
-    return wave.clamp(-1, 1)[0, 0].cpu()
+    result = wave[0, 0].cpu()
+    return result.clamp(-1, 1) if clamp_output else result
 
 
 @torch.no_grad()
