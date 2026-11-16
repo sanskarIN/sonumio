@@ -171,3 +171,15 @@ configuration and reports thread-profile differences separately.
 The private training CI also checks its actual model input fingerprints
 against an independent preflight. Coarse bucketed hash agreement is not
 a byte-identity claim or proof of real-world independent test coverage.
+
+
+## Stage-level DSP CPU reproducibility
+
+The [pipeline tracer](DSP_PIPELINE_TRACE.md) regenerates original
+first-party DSP and validates exact 24-kHz generator output and the
+final 8-kHz training crop, with hashes for every layer and processing
+stage. Research CI requires two independent process traces to agree
+exactly on the same host; the private training workflow checks all
+84 final trace digests against independently generated training
+input provenance. Per-stage and single-source SHA aggregates help
+narrow host-dependent DSP float differences without altering audio.

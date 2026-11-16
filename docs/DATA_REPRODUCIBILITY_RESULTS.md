@@ -111,3 +111,14 @@ For all current research experiments:
 
 **No WAV, neural weight, model generation, tag, release, prerelease
 or draft PR merge was produced or authorized.**
+
+
+## Next instrumented operation-level investigation
+
+The [original DSP stage trace](DSP_PIPELINE_TRACE.md) now compares
+hashes of the original procedural sound layers, mix and FIR stages
+across CPU environments. This follows the observed exact-data
+fingerprint drift without changing source recordings or retrospective
+training results. Stage fingerprints narrow the first changed step;
+they do not alone prove a specific CPU instruction or math library
+is responsible.

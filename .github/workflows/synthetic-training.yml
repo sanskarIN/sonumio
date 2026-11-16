@@ -55,6 +55,31 @@ jobs:
           print('Training runner CPU model:', data['environment']['cpu_model'])
           print('Synthetic research input provenance audited before training.')
           PY
+      - name: Trace original DSP source layers and numerical resampling
+        run: |
+          python -m research.dsp_pipeline_trace --output /tmp/sonumio-pipeline-trace.json > /dev/null
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          original = json.loads(Path('/tmp/sonumio-input-data.json').read_text(encoding='utf-8'))
+          traced = json.loads(Path('/tmp/sonumio-pipeline-trace.json').read_text(encoding='utf-8'))
+          index = {(r['split'], tuple(r['sources']), r['seed']): r for r in original['entries']}
+          assert len(traced['records']) == 84
+          assert traced['source_recipe_unchanged']
+          assert traced['matches_original_renderer_exactly']
+          assert not traced['audio_files_saved'] and not traced['model_weights_saved']
+          for row in traced['records']:
+              key = (row['split'], tuple(row['sources']), row['seed'])
+              assert row['stages']['cropped_8k']['sha256'] == index[key]['exact_sha256']
+          print('Training pipeline original DSP SHA256 agrees with independently rebuilt training manifest.')
+          print('Training pipeline CPU:', traced['environment']['cpu_model'])
+          for key, stat in traced['stage_aggregate'].items():
+              print('Stage exact SHA256:', key, stat['sha256'], 'count', stat['count'])
+          for category, group in traced['single_source_aggregate'].items():
+              for key, stat in group.items():
+                  if key.startswith('layer_') or key == 'cropped_8k':
+                      print('Single-source stage exact SHA256:', category, key, stat['sha256'])
+          PY
       - name: Train paired epsilon and velocity models from identical weights and noise
         run: |
           python -m research.velocity_ablation \

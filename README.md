@@ -301,3 +301,12 @@ different AMD EPYC runner models produced **different exact dataset
 hashes**. Coarse 0.01 amplitude-bucket hashes matched, but that does
 not prove byte identity or a maximum numerical-error bound. The model
 and data recipe remain research-only and unchanged.
+
+
+**Stage-level DSP reproducibility:** a [first-party pipeline trace](docs/DSP_PIPELINE_TRACE.md)
+now fingerprints each source layer, mixture, fade, peak normalization,
+FIR kernel, filtered signal, decimation, and final training crop.
+It checks all stages against the unmodified procedural renderer and
+records differences between CPU runners without changing the original
+dataset or publishing audio/weights. Results must be interpreted as
+numerical provenance, not audible quality.

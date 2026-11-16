@@ -194,3 +194,15 @@ and the private training process agreed exactly with its independent
 preflight, but cross-host overall hashes differed. Neither source
 recordings nor trained weights were uploaded; model-quality research
 must continue using strict within-run data pairing.
+
+
+### Original DSP stage provenance
+
+The [numerical stage-level trace](DSP_PIPELINE_TRACE.md) checks all
+84 original first-party recordings and records exact hashes for each
+individual sound component, layer mix, edge fade, normalization,
+49-tap resampling kernel, filtered float64 samples, 8-kHz downsampling
+and final 8192-sample crop. It enforces exact agreement with existing
+Sonumio DSP source output, not a newly substituted recording recipe.
+The research and training CI jobs report per-stage signatures
+from their separate CPU hosts.
