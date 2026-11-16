@@ -104,3 +104,13 @@ validation, RMS, clipping, silence, spectral characteristics, and
 same-noise-seed prompt-change sensitivity for English/Hindi rain/wind
 prompts. This does not replace independent listening or rights-reviewed
 reference audio. No waveform or model-weight artifacts are published.
+
+
+## Empirical generation failures
+
+The [in-memory generation pilot](GENERATED_AUDIO_PILOT_RESULTS.md)
+reported substantial clipping in raw output and weak measured prompt
+variation for the latent output. The research pipeline also identifies
+a likely terminal DDPM prior mismatch with the eight-step linear beta
+schedule. The next controlled study must address these issues without
+conflating denoising error reduction with audible output quality.

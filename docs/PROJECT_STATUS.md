@@ -113,3 +113,14 @@ now runs after model training, before weights are discarded. It checks
 actually sampled 8-kHz one-second waveform duration, finite samples,
 clipping, silence, simple spectrum and prompt-change sensitivity. These
 do not replace real listening or independent audio-class relevance tests.
+
+
+### Generated audio findings and prioritized corrective research
+
+The [actual generated-waveform pilot](GENERATED_AUDIO_PILOT_RESULTS.md) ran
+after full synthetic training. Raw output clipped around 13.7% of audio
+samples, while latent output had small same-noise-seed prompt-change
+differences. A new numerical diagnostic identifies the eight-step
+linear-beta terminal-prior mismatch (alpha_bar ≈ 0.922), which must
+be studied under controlled alternative diffusion schedules before
+making quality claims. Current audio generation is **not production-ready**.

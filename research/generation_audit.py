@@ -108,6 +108,37 @@ def _compare_waveforms(left: torch.Tensor, right: torch.Tensor) -> dict:
     }
 
 
+
+def sampling_prior_diagnostic(schedule: DiffusionSchedule) -> dict:
+    """Detect how far terminal noising remains from a pure Gaussian prior.
+
+    DDPM generation starts from N(0, I); if q(x_T|x_0) still contains a large
+    proportion of x_0, that assumed start distribution can be badly mismatched.
+    This diagnostic cannot by itself prove that quality will improve with
+    another schedule, and should not silently modify existing experiments.
+    """
+    if schedule.steps < 8 or schedule.steps > 256:
+        raise ValueError('Prior diagnostic requires an 8..256 step schedule')
+    value = float(schedule.alpha_bars[-1].cpu())
+    if not 0 < value < 1 or not math.isfinite(value):
+        raise ValueError('Invalid terminal diffusion alpha cumulative product')
+    retained = float(math.sqrt(value))
+    injected = float(math.sqrt(1 - value))
+    return {
+        'terminal_alpha_bar': value,
+        'clean_signal_coefficient': retained,
+        'gaussian_noise_coefficient': injected,
+        'sampling_initialization': 'pure_unit_gaussian',
+        'gaussian_prior_mismatch_risk': bool(value > 0.1),
+        'warning': (
+            'A large remaining signal coefficient in the training terminal '
+            'distribution is inconsistent with assuming that every final '
+            'sample is pure random noise; this is a design warning, not a '
+            'measured quality prediction.'
+        ),
+    }
+
+
 @torch.no_grad()
 def sample_raw_full(raw: TextWaveDenoiser, schedule: DiffusionSchedule,
                     caption: str, *, seed: int, guidance: float = 1.0) -> torch.Tensor:
@@ -218,6 +249,7 @@ def generation_audit(raw: TextWaveDenoiser, latent: LatentResearchModel,
         'protocol': PROTOCOL,
         'sample_rate': SAMPLE_RATE, 'duration_seconds': FRAMES / SAMPLE_RATE,
         'seeds': list(seeds), 'guidance': float(guidance),
+        'diffusion_sampling_prior': sampling_prior_diagnostic(schedule),
         'prompts_by_category': {
             category: {'en': en, 'hi': hi}
             for en, hi, category in PAIRS

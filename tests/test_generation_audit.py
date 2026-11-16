@@ -10,7 +10,7 @@ torch = pytest.importorskip('torch')
 
 from research.generation_audit import (
     PROTOCOL, generation_audit, sample_raw_full,
-    waveform_statistics, _compare_waveforms,
+    waveform_statistics, _compare_waveforms, sampling_prior_diagnostic,
 )
 from research.latent_audio import FRAMES, LatentResearchModel
 from research.text_audio import TextWaveDenoiser
@@ -91,6 +91,10 @@ def test_actual_generation_audit_has_four_prompts_and_two_arms_no_saved_weights(
     assert report['sample_rate'] == 8000
     assert report['duration_seconds'] == FRAMES / 8000
     assert report['seeds'] == [51]
+    prior = report['diffusion_sampling_prior']
+    assert prior['terminal_alpha_bar'] == pytest.approx(0.9222122, rel=1e-5)
+    assert prior['gaussian_prior_mismatch_risk'] is True
+    assert prior['clean_signal_coefficient'] > prior['gaussian_noise_coefficient']
     assert report['audio_files_saved'] is False
     assert report['neural_weights_saved'] is False
     assert set(report['prompts_by_category']) == {'rain', 'wind'}
@@ -125,3 +129,14 @@ def test_reject_bad_seed_lists_and_guidance_before_generation():
     for guidance in (float('inf'), float('nan'), -1, 5, True):
         with pytest.raises(ValueError):
             generation_audit(raw, latent, schedule, guidance=guidance)
+
+
+
+def test_short_linear_diffusion_is_not_close_to_pure_gaussian_prior():
+    schedule = DiffusionSchedule(8)
+    assessment = sampling_prior_diagnostic(schedule)
+    assert assessment['sampling_initialization'] == 'pure_unit_gaussian'
+    assert assessment['terminal_alpha_bar'] > 0.9
+    assert assessment['clean_signal_coefficient'] > 0.95
+    assert assessment['gaussian_noise_coefficient'] < 0.3
+    assert assessment['gaussian_prior_mismatch_risk']

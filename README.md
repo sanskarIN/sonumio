@@ -233,3 +233,11 @@ noise-prediction loss. This checks silence/clipping/spectral health and
 whether different bilingual prompts yield different generated samples.
 It **does not** prove realistic sound effects or reliable prompt meaning,
 and saves neither WAV samples nor model weights.
+
+
+**Generated waveform audit findings:** the
+[actual in-memory sampling pilot](docs/GENERATED_AUDIO_PILOT_RESULTS.md)
+found substantial clipping in raw DDPM samples and weak numerical
+prompt-change sensitivity in latent samples. The eight-step linear
+schedule also has a serious terminal-noise/initial-prior mismatch risk.
+These are *research blockers*, not finished Sonumio capabilities.

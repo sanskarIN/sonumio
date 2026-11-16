@@ -93,3 +93,14 @@ remain required before any Sonumio model-generation or product claims.
 
 **No release, pre-release, tag, PR merge or model-weight publication
 is authorized by successful tests or an apparently good numerical score.**
+
+
+## Verified generation pilot and sampling-prior warning
+
+The first [numerical generated-audio pilot report](GENERATED_AUDIO_PILOT_RESULTS.md)
+documents the *measured* 3-seed results: severe raw-branch clipping,
+small latent prompt-change differences and no listener-quality
+certification. The audit now records the final diffusion cumulative
+alpha and terminal clean/noise coefficients, flagging the potential
+sampling-prior mismatch. This is a **hypothesis requiring controlled
+experiments**, not an automatic explanation of every waveform defect.
