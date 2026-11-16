@@ -46,6 +46,12 @@ def report_for_seed(seed: int) -> dict:
             'denoiser_updates_per_arm': 4, 'diffusion_schedule_steps': 8,
             'nominal_channels': 16, 'training_batch_size_per_arm': 2,
             'optimizer': 'AdamW',
+            'schedule_profile': 'linear_beta_v1',
+        },
+        'schedule_diagnostics': {
+            'profile': 'linear_beta_v1',
+            'terminal_alpha_bar': 0.9222122,
+            'gaussian_prior_mismatch_risk': True,
         },
         'train_eval_exact_byte_overlap': 0,
         'category_disjoint_hard_negatives': True,
@@ -231,3 +237,28 @@ def test_generation_audit_flag_is_forwarded_to_runner_only_when_enabled():
     assert all(x['generation_probe'] is True for x in seen)
     with pytest.raises(ValueError, match='boolean'):
         run_study(generation_probe=1, runner=fake)
+
+
+
+def test_multiseed_rejects_schedules_changed_across_seeds():
+    seeds = (17, 29)
+    runs = [report_for_seed(s) for s in seeds]
+    runs[1]['shared_parameters']['schedule_profile'] = 'cosine_zero_terminal_v1'
+    runs[1]['schedule_diagnostics'] = {
+        'profile': 'cosine_zero_terminal_v1',
+        'terminal_alpha_bar': 0.00003747,
+        'gaussian_prior_mismatch_risk': False,
+    }
+    with pytest.raises(ValueError, match='do not share dataset'):
+        summarize_runs(runs, seeds)
+
+
+def test_multiseed_rejects_profile_and_prior_diagnostics_drift():
+    runs = [report_for_seed(17), report_for_seed(29)]
+    runs[1]['schedule_diagnostics']['terminal_alpha_bar'] = float('nan')
+    with pytest.raises(ValueError):
+        summarize_runs(runs, (17, 29))
+    runs[1] = report_for_seed(29)
+    runs[1]['schedule_diagnostics']['gaussian_prior_mismatch_risk'] = False
+    with pytest.raises(ValueError, match='risk'):
+        summarize_runs(runs, (17, 29))

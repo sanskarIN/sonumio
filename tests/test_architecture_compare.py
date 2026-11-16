@@ -181,3 +181,18 @@ def test_optional_actual_generation_probe_has_no_saved_artifacts():
     assert not report['weights_saved'] and not report['weights_published']
     with pytest.raises(ValueError, match='boolean'):
         compare(generation_probe=1)
+
+
+
+def test_real_one_step_cosine_schedule_comparison_remains_numerically_finite():
+    result = compare(codec_steps=1, denoiser_steps=1, schedule_steps=8,
+                     channels=16, seed=17, evaluation_combinations=2,
+                     schedule_profile='cosine_zero_terminal_v1',
+                     generation_probe=True)
+    assert result['shared_parameters']['schedule_profile'] == 'cosine_zero_terminal_v1'
+    assert result['schedule_diagnostics']['terminal_alpha_bar'] < 1e-3
+    assert result['schedule_diagnostics']['gaussian_prior_mismatch_risk'] is False
+    for arm in ('raw', 'latent'):
+        assert len(result['generation_audit']['generated'][arm]) == 4
+        assert all(math.isfinite(item['stats']['rms'])
+                   for item in result['generation_audit']['generated'][arm])

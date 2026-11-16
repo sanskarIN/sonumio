@@ -114,3 +114,13 @@ variation for the latent output. The research pipeline also identifies
 a likely terminal DDPM prior mismatch with the eight-step linear beta
 schedule. The next controlled study must address these issues without
 conflating denoising error reduction with audible output quality.
+
+
+## Schedule-prior experiment
+
+A [paired linear-versus-cosine schedule study](SCHEDULE_ABLATION.md)
+uses matched initialization seeds and generated-audio health metrics to
+test whether the eight-step terminal-prior mismatch identified in
+the generation pilot contributes to clipping. The default linear
+schedule and previously recorded research results remain unchanged.
+The experiment makes no release, listener-quality or model-selection claim.

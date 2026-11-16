@@ -100,18 +100,43 @@ class TinyWaveDenoiser(nn.Module):
 
 
 class DiffusionSchedule(nn.Module):
-    """Linear-beta DDPM with buffered, device-aware statistics."""
+    """Buffered DDPM research schedules; default preserves prior linear models.
 
-    def __init__(self, steps: int = DEFAULT_DIFFUSION_STEPS):
+    cosine_zero_terminal_v1 is a *different training and sampling protocol*
+    and must never be substituted into existing checkpoints after training.
+    The terminal cosine beta is clamped to 0.999, avoiding zero alpha and
+    division by zero in the epsilon-prediction DDPM sampler.
+    """
+
+    PROFILES = ("linear_beta_v1", "cosine_zero_terminal_v1")
+
+    def __init__(self, steps: int = DEFAULT_DIFFUSION_STEPS,
+                 *, profile: str = "linear_beta_v1"):
         super().__init__()
-        if not 8 <= steps <= 1_000:
-            raise ValueError("diffusion steps must be between 8 and 1000")
+        if type(steps) is not int or not 8 <= steps <= 1_000:
+            raise ValueError("diffusion steps must be integer 8..1000")
+        if type(profile) is not str or profile not in self.PROFILES:
+            raise ValueError("unrecognized diffusion schedule profile")
         self.steps = steps
-        betas = torch.linspace(0.0001, 0.02, steps, dtype=torch.float32)
+        self.profile = profile
+        if profile == "linear_beta_v1":
+            betas = torch.linspace(0.0001, 0.02, steps, dtype=torch.float32)
+        else:
+            # Cosine alpha-bar schedule, normalized to alpha_bar(t=0)=1.
+            # Compute ratios in float64 before storing float32 DDPM buffers.
+            t = torch.linspace(0, 1, steps + 1, dtype=torch.float64)
+            abar = torch.cos((t + 0.008) / 1.008 * math.pi / 2).square()
+            abar = abar / abar[0]
+            betas = (1 - abar[1:] / abar[:-1]).clamp(1e-4, 0.999).float()
         alphas = 1.0 - betas
+        alpha_bars = torch.cumprod(alphas, dim=0)
+        if (not torch.isfinite(alpha_bars).all()
+                or not torch.all((alpha_bars > 0) & (alpha_bars < 1))
+                or not torch.all(alpha_bars[1:] < alpha_bars[:-1])):
+            raise ValueError("invalid or non-monotonic diffusion alpha schedule")
         self.register_buffer("betas", betas)
         self.register_buffer("alphas", alphas)
-        self.register_buffer("alpha_bars", torch.cumprod(alphas, dim=0))
+        self.register_buffer("alpha_bars", alpha_bars)
 
     def corrupt(self, clean: torch.Tensor, step: torch.Tensor, noise: torch.Tensor) -> torch.Tensor:
         a = self.alpha_bars[step].view(-1, 1, 1)

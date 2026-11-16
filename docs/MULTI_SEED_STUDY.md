@@ -150,3 +150,14 @@ still not directly comparable. See [generated waveform audit](GENERATED_AUDIO_AU
 The study protocol is now \`raw-vs-latent-multi-seed-diagnostics-v3\`.
 Historical pilot and extended training results in v2 remain valid
 **historical evidence**, but did **not** include this generation audit.
+
+
+## Controlled schedule intervention
+
+The schedule profile is now explicit in v4 reports:
+\`linear_beta_v1\` (the unchanged default), and
+\`cosine_zero_terminal_v1\` (research-only). The
+[paired schedule ablation](SCHEDULE_ABLATION.md) evaluates
+both with the same training data, model-initialization seeds and
+optimizer budgets, while comparing the *generated waveforms* in RAM.
+Old v3 results remain valid only under the recorded linear schedule.

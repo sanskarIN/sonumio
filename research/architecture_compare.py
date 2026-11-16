@@ -32,19 +32,22 @@ from research.latent_audio import latent_noise_loss
 from research.text_audio import SYNTHETIC_COMBINATIONS
 from research.wave_diffusion import DiffusionSchedule, SAMPLE_RATE
 
-PROTOCOL = 'shared-data-raw-vs-latent-text-ddpm-v3'
+PROTOCOL = 'shared-data-raw-vs-latent-text-ddpm-v4'
 MAX_OPTIMIZER_STEPS = 1000
 MAX_EVAL_COMBINATIONS = len(SYNTHETIC_COMBINATIONS)
 
 
 def _validate(*, codec_steps: int, denoiser_steps: int, schedule_steps: int,
-              seed: int, channels: int, evaluation_combinations: int) -> None:
+              seed: int, channels: int, evaluation_combinations: int,
+              schedule_profile: str = 'linear_beta_v1') -> None:
     if (type(codec_steps) is not int or not 1 <= codec_steps <= MAX_OPTIMIZER_STEPS
             or type(denoiser_steps) is not int
             or not 1 <= denoiser_steps <= MAX_OPTIMIZER_STEPS):
         raise ValueError('Optimizer steps must be integers in 1..1000')
     if type(schedule_steps) is not int or not 8 <= schedule_steps <= 256:
         raise ValueError('Diffusion schedule must be 8..256 steps')
+    if type(schedule_profile) is not str or schedule_profile not in DiffusionSchedule.PROFILES:
+        raise ValueError('Unrecognized schedule profile')
     if type(seed) is not int or not 0 <= seed < 2**32 - 4096:
         raise ValueError('Seed must be a bounded unsigned 32-bit integer')
     if type(channels) is not int or channels not in (16, 24, 32):
@@ -190,7 +193,8 @@ def evaluate_denoiser(model: nn.Module, schedule: DiffusionSchedule,
 def compare(*, codec_steps: int = 2, denoiser_steps: int = 2,
             schedule_steps: int = 8, seed: int = 17, channels: int = 16,
             evaluation_combinations: int = 4,
-            generation_probe: bool = False) -> dict:
+            generation_probe: bool = False,
+            schedule_profile: str = 'linear_beta_v1') -> dict:
     """Train two experimental models and measure diagnostics without weights.
 
     Shared training pairs, update count, text encoder architecture, schedule,
@@ -202,7 +206,8 @@ def compare(*, codec_steps: int = 2, denoiser_steps: int = 2,
         raise ValueError('generation_probe must be a boolean')
     _validate(codec_steps=codec_steps, denoiser_steps=denoiser_steps,
               schedule_steps=schedule_steps, seed=seed, channels=channels,
-              evaluation_combinations=evaluation_combinations)
+              evaluation_combinations=evaluation_combinations,
+              schedule_profile=schedule_profile)
     with torch.random.fork_rng(devices=[]):
         torch.manual_seed(seed)
         started = perf_counter()
@@ -228,7 +233,7 @@ def compare(*, codec_steps: int = 2, denoiser_steps: int = 2,
         codec = model.codec
         raw = TextWaveDenoiser(channels)
         latent = model.denoiser
-        schedule = DiffusionSchedule(schedule_steps)
+        schedule = DiffusionSchedule(schedule_steps, profile=schedule_profile)
         sample_selector = torch.Generator().manual_seed(seed + 2)
         initial_codec_loss = 0.0
         optimizer_codec = torch.optim.AdamW(codec.parameters(), lr=0.001)
@@ -332,6 +337,7 @@ def compare(*, codec_steps: int = 2, denoiser_steps: int = 2,
                 'nominal_channels': channels,
                 'training_batch_size_per_arm': 2,
                 'seed': seed, 'optimizer': 'AdamW',
+                'schedule_profile': schedule_profile,
             },
             'codec': {
                 'trainable_parameters': sum(p.numel() for p in codec.parameters()),
@@ -359,6 +365,11 @@ def compare(*, codec_steps: int = 2, denoiser_steps: int = 2,
             'weights_published': False,
             'model_generation': None,
             'generation_audit': generated,
+            'schedule_diagnostics': {
+                'profile': schedule.profile,
+                'terminal_alpha_bar': float(schedule.alpha_bars[-1]),
+                'gaussian_prior_mismatch_risk': bool(float(schedule.alpha_bars[-1]) > 0.1),
+            },
             'limitations': [
                 'Raw and latent noise MSE are on different representations: never rank their absolute values',
                 'The branches have unequal parameter counts and compute, and latent requires codec pretraining',
@@ -375,6 +386,8 @@ def main() -> None:
     parser.add_argument('--codec-steps', type=int, default=2)
     parser.add_argument('--denoiser-steps', type=int, default=2)
     parser.add_argument('--schedule-steps', type=int, default=8)
+    parser.add_argument('--schedule-profile', type=str, default='linear_beta_v1',
+                        choices=DiffusionSchedule.PROFILES)
     parser.add_argument('--channels', type=int, default=16, choices=(16, 24, 32))
     parser.add_argument('--seed', type=int, default=17)
     parser.add_argument('--evaluation-combinations', type=int, default=4)
@@ -386,7 +399,8 @@ def main() -> None:
     report = compare(codec_steps=args.codec_steps, denoiser_steps=args.denoiser_steps,
                      schedule_steps=args.schedule_steps, seed=args.seed,
                      channels=args.channels, evaluation_combinations=args.evaluation_combinations,
-                     generation_probe=args.audit_generated_audio)
+                     generation_probe=args.audit_generated_audio,
+                     schedule_profile=args.schedule_profile)
     serialized = json.dumps(report, indent=2, ensure_ascii=False, allow_nan=False) + '\n'
     if args.output is not None:
         args.output.parent.mkdir(parents=True, exist_ok=True)

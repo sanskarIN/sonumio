@@ -70,3 +70,26 @@ def test_train_short_smoke(tmp_path: Path):
     assert report["parameter_count"] > 1_000
     assert report["weights_published"] is False
     assert (tmp_path / "manifest.json").exists()
+
+
+
+def test_cosine_profile_terminal_prior_is_small_finite_monotonic():
+    linear = DiffusionSchedule(8)
+    cosine = DiffusionSchedule(8, profile='cosine_zero_terminal_v1')
+    assert linear.profile == 'linear_beta_v1'
+    assert cosine.profile == 'cosine_zero_terminal_v1'
+    assert 0.9 < float(linear.alpha_bars[-1]) < 0.95
+    assert 0 < float(cosine.alpha_bars[-1]) < 1e-3
+    assert (cosine.betas > 0).all() and (cosine.betas < 1).all()
+    assert (cosine.alpha_bars[:-1] > cosine.alpha_bars[1:]).all()
+    assert torch.isfinite(cosine.alpha_bars).all()
+    torch.manual_seed(4)
+    model = TinyWaveDenoiser(16)
+    first = cosine.sample(model, 0, seed=9, frames=256)
+    second = cosine.sample(model, 0, seed=9, frames=256)
+    assert torch.equal(first, second)
+    assert torch.isfinite(first).all()
+    for kwargs in ({'profile': 'invalid'}, {'profile': True},
+                   {'steps': True}, {'steps': 7}):
+        with pytest.raises(ValueError):
+            DiffusionSchedule(**kwargs)

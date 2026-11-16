@@ -102,3 +102,12 @@ schedule change fixes codec collapse and language grounding.
   open-ended sound prompting works; those remain future research work.
 - **No release, pre-release, model generation, weight upload, version tag
   or PR merge is authorized by these results.**
+
+
+## Follow-up schedule experiment
+
+The [paired linear-versus-cosine study](SCHEDULE_ABLATION.md)
+was introduced *after* this original generation pilot, specifically
+to investigate its terminal DDPM train/sampling-prior mismatch. The
+numerical results above remain historical evidence for the **linear**
+schedule and are not proof that cosine will improve generated audio.

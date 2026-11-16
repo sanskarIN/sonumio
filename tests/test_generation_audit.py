@@ -140,3 +140,14 @@ def test_short_linear_diffusion_is_not_close_to_pure_gaussian_prior():
     assert assessment['clean_signal_coefficient'] > 0.95
     assert assessment['gaussian_noise_coefficient'] < 0.3
     assert assessment['gaussian_prior_mismatch_risk']
+
+
+
+def test_cosine_prior_audit_has_nearly_gaussian_terminal_distribution():
+    reference = sampling_prior_diagnostic(DiffusionSchedule(8))
+    candidate = sampling_prior_diagnostic(
+        DiffusionSchedule(8, profile='cosine_zero_terminal_v1'))
+    assert reference['gaussian_prior_mismatch_risk'] is True
+    assert candidate['gaussian_prior_mismatch_risk'] is False
+    assert candidate['terminal_alpha_bar'] < 1e-3
+    assert candidate['gaussian_noise_coefficient'] > 0.999

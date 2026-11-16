@@ -124,3 +124,14 @@ differences. A new numerical diagnostic identifies the eight-step
 linear-beta terminal-prior mismatch (alpha_bar ≈ 0.922), which must
 be studied under controlled alternative diffusion schedules before
 making quality claims. Current audio generation is **not production-ready**.
+
+
+### Controlled next experiment — two diffusion schedules
+
+The [diffusion-prior schedule ablation](SCHEDULE_ABLATION.md) now
+trains and samples both the original eight-step linear-beta DDPM and a
+cosine near-zero-terminal-SNR variant under the same three model seeds,
+train/evaluation recordings, optimizer updates, model widths and
+audio-generation numerical controls. Prior metrics cannot be interpreted
+as proof the alternative improves audible quality. This study is explicitly
+for diagnosing raw output clipping and weak latent prompt variation.

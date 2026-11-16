@@ -26,7 +26,7 @@ import torch
 
 from research.architecture_compare import PROTOCOL as SINGLE_RUN_PROTOCOL, compare
 
-PROTOCOL = 'raw-vs-latent-multi-seed-diagnostics-v3'
+PROTOCOL = 'raw-vs-latent-multi-seed-diagnostics-v4'
 MIN_SEEDS = 2
 MAX_SEEDS = 8
 BENCHMARK_METRICS = (
@@ -105,6 +105,18 @@ def summarize_runs(runs: list[dict], seeds: tuple[int, ...]) -> dict:
             raise ValueError('A run is missing its explicit random seed')
         if params['seed'] != seed:
             raise ValueError('Seed/run misalignment')
+        profile = params.get('schedule_profile')
+        diagnostics = run.get('schedule_diagnostics')
+        if (profile not in ('linear_beta_v1', 'cosine_zero_terminal_v1')
+                or not isinstance(diagnostics, dict)
+                or diagnostics.get('profile') != profile):
+            raise ValueError('Missing or incompatible training/sampling schedule profile')
+        terminal = _bounded_float(diagnostics.get('terminal_alpha_bar'),
+                                  'terminal diffusion alpha bar')
+        if not 0 < terminal < 1:
+            raise ValueError('Invalid terminal cumulative alpha')
+        if diagnostics.get('gaussian_prior_mismatch_risk') is not (terminal > 0.1):
+            raise ValueError('Inconsistent sampling-prior risk report')
         signature = (
             run.get('data_recipe'), run.get('train_fingerprint'),
             run.get('validation_fingerprint'), run.get('sample_rate'),
@@ -118,6 +130,7 @@ def summarize_runs(runs: list[dict], seeds: tuple[int, ...]) -> dict:
             run.get('latent', {}).get('parameters'),
             run.get('codec', {}).get('trainable_parameters'),
             run.get('hard_negative_tokens_sha256'),
+            profile, terminal,
         )
         if any(x is None for x in signature):
             raise ValueError('Missing shared configuration or model metadata')
@@ -228,6 +241,11 @@ def summarize_runs(runs: list[dict], seeds: tuple[int, ...]) -> dict:
             'hard_negative_tokens_sha256': canonical[16],
             'category_disjoint_hard_negatives': True,
         },
+        'diffusion_schedule': {
+            'profile': canonical[17],
+            'terminal_alpha_bar': canonical[18],
+            'gaussian_prior_mismatch_risk': bool(canonical[18] > 0.1),
+        },
         'mean_and_variability_by_model_and_noise_band': aggregated,
         'codec_reconstruction_waveform_mae': summarize_values([
             _bounded_float(run['codec']['eval_waveform_mae'], 'codec reconstruction')
@@ -288,6 +306,8 @@ def summarize_runs(runs: list[dict], seeds: tuple[int, ...]) -> dict:
             'in-memory-generated-waveform-numerical-audit-v1' if audited_count else None
         ),
         'model_parameters': [canonical[13], canonical[14], canonical[15]],
+        'schedule_profile': canonical[17],
+        'terminal_alpha_bar': canonical[18],
     }
     result['configuration_sha256'] = hashlib.sha256(
         json.dumps(fingerprint_material, sort_keys=True, separators=(',', ':')).encode('utf-8')
@@ -300,6 +320,7 @@ def run_study(*, seeds: tuple[int, ...] = (17, 29, 41),
               schedule_steps: int = 8, channels: int = 16,
               evaluation_combinations: int = 4,
               generation_probe: bool = False,
+              schedule_profile: str = 'linear_beta_v1',
               runner: Callable[..., dict] = compare) -> dict:
     """Repeat the same research design with distinct model-initialization seeds.
 
@@ -309,6 +330,10 @@ def run_study(*, seeds: tuple[int, ...] = (17, 29, 41),
     _check_seeds(seeds)
     if type(generation_probe) is not bool:
         raise ValueError('generation_probe must be boolean')
+    if type(schedule_profile) is not str or schedule_profile not in (
+        'linear_beta_v1', 'cosine_zero_terminal_v1'
+    ):
+        raise ValueError('Unrecognized research schedule profile')
     collected = []
     for seed in seeds:
         options = {
@@ -319,6 +344,10 @@ def run_study(*, seeds: tuple[int, ...] = (17, 29, 41),
         }
         if generation_probe:
             options['generation_probe'] = True
+        # Avoid surprising injected legacy test runners when the default profile
+        # is used; actual compare() always records a strict schedule profile.
+        if schedule_profile != 'linear_beta_v1':
+            options['schedule_profile'] = schedule_profile
         collected.append(runner(**options))
     summary = summarize_runs(collected, seeds)
     summary['runtime_environment'] = {
@@ -336,6 +365,8 @@ def main() -> None:
     parser.add_argument('--codec-steps', type=int, default=2)
     parser.add_argument('--denoiser-steps', type=int, default=2)
     parser.add_argument('--schedule-steps', type=int, default=8)
+    parser.add_argument('--schedule-profile', type=str, default='linear_beta_v1',
+                        choices=('linear_beta_v1', 'cosine_zero_terminal_v1'))
     parser.add_argument('--channels', type=int, default=16, choices=(16, 24, 32))
     parser.add_argument('--evaluation-combinations', type=int, default=4)
     parser.add_argument('--audit-generated-audio', action='store_true',
@@ -347,6 +378,7 @@ def main() -> None:
         denoiser_steps=args.denoiser_steps, schedule_steps=args.schedule_steps,
         channels=args.channels, evaluation_combinations=args.evaluation_combinations,
         generation_probe=args.audit_generated_audio,
+        schedule_profile=args.schedule_profile,
     )
     serialized = json.dumps(report, indent=2, ensure_ascii=False, allow_nan=False) + '\n'
     if args.output is not None:

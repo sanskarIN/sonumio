@@ -241,3 +241,13 @@ found substantial clipping in raw DDPM samples and weak numerical
 prompt-change sensitivity in latent samples. The eight-step linear
 schedule also has a serious terminal-noise/initial-prior mismatch risk.
 These are *research blockers*, not finished Sonumio capabilities.
+
+
+### Controlled diffusion-prior schedule experiment
+
+The draft branch now has a [matched linear-vs-cosine schedule ablation](docs/SCHEDULE_ABLATION.md).
+It holds Sonumio-owned training data, model random seeds, optimizer budgets,
+source combinations and actual generated-waveform diagnostics fixed while
+testing whether near-zero terminal noise reduces the previously measured
+clipping. Results must be checked before claiming any improvement. Neither
+noise-MSE reduction nor waveform prompt sensitivity by itself proves quality.

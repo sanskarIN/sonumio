@@ -37,15 +37,15 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -e '.[test]' 'scipy>=1.12,<2'
           python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
-      - name: Train three real experiments on Sonumio-owned procedural data
+      - name: Train matched original linear and cosine schedule experiments
         run: |
-          python -m research.multi_seed_study \
+          python -m research.schedule_ablation \
             --seeds 17,29,41 \
             --codec-steps 128 --denoiser-steps 256 \
             --schedule-steps 8 --channels 16 \
-            --evaluation-combinations 21 --audit-generated-audio \
-            --output checkpoints/private-research/extended-synthetic-training.json
-      - name: Validate full held-out grid, report and no weight files
+            --evaluation-combinations 21 \
+            --output checkpoints/private-research/schedule-ablation.json
+      - name: Validate paired protocol, all waveform checks, and zero artifacts
         run: |
           python - <<'PY'
           import json
@@ -53,43 +53,36 @@ jobs:
           from pathlib import Path
 
           root = Path('checkpoints')
-          report_path = root / 'private-research' / 'extended-synthetic-training.json'
+          report_path = root / 'private-research' / 'schedule-ablation.json'
           report = json.loads(report_path.read_text(encoding='utf-8'))
-          assert report['seed_count'] == 3 and report['seeds'] == [17, 29, 41]
-          assert report['protocol'] == 'raw-vs-latent-multi-seed-diagnostics-v3'
-          assert report['shared_data']['evaluated_source_combinations'] == 21
-          assert report['shared_data']['evaluated_caption_pairs'] == 84
-          assert report['shared_data']['category_disjoint_hard_negatives'] is True
-          assert report['generation_audit_enabled'] is True
-          assert report['weights_saved'] is False
-          assert report['weights_published'] is False
-          assert report['model_generation'] is None
-          for single in report['individual_runs']:
-              p = single['shared_parameters']
-              assert p['codec_pretraining_steps'] == 128
-              assert p['denoiser_updates_per_arm'] == 256
-              assert single['train_recordings'] == 42
-              assert single['validation_recordings_total'] == 42
-              assert single['train_eval_exact_byte_overlap'] == 0
-              assert single['generation_audit']['audio_files_saved'] is False
-              assert single['generation_audit']['neural_weights_saved'] is False
-              for arm in ('raw', 'latent'):
-                  assert len(single['generation_audit']['generated'][arm]) == 4
-              assert math.isfinite(single['codec']['eval_waveform_mae'])
-          materialized = [p for p in root.rglob('*') if p.is_file()]
-          assert materialized == [report_path], materialized
+          assert report['protocol'] == 'paired-cosine-vs-linear-generated-audio-ablation-v1'
+          assert report['paired_seeds'] == [17, 29, 41]
+          assert report['shared_training_data']['evaluated_source_combinations'] == 21
+          assert report['shared_training_data']['evaluated_caption_pairs'] == 84
+          assert report['shared_training_data']['category_disjoint_hard_negatives']
+          settings = report['shared_configuration']
+          assert settings['codec_steps'] == 128
+          assert settings['denoiser_steps'] == 256
+          assert settings['schedule_steps'] == 8
+          assert report['linear_schedule']['profile'] == 'linear_beta_v1'
+          assert report['cosine_schedule']['profile'] == 'cosine_zero_terminal_v1'
+          assert report['linear_schedule']['terminal_alpha_bar'] > 0.9
+          assert report['cosine_schedule']['terminal_alpha_bar'] < 0.001
+          assert report['model_weights_written'] is False
+          assert report['generated_audio_written'] is False
+          assert report['release_authorized'] is False
+          assert len(report['paired_seed_metrics']) == 3
+          assert {p.name for p in root.rglob('*') if p.is_file()} == {report_path.name}
           for arm in ('raw', 'latent'):
-              for band in ('low', 'medium', 'high'):
-                  stats = report['mean_and_variability_by_model_and_noise_band'][arm][band]
-                  print(
-                      arm, band,
-                      'paired_vs_zero=', round(
-                          stats['paired_improvement_over_zero_fraction']['mean'], 6),
-                      'matched_vs_disjoint=', round(
-                          stats['shuffled_minus_paired_mse']['mean'], 6),
-                      'positive_caption_seeds=',
-                      stats['shuffled_minus_paired_mse']['positive_runs'], '/3'
-                  )
-          print('Synthetic training complete:', report['configuration_sha256'])
-          print('No neural weight files were written or published.')
+              for measure in ('clipping_fraction', 'rms',
+                              'spectral_centroid_hz',
+                              'rain_vs_wind_mean_absolute_difference'):
+                  stat = report['paired_schedule_difference_summary'][arm][measure]
+                  assert stat['count'] == 3
+                  assert math.isfinite(stat['mean'])
+                  print(arm, measure, 'cosine-minus-linear mean=', round(stat['mean'], 6),
+                        'positive seeds=', stat['positive_runs'], '/3',
+                        'negative seeds=', stat['negative_runs'], '/3')
+          print('Matched schedule training complete:', report['configuration_sha256'])
+          print('No neural weights, WAVs, release files or artifacts were written.')
           PY
