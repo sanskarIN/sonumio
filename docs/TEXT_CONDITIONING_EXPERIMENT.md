@@ -31,6 +31,15 @@ recording seeds 101 and 102 produce **84 evaluation examples**. These are
 seed-separated, but captions are a tiny hand-written template collection,
 so a low validation loss does **not** prove generalization to natural prompts.
 
+The `active-window-dsp-v2` recipe renders one second per source combination
+and takes a seeded 256 ms crop starting between 300 and 400 ms. The original
+crop ended before the first bird call and reused the exact same solo ambient
+waveform across splits. The new window contains bird activity and varies the
+ambient phase. Regression tests check that all 168 underlying single-source
+and mixture clips across the fixed train, validation, and benchmark seeds have
+distinct waveform bytes. English and Hindi captions intentionally share their
+underlying clip. All splits still use the same DSP generators.
+
 ```bash
 python -m pip install -e '.[research,test]'
 OMP_NUM_THREADS=2 python -m research.text_audio train \
@@ -65,19 +74,79 @@ loader accepts only **one recognized sound category per WAV caption**.
 
 ## Evaluation and honesty rules
 
-Each training report contains: training and held-out noise MSE, parameter
-count, runtime, train/evaluation dataset fingerprints, the training source,
-and a **matched-versus-shuffled caption probe**. The latter corrupts audio
-once with fixed noise and evaluates the same noisy audio against its paired
-caption, a shuffled caption and no caption. It is **not** an audio-quality,
-language-comprehension, source-separation or memorization benchmark.
+Each training report includes training and validation noise MSE, split
+fingerprints, training source, parameter count, and runtime. The legacy
+`caption_alignment_probe` rotates the first 16 captions. Rotated captions
+can still name the correct sound, so use the separate benchmark below to
+measure synthetic caption retrieval.
 
-On a local smoke run (8 train steps, 16 channels, 8 DDPM steps):
+### Held-out caption retrieval
 
-- Held-out noise MSE: approximately **0.8812**.
-- Paired-caption noise MSE: **0.8540**; shuffled-caption noise MSE: **0.8531**.
-- Matched prompts performed *slightly worse*, not better, in this diagnostic.
-  This is not evidence of successful text-audio alignment.
+```bash
+python -m research.text_alignment \
+  --checkpoint checkpoints/private-text-experiment --compare-initialization
+```
+
+The benchmark uses 42 clips from DSP seeds 1001 and 1002. It scores English and
+Hindi captions with both the familiar training templates and held-out wording
+that reverses the order of two-source captions while retaining the same sound
+names. Each caption competes against every caption in the same language and
+style with exactly one source replaced. The matched, wrong, and blank captions
+all receive identical corrupted audio at each of three fixed noise levels.
+The report covers 504 cases and 3,600 wrong-caption comparisons. Those cases
+reuse the 42 clips, so they are correlated.
+
+- **Pairwise accuracy** is the share of wrong captions beaten by the matched
+  caption, averaged per case. A tie gives half credit.
+- **Top-1 retrieval** is the share of cases where the matched caption has the
+  lowest noise-prediction error. Tied winners split credit. Uniform chance is
+  16.7% for one sound, 11.1% for two sounds, and 12.7% overall.
+- **Mean MSE advantage** is wrong-caption MSE minus matched-caption MSE.
+  Positive values favor the matched caption.
+
+The report records the benchmark fingerprint, checkpoint hash, training recipe,
+and separate summaries by language and wording, source count, noise level,
+and recording seed. The optional initialization baseline reconstructs the
+starting architecture from the checkpoint's recorded seed using the current
+PyTorch runtime.
+
+### CPU baseline
+
+From the repository root, repeat this pair of commands with seeds 10, 19,
+and 31. The measured runs used Python 3.12, PyTorch 2.15.0 CPU, two PyTorch
+threads, 16 model channels, and a 256-step diffusion schedule.
+
+```bash
+OMP_NUM_THREADS=2 MKL_NUM_THREADS=2 python -m research.text_audio train \
+  --steps 400 --seed 10 --channels 16 --diffusion-steps 256 \
+  --output checkpoints/text-alignment-10
+OMP_NUM_THREADS=2 MKL_NUM_THREADS=2 python -m research.text_alignment \
+  --checkpoint checkpoints/text-alignment-10 --compare-initialization
+```
+
+| Training seed | Initial pairwise | Trained pairwise | Initial top-1 | Trained top-1 |
+| --- | ---: | ---: | ---: | ---: |
+| 10 | 50.7% | 62.3% | 9.3% | 18.7% |
+| 19 | 50.2% | 62.2% | 11.5% | 15.3% |
+| 31 | 51.9% | 59.9% | 11.9% | 13.5% |
+
+At 400 steps, pairwise retrieval improved for all three initializations.
+High-noise pairwise accuracy stayed between 49.2% and 51.8%. Two-source top-1
+retrieval cleared its 11.1% chance baseline in one run out of three.
+
+Two exploratory reruns used the same settings with `--steps 1600` and fresh
+output paths. Both improved two-source retrieval, though high-noise scores
+remained much lower than the overall scores.
+
+| Training seed | Overall pairwise | Overall top-1 | Two-source top-1 | High-noise pairwise |
+| --- | ---: | ---: | ---: | ---: |
+| 10 | 69.7% | 27.4% | 21.7% | 52.4% |
+| 19 | 68.1% | 24.6% | 18.3% | 56.0% |
+
+These results measure denoising on synthetic clips with six known source
+names. The longer reruns reuse the same benchmark and are exploratory.
+Generated-audio quality and natural-language prompt adherence remain
+unevaluated.
 
 Before any original model-generation milestone or distribution, Sonumio needs
 longer audio modeling, licensed human-reviewed varied audio datasets, genuinely

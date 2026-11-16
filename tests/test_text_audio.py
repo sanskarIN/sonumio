@@ -13,7 +13,13 @@ from research.text_audio import (
     BYTE_VOCAB, MAX_TOKENS, ByteTextTokenizer, TextEncoder, TextWaveDenoiser,
     synthetic_captioned_dataset, reviewed_captioned_dataset, text_noise_loss,
     DiffusionSchedule, sample_text, train, load_checkpoint, caption_alignment_probe,
+    SYNTHETIC_COMBINATIONS, SYNTHETIC_RECIPE, SYNTHETIC_TRAIN_SEEDS,
+    SYNTHETIC_VALIDATION_SEEDS, synthetic_recording,
 )
+from research.text_alignment import (
+    CAPTION_VARIANTS, RECORDING_SEEDS, CaptionScores, _caption, _hard_negatives, evaluate,
+)
+from research.wave_diffusion import CATEGORIES
 
 
 def test_multilingual_utf8_and_normalization():
@@ -60,6 +66,79 @@ def test_english_hindi_dataset_pairing_and_grouped_seed_holdout():
 def test_synthetic_dataset_rejects_bad_seed_groups(seeds):
     with pytest.raises(ValueError):
         synthetic_captioned_dataset(seeds)
+
+
+def test_synthetic_crop_contains_birds_and_has_no_exact_split_duplicates():
+    seeds = (*SYNTHETIC_TRAIN_SEEDS, *SYNTHETIC_VALIDATION_SEEDS, *RECORDING_SEEDS)
+    assert len(seeds) == len(set(seeds))
+    bird = (CATEGORIES.index('forest'),)
+    hashes = set()
+    for members in SYNTHETIC_COMBINATIONS:
+        for seed in seeds:
+            clip = synthetic_recording(members, seed)
+            if members == bird:
+                assert clip.square().mean().sqrt() > 0.01
+            hashes.add(hashlib.sha256(clip.numpy().tobytes()).digest())
+    assert len(hashes) == len(seeds) * len(SYNTHETIC_COMBINATIONS)
+
+
+def test_alignment_negatives_replace_one_source_and_keep_valid_bilingual_text():
+    tokenizer = ByteTextTokenizer()
+    for members in SYNTHETIC_COMBINATIONS:
+        negatives = _hard_negatives(members)
+        assert len(negatives) == {1: 5, 2: 8}[len(members)]
+        assert len(negatives) == len(set(negatives))
+        for negative in negatives:
+            assert len(negative) == len(members)
+            assert len(set(members).difference(negative)) == 1
+        for language, style in CAPTION_VARIANTS:
+            captions = [_caption(candidate, language, style, RECORDING_SEEDS[0])
+                        for candidate in (members, *negatives)]
+            tokens = tokenizer.encode(captions)
+            assert len(torch.unique(tokens, dim=0)) == len(captions)
+            if style == 'heldout_wording':
+                training_prompts = {
+                    _caption(candidate, language, 'training_template', seed)
+                    for candidate in SYNTHETIC_COMBINATIONS for seed in SYNTHETIC_TRAIN_SEEDS
+                }
+                assert training_prompts.isdisjoint(captions)
+
+
+def test_alignment_scoring_splits_credit_for_ties():
+    scores = CaptionScores(1.0, (1.0, 1.0, 2.0), 3.0)
+    assert scores.pairwise_accuracy == pytest.approx(2 / 3)
+    assert scores.retrieval_accuracy == pytest.approx(1 / 3)
+    scores = CaptionScores(1.0, (0.5, 2.0), 3.0)
+    assert scores.pairwise_accuracy == 0.5
+    assert scores.retrieval_accuracy == 0.0
+
+
+def test_alignment_benchmark_caption_blind_model_scores_at_chance():
+    class CaptionBlindModel(torch.nn.Module):
+        def forward(self, audio, timestep, tokens):
+            assert not self.training
+            assert torch.equal(audio, audio[:1].expand_as(audio))
+            assert (timestep == timestep[0]).all()
+            if not tokens[0].any():
+                self.corruption = audio[0]
+                self.timestep = timestep[0]
+            else:
+                assert torch.equal(audio[0], self.corruption)
+                assert timestep[0] == self.timestep
+            return audio
+
+    model = CaptionBlindModel()
+    rng_before = torch.random.get_rng_state()
+    report = evaluate(model, DiffusionSchedule(8))
+    assert model.training
+    assert torch.equal(torch.random.get_rng_state(), rng_before)
+    assert report['unique_rendered_clips'] == 42
+    assert report['overall']['cases'] == 504
+    assert report['overall']['wrong_caption_comparisons'] == 3600
+    assert report['overall']['mean_mse_advantage'] == pytest.approx(0.0, abs=1e-10)
+    assert report['overall']['pairwise_accuracy'] == 0.5
+    assert report['overall']['retrieval_accuracy'] == report['overall']['retrieval_chance']
+    assert all(group['cases'] == 126 for group in report['by_language_and_style'].values())
 
 
 def test_learned_text_features_and_null_conditioning_are_differentiable():
@@ -121,6 +200,7 @@ def test_smoke_train_checkpoint_safe_load_and_checksum(tmp_path):
     checkpoint = tmp_path / 'private-model'
     report = train(steps=2, seed=19, channels=16, diffusion_steps=8, output=checkpoint)
     assert report['conditioning_mode'] == 'learned-byte-text'
+    assert report['synthetic_recipe'] == SYNTHETIC_RECIPE
     assert report['training_examples'] == 168
     assert report['heldout_examples'] == 84
     assert report['training_fingerprint'] != report['heldout_fingerprint']

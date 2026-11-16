@@ -138,15 +138,17 @@ Local smoke test (not a usable creator model):
 python -m pip install -e '.[research,test]'
 python -m research.text_audio train --steps 50 --channels 16 --diffusion-steps 8 --output checkpoints/private-text-experiment
 python -m research.text_audio sample --checkpoint checkpoints/private-text-experiment --prompt 'बारिश और हवा' --output outputs/text-experiment.wav
+python -m research.text_alignment --checkpoint checkpoints/private-text-experiment --compare-initialization
 python -m pytest -q tests/test_text_audio.py
 ```
 
 The experiment also supports **rights-declared local WAV captions**, preserving
 recording-group-isolated train/validation splits through the existing validator.
 Passing metadata gates is NOT independent permission or voice verification.
-Numerical/JSON checkpoints are SHA256-checked and remain private. Research
-reports include a matched-versus-shuffled-caption diagnostic, **not**
-perceptual sound quality or meaningful instruction-following scores.
+Numerical/JSON checkpoints are SHA256-checked and remain private. The
+caption-retrieval benchmark measures whether a matched English or Hindi
+caption helps predict noise on held-out synthetic clips. Audio quality
+and natural-language prompt adherence require separate evaluation.
 
 See [limitations and methodology](docs/TEXT_CONDITIONING_EXPERIMENT.md).
 No model weights, tags, GitHub pre-releases or releases are authorized.

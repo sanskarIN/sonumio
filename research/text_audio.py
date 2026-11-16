@@ -41,6 +41,14 @@ MAX_TOKENS = MAX_BYTES + 2
 CHECKPOINT_FORMAT = 'sonumio-text-conditioned-diffusion-experiment-1'
 EN_LABELS = ('rain', 'thunder', 'wind', 'forest birds', 'ocean waves', 'ambient synth')
 HI_LABELS = ('बारिश', 'गरज', 'हवा', 'जंगल में चिड़िया', 'समुद्र की लहर', 'मधुर धुन')
+SYNTHETIC_RECIPE = 'active-window-dsp-v2'
+SYNTHETIC_TRAIN_SEEDS = (0, 1, 2, 3)
+SYNTHETIC_VALIDATION_SEEDS = (101, 102)
+SYNTHETIC_COMBINATIONS = tuple(
+    members
+    for size in (1, 2)
+    for members in combinations(range(len(CATEGORIES)), size)
+)
 
 
 def normalize_caption(caption: str) -> str:
@@ -163,7 +171,20 @@ def _synth_prompts(ids: tuple[int, ...], language: str, variant: int) -> str:
     return ('आवाज़ ' if variant % 2 == 0 else 'ध्वनि ') + item
 
 
-def synthetic_captioned_dataset(seeds: tuple[int, ...] = (0, 1, 2, 3)) -> CaptionedClips:
+def synthetic_recording(members: tuple[int, ...], seed: int) -> torch.Tensor:
+    """Crop around the first bird call and the onset of the thunder rumble."""
+    dsp_prompt = ' and '.join(CATEGORIES[i] for i in members)
+    audio = dsp_generate(dsp_prompt, 1.0, seed).samples
+    mono = _downsample_24k_to_8k(audio)
+    # Crops starting at 300–400 ms include the bird call at 350–540 ms.
+    # Vary the offset by seed so even the deterministic synth changes phase.
+    first = int(np.random.default_rng(seed).integers(
+        3 * SAMPLE_RATE // 10, 4 * SAMPLE_RATE // 10 + 1,
+    ))
+    return torch.from_numpy(mono[first:first + CLIP_FRAMES].copy()).view(1, -1)
+
+
+def synthetic_captioned_dataset(seeds: tuple[int, ...] = SYNTHETIC_TRAIN_SEEDS) -> CaptionedClips:
     """DSP originals paired with *different* English/Hindi text descriptions.
 
     Evaluation seeds must not overlap training seeds; captions are templates,
@@ -173,20 +194,17 @@ def synthetic_captioned_dataset(seeds: tuple[int, ...] = (0, 1, 2, 3)) -> Captio
         isinstance(s, bool) or not isinstance(s, int) or not 0 <= s < 2**32 for s in seeds
     ):
         raise ValueError('seeds must be nonempty, unique 32-bit integers')
-    combos = [(i,) for i in range(len(CATEGORIES))]
-    combos += list(combinations(range(len(CATEGORIES)), 2))
     clips, captions = [], []
-    fingerprint = hashlib.sha256()
-    for members in combos:
-        dsp_prompt = ' and '.join(CATEGORIES[i] for i in members)
+    fingerprint = hashlib.sha256(SYNTHETIC_RECIPE.encode('ascii'))
+    for members in SYNTHETIC_COMBINATIONS:
         for seed in seeds:
-            audio = dsp_generate(dsp_prompt, 0.5, seed).samples
-            mono = _downsample_24k_to_8k(audio)[:CLIP_FRAMES].copy()
+            audio = synthetic_recording(members, seed)
             for language in ('en', 'hi'):
                 caption = _synth_prompts(members, language, seed)
                 captions.append(caption)
-                clips.append(torch.from_numpy(mono).view(1, -1))
-                fingerprint.update((str(members) + str(seed) + caption).encode('utf-8') + mono.tobytes())
+                clips.append(audio)
+                fingerprint.update(bytes(members) + seed.to_bytes(4, 'little'))
+                fingerprint.update(caption.encode('utf-8') + audio.numpy().tobytes())
     return CaptionedClips(torch.stack(clips), ByteTextTokenizer().encode(captions),
                           fingerprint.hexdigest(), len(clips))
 
@@ -365,7 +383,7 @@ def train(*, steps: int = 50, seed: int = 10, channels: int = 32,
         source = 'rights-declared-local-wav'
     else:
         train_set = synthetic_captioned_dataset()
-        val_set = synthetic_captioned_dataset((101, 102))
+        val_set = synthetic_captioned_dataset(SYNTHETIC_VALIDATION_SEEDS)
         source = 'sonumio-synthetic-bilingual-dsp'
     if train_set.fingerprint == val_set.fingerprint:
         raise ValueError('Train/validation fingerprints must differ')
@@ -394,6 +412,7 @@ def train(*, steps: int = 50, seed: int = 10, channels: int = 32,
         'model_generation': None, 'not_production_ready': True,
         'training_examples': train_set.examples, 'heldout_examples': val_set.examples,
         'data_source': source, 'conditioning_mode': 'learned-byte-text',
+        'synthetic_recipe': SYNTHETIC_RECIPE if manifest is None else None,
         'manifest_review': rights_report,
         'training_fingerprint': train_set.fingerprint,
         'heldout_fingerprint': val_set.fingerprint,
@@ -401,6 +420,7 @@ def train(*, steps: int = 50, seed: int = 10, channels: int = 32,
         'initial_step_noise_mse': losses[0], 'last_step_noise_mse': losses[-1],
         'heldout_noise_mse': heldout,
         'caption_alignment_probe': alignment,
+        'caption_alignment_probe_method': 'legacy-prefix-caption-rotation',
         'parameter_count': sum(parameter.numel() for parameter in model.parameters()),
         'elapsed_seconds': round(perf_counter() - started, 3),
         'weights_published': False,
