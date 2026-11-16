@@ -318,3 +318,12 @@ verified exact original-audio stage identities across one AMD EPYC
 on all 84 source recordings. The previously differing AMD EPYC 7763
 environment was not represented; the root cause remains open.
 A mixed Ubuntu 22.04/24.04 matrix now broadens the CPU sampling.
+
+
+**CPU source-level numerical results:** the
+[reproduced EPYC 7763 divergence](docs/DSP_PIPELINE_TRACE_RESULTS.md)
+is isolated to rain, thunder and wind before mixing; forest,
+water and ambient source hashes matched. A
+[targeted convolution study](docs/DSP_CONVOLUTION_ISOLATION.md)
+now checks the original float32 random inputs, 12/60/140/180-tap
+kernels and outputs without changing model-training audio.

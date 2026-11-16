@@ -92,3 +92,44 @@ data remain necessary.
 These tests use only diagnostic SHA256s, CPU strings and source labels.
 **No release, prerelease, tag, PR merge or pretrained model weights
 were published.**
+
+
+## Second four-runner study reproduced EPYC 7763 differences
+
+Workflow: [Independent DSP CPU pipeline trace #43881702284](https://github.com/sanskarIN/sonumio/actions/runs/43881702284).
+**All four hosted jobs passed**, with exactly matched stage hashes
+between the two processes **within each job**.
+
+| Job | Ubuntu image | Processor | Match to baseline 20-stage digest list |
+| --- | --- | --- | --- |
+| 1 | 24.04 | AMD EPYC 9V74 | All 20 stages equal |
+| 2 | 24.04 | AMD EPYC 9V74 | All 20 stages equal |
+| 3 | 22.04 | **AMD EPYC 7763** | **15 stages differ** |
+| 4 | 22.04 | Intel Xeon 6973P-C | All 20 stages equal |
+
+The previous EPYC 7763 result is **now reproducible as a source-layer
+difference**. Importantly, the other Ubuntu 22.04 Intel runner matches
+the baseline exactly, so the older Ubuntu image by itself is
+insufficient to explain the difference.
+
+On EPYC 7763, the following first-party source layer hashes were
+different: **rain, thunder, wind**. The other three source layers
+**forest, water/ocean and ambient/drone** matched exactly.
+The original float32 time grid, FIR downsampling kernel, and
+the per-source component hashes of forest, water and drone
+also matched. After rain/thunder/wind layer differences were
+introduced, mixed audio, fades, normalization, filtered and
+cropped arrays naturally inherited the divergence.
+
+The three differing source functions all use **long float32
+NumPy convolutions (kernels of 180, 140 and 60 taps)**.
+The water control uses a **12-tap** smoothing convolution and
+matched. This provides a precise operation-level hypothesis,
+**not proof** that NumPy convolution or any particular CPU
+instruction is responsible.
+
+A [targeted convolution probe](DSP_CONVOLUTION_ISOLATION.md)
+now isolates original seeded input arrays, kernels, individual
+convolution outputs and scalar reference calculations without
+changing source DSP or writing WAV files. Its cross-host
+results must be inspected separately before causal conclusions.

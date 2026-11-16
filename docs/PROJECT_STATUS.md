@@ -216,3 +216,15 @@ confirmed that all 20 original DSP stage aggregates and all
 9V45 and Intel Xeon 6975P-C hosts. The historical AMD EPYC 7763
 mismatch remains unresolved, so a controlled older-host experiment
 is warranted before changing the original audio recipe.
+
+
+### EPYC 7763 stage-level mismatch reproduced
+
+The [four-host investigation](DSP_PIPELINE_TRACE_RESULTS.md)
+reproduced different original audio bytes specifically in
+rain/thunder/wind source layers on an EPYC 7763 machine,
+while a same-image Intel CPU and Ubuntu 24.04 AMD machines
+matched each other. A [targeted source-convolution diagnostic](DSP_CONVOLUTION_ISOLATION.md)
+now tests RNG inputs, float32 kernel construction and
+NumPy convolution outputs for 60/140/180 versus 12 taps,
+without modifying the training corpus or neural models.

@@ -183,3 +183,14 @@ exactly on the same host; the private training workflow checks all
 84 final trace digests against independently generated training
 input provenance. Per-stage and single-source SHA aggregates help
 narrow host-dependent DSP float differences without altering audio.
+
+
+## Original source-convolution numerical investigation
+
+The latest [source-level trace findings](DSP_PIPELINE_TRACE_RESULTS.md)
+reproduced exact hash drift in rain, thunder and wind on
+AMD EPYC 7763, not in the other three sound classes.
+The [convolution isolation protocol](DSP_CONVOLUTION_ISOLATION.md)
+compares actual seeded inputs, kernels, convolution outputs and
+scalar \`math.fsum\` references. This is a diagnostic of the
+unchanged original DSP only, not proof of end-user audio quality.

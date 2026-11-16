@@ -144,3 +144,16 @@ was not represented; therefore the earlier host-specific numerical
 difference remains unexplained, not fixed. A follow-up mixed
 Ubuntu 22.04/24.04 matrix broadens the sample without changing
 original source waveforms or training.
+
+
+## Reproduced source-level divergence on EPYC 7763
+
+The [second actual cross-CPU study](DSP_PIPELINE_TRACE_RESULTS.md)
+included two Ubuntu 24.04 AMD EPYC 9V74, one Ubuntu 22.04
+Intel Xeon 6973P-C and one Ubuntu 22.04 AMD EPYC 7763.
+All 84 original audio traces passed within-job validation, but
+**rain, thunder and wind layer hashes diverged on EPYC 7763**,
+while time grid, FIR kernel, forest, water and ambient matched.
+The new [convolution probe](DSP_CONVOLUTION_ISOLATION.md)
+tests original 180-/140-/60-tap convolutions against a
+12-tap water control, separating input/kernel/output hashes.

@@ -7,6 +7,7 @@ on:
   pull_request:
     paths:
       - 'research/dsp_pipeline_trace.py'
+      - 'research/dsp_convolution_probe.py'
       - 'research/data_reproducibility.py'
       - 'research/latent_audio.py'
       - 'research/wave_diffusion.py'
@@ -76,4 +77,28 @@ jobs:
                   if name.startswith('layer_') or name == 'cropped_8k':
                       print('CPU_TRACE_SOURCE:', category, name, subset[name]['sha256'])
           print('All stage digest comparisons are numerical diagnostics only.')
+          PY
+      - name: Isolate original NumPy source convolutions and scalar references
+        run: |
+          python -m research.dsp_convolution_probe --output /tmp/sonumio-conv-a.json > /dev/null
+          python -m research.dsp_convolution_probe --output /tmp/sonumio-conv-b.json > /dev/null
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from research.dsp_convolution_probe import compare_probes
+          a = json.loads(Path('/tmp/sonumio-conv-a.json').read_text(encoding='utf-8'))
+          b = json.loads(Path('/tmp/sonumio-conv-b.json').read_text(encoding='utf-8'))
+          same = compare_probes(a, b)
+          assert same['all_exact_stages_match']
+          assert not a['audio_files_saved'] and not a['model_weights_saved']
+          print('CPU_CONV_INSTANCE:', '${{ matrix.instance }}')
+          print('CPU_CONV_HOST:', a['environment']['cpu_model'])
+          print('CPU_CONV_EXACT_SAME_HOST:', same['all_exact_stages_match'])
+          for source, stages in a['source_stage_aggregate'].items():
+              for name, metrics in stages.items():
+                  print('CPU_CONV_STAGE:', source, name, metrics['sha256'])
+          for source in ('rain', 'thunder', 'wind', 'water'):
+              rows = [row for row in a['recordings'] if row['source'] == source]
+              print('CPU_CONV_SCALAR_DIFF_MAX:', source,
+                    max(row['max_selected_fsum_difference'] for row in rows))
           PY
