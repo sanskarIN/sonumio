@@ -156,3 +156,9 @@ memorization evaluation and robust hardware/resource benchmarks.
 
 **DO NOT merge this draft as a release, publish pre-releases/tags, or publish
 weights without explicit project-owner approval.**
+
+Checkpoint loading additionally preflights the NPZ container before NumPy
+allocates any tensor: exact expected member names (no duplicates), declared
+uncompressed byte budgets, finite bounded model dimensions, and NumPy header
+shapes/dtypes. A SHA-256 checksum alone is not a guarantee that a checkpoint
+is safe to deserialize; **checkpoints remain local and unpublished**.

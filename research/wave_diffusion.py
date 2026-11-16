@@ -25,6 +25,7 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 
+from research.checkpoint_archive import validate_numeric_archive
 from sonumio.audio import encode_wav
 from sonumio.engines.procedural import generate as dsp_generate
 
@@ -201,13 +202,21 @@ def load_checkpoint(path: Path) -> tuple[TinyWaveDenoiser, DiffusionSchedule, di
         raise ValueError("Unsupported checkpoint manifest or mismatched prompt categories")
     if manifest.get("sample_rate") != SAMPLE_RATE or manifest.get("clip_frames") != CLIP_FRAMES:
         raise ValueError("Incompatible waveform layout")
-    checkpoint = (path / "weights.npz").read_bytes()
+    channels, steps = manifest.get("channels"), manifest.get("diffusion_steps")
+    if (type(channels) is not int or channels not in range(8, 65, 8)
+            or type(steps) is not int or not 8 <= steps <= 1000):
+        raise ValueError("Unsupported waveform diffusion checkpoint configuration")
+    weight_file = path / "weights.npz"
+    if weight_file.stat().st_size > 64 * 1024 * 1024:
+        raise ValueError("Checkpoint exceeds research size limit")
+    checkpoint = weight_file.read_bytes()
     if hashlib.sha256(checkpoint).hexdigest() != manifest["weights_sha256"]:
         raise ValueError("Checkpoint SHA256 mismatch")
-    model = TinyWaveDenoiser(channels=manifest["channels"])
-    schedule = DiffusionSchedule(manifest["diffusion_steps"])
-    with np.load(path / "weights.npz", allow_pickle=False) as weights:
-        expected = model.state_dict()
+    model = TinyWaveDenoiser(channels=channels)
+    schedule = DiffusionSchedule(steps)
+    expected = model.state_dict()
+    validate_numeric_archive(weight_file, expected)
+    with np.load(weight_file, allow_pickle=False) as weights:
         if set(weights.files) != set(expected):
             raise ValueError("Unexpected checkpoint tensor names")
         safe = {}

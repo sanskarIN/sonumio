@@ -26,6 +26,7 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 
+from research.checkpoint_archive import validate_numeric_archive
 from research.wave_diffusion import (
     CATEGORIES, CLIP_FRAMES, DEFAULT_DIFFUSION_STEPS, SAMPLE_RATE,
     ConditionedResidual, DiffusionSchedule, _downsample_24k_to_8k,
@@ -351,6 +352,7 @@ def load_checkpoint(path: Path) -> tuple[TextWaveDenoiser, DiffusionSchedule, di
     model = TextWaveDenoiser(channels=channels)
     schedule = DiffusionSchedule(steps=steps)
     state = model.state_dict()
+    validate_numeric_archive(weight_file, state)
     with np.load(weight_file, allow_pickle=False) as checkpoint:
         if set(checkpoint.files) != set(state):
             raise ValueError('Unexpected text checkpoint tensor names')

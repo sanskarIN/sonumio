@@ -50,3 +50,9 @@ with --audio-root trains from declared, checksum-verified local PCM recordings.
 It retains 0.256-second 8 kHz clips and single-category conditioning.
 A human must independently verify rights and that recordings contain no voices.
 No checkpoints are published.
+
+Checkpoint loading additionally preflights the NPZ container before NumPy
+allocates any tensor: exact expected member names (no duplicates), declared
+uncompressed byte budgets, finite bounded model dimensions, and NumPy header
+shapes/dtypes. A SHA-256 checksum alone is not a guarantee that a checkpoint
+is safe to deserialize; **checkpoints remain local and unpublished**.
