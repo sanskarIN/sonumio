@@ -204,3 +204,7 @@ prespecified initialization seeds. It reports **within-model** prompt/blank/
 zero-predictor comparisons, observed seed variability and exact data
 fingerprints; it never compares raw and latent noise MSE directly to pick a
 winner. It cannot certify generated-audio quality or model release readiness.
+
+The [recorded three-seed CPU pilot](docs/MULTI_SEED_PILOT_RESULTS.md)
+documents measured training diagnostics and the remaining evidence gaps.
+It does not demonstrate creator-quality generation or justify a release.

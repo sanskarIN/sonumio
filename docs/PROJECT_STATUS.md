@@ -80,3 +80,9 @@ The replicated research study now also checks that **wrong-caption controls
 do not accidentally name a true source category**. Its updated protocol
 fingerprints those category-disjoint bilingual hard negatives before combining
 results across model-initialization seeds. It remains synthetic-only.
+
+The [first executed three-seed pilot result](MULTI_SEED_PILOT_RESULTS.md)
+records the actual reproducible CI configuration, observed within-model
+zero-noise prediction improvements, and small inconsistent bilingual
+caption-alignment effects. This is still a synthetic pilot, not a model or
+release readiness result.

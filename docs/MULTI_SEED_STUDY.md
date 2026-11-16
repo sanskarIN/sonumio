@@ -130,3 +130,10 @@ and the multi-seed aggregator rejects incompatible or older `v1` results.
 A caption advantage that improves under this correction would still be
 limited to known DSP sources and short templates. It is not proof of
 open-ended prompt understanding or usable generated-audio quality.
+
+## Measured pilot result (16 November 2026)
+
+See the [three-initialization experimental results](MULTI_SEED_PILOT_RESULTS.md)
+for the verified 24-codec-update/48-denoiser-update CPU run, exact
+configuration hash, category-disjoint caption scores and limitations.
+This result does **not** establish usable generated-audio quality.
