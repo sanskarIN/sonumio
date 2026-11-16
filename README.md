@@ -152,3 +152,22 @@ and natural-language prompt adherence require separate evaluation.
 
 See [limitations and methodology](docs/TEXT_CONDITIONING_EXPERIMENT.md).
 No model weights, tags, GitHub pre-releases or releases are authorized.
+
+
+## One-second latent diffusion research (development branch only)
+
+A new **independent trainable waveform codec + bilingual text-conditioned latent
+DDPM** prototype explores 1.024-second, 8 kHz mono sound effects. It has a
+64× temporal compression bottleneck, multiresolution spectral reconstruction
+loss and hard-negative English/Hindi caption retrieval checks. It uses only
+synthetic DSP examples and **does not** demonstrate creator-quality output,
+long-form music, speech synthesis, or a finished original model.
+
+~~~bash
+python -m research.latent_audio train --ae-steps 10 --diffusion-steps 10 --schedule-steps 8 --output checkpoints/private-latent-experiment
+python -m research.latent_audio sample --checkpoint checkpoints/private-latent-experiment --prompt 'rain and thunder' --output outputs/latent-experiment.wav
+python -m research.latent_alignment --checkpoint checkpoints/private-latent-experiment
+~~~
+
+See [isolated latent audio research methodology](docs/LATENT_AUDIO_EXPERIMENT.md).
+All checkpoints remain local. No release, pre-release or weight publication.

@@ -34,3 +34,19 @@ Original neural training or weights, realistic open-vocabulary sound effects, sp
 ## Implemented research scaffolding
 - `research/spectral_smoke.py`: optional PyTorch experiment using Sonumio-owned synthetic DSP examples. Measures train and held-out seed MSE and stores local NPZ weights (not published). **Does not generate audio.**
 - `research/dataset_manifest.py`: JSONL validation of source metadata and rights declarations, split group integrity, duplicates and voice-data exclusion. Human rights verification is still mandatory.
+
+
+## Longer-clip latent audio experiment — in draft, not Sonumio-1
+
+The isolated [latent audio research experiment](LATENT_AUDIO_EXPERIMENT.md)
+adds an original convolutional autoencoder and English/Hindi text-conditioned
+latent DDPM for **1.024-second 8 kHz** synthetic clips. Unlike the earlier
+short raw-waveform DDPM, the noisy diffusion tensor is a 16×128 latent instead
+of an 8,192-frame waveform. Reconstruction uses waveform plus multiresolution
+STFT losses. A matched/noisy-latent caption-retrieval benchmark includes
+one-source-replacement hard negatives and a caption-blind chance control.
+
+This is *not* an effective compression ratio for shipping audio files, not
+long-form audio generation, and not evidence of subjective audio quality.
+Independent listening/evaluation and diverse rights-reviewed datasets remain
+unimplemented. No weights, tags or releases will be published without approval.
