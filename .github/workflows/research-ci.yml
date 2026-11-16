@@ -54,6 +54,10 @@ jobs:
           print('Same-environment two-process exact DSP reproducibility:', repeated['exact_recording_bytes_equal'])
           print('Training source fingerprint:', one['splits']['train']['dataset_fingerprint'])
           print('Heldout source fingerprint:', one['splits']['validation']['dataset_fingerprint'])
+          for split in ('train', 'validation'):
+              print(split, 'source bucket 0.001 SHA256:', one['splits'][split]['bucket_0.001_sha256'])
+              print(split, 'source bucket 0.01 SHA256:', one['splits'][split]['bucket_0.01_sha256'])
+          print('Research runner CPU model:', one['environment']['cpu_model'])
           print('Different threading environment exact waveform identity:', threads['exact_recording_bytes_equal'])
           print('Coarse bucket disagreement counts (0.001 and 0.01 amplitude):', threads['quantized_bucket_mismatch_counts'])
           print('Per-recording drift examples:', threads['illustrative_exact_mismatches'][:3])

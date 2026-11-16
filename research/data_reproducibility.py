@@ -69,6 +69,19 @@ def waveform_digests(audio: np.ndarray) -> dict:
     return result
 
 
+def _cpu_model() -> str | None:
+    """Read only the CPU model identifier, not arbitrary runner environment."""
+    path = Path("/proc/cpuinfo")
+    try:
+        if path.is_file():
+            for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+                if line.lower().startswith("model name") and ":" in line:
+                    return line.split(":", 1)[1].strip()[:128]
+    except OSError:
+        return None
+    return None
+
+
 def _environment() -> dict:
     # No user environment dump or secrets; only allowlisted numerics metadata.
     return {
@@ -77,6 +90,8 @@ def _environment() -> dict:
         "torch": torch.__version__,
         "machine": platform.machine(),
         "system": platform.system(),
+        "cpu_model": _cpu_model(),
+        "numpy_disabled_cpu_features": os.environ.get("NPY_DISABLE_CPU_FEATURES"),
         "threads": {
             key: os.environ.get(key) for key in (
                 "OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS"
@@ -121,13 +136,19 @@ def build_manifest() -> dict:
                     "seed": seed,
                     **info,
                 })
+        split_rows = [x for x in entries if x["split"] == split]
         splits[split] = {
             "dataset_fingerprint": dataset.fingerprint,
             "recording_count": len(source_hashes),
             "caption_count": dataset.examples,
-            "recording_sha256": _digest(
-                b"".join(bytes.fromhex(x["exact_sha256"])
-                         for x in entries if x["split"] == split)),
+            "recording_sha256": _digest(b"".join(
+                bytes.fromhex(x["exact_sha256"]) for x in split_rows
+            )),
+            **{
+                f"bucket_{step:g}_sha256": _digest(b"".join(
+                    bytes.fromhex(x[f"bucket_{step:g}_sha256"]) for x in split_rows
+                )) for step in QUANTIZATION_STEPS
+            },
         }
     train = {e["exact_sha256"] for e in entries if e["split"] == "train"}
     validation = {e["exact_sha256"] for e in entries if e["split"] == "validation"}
@@ -202,6 +223,13 @@ def validate_manifest(value: dict) -> None:
         ))
         if record["recording_sha256"] != digest:
             raise ValueError("Split-level byte digest contradicts recording hashes")
+        for step in QUANTIZATION_STEPS:
+            name = f"bucket_{step:g}_sha256"
+            aggregate = _digest(b"".join(
+                bytes.fromhex(e[name]) for e in entries if e["split"] == split
+            ))
+            if record.get(name) != aggregate:
+                raise ValueError("Split-level quantized digest contradicts recording hashes")
 
 
 def compare_manifests(first: dict, second: dict) -> dict:

@@ -49,6 +49,10 @@ jobs:
           assert data['splits']['validation']['recording_count'] == 42
           print('Independent train SHA256:', data['splits']['train']['dataset_fingerprint'])
           print('Independent heldout SHA256:', data['splits']['validation']['dataset_fingerprint'])
+          for split in ('train', 'validation'):
+              print(split, 'source bucket 0.001 SHA256:', data['splits'][split]['bucket_0.001_sha256'])
+              print(split, 'source bucket 0.01 SHA256:', data['splits'][split]['bucket_0.01_sha256'])
+          print('Training runner CPU model:', data['environment']['cpu_model'])
           print('Synthetic research input provenance audited before training.')
           PY
       - name: Train paired epsilon and velocity models from identical weights and noise

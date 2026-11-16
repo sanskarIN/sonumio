@@ -45,6 +45,12 @@ def test_manifest_covers_all_recordings_not_twice_per_language(manifest):
         assert group["recording_sha256"] == _digest_of_records(
             manifest["entries"], split
         )
+        for step in (0.001, 0.01):
+            key = f"bucket_{step:g}_sha256"
+            assert group[key] == hashlib.sha256(b"".join(
+                bytes.fromhex(row[key]) for row in manifest["entries"]
+                if row["split"] == split
+            )).hexdigest()
     assert len(set(e["exact_sha256"] for e in manifest["entries"])) == 84
     assert {x["seed"] for x in manifest["entries"] if x["split"] == "train"} == {0, 1}
     assert {x["seed"] for x in manifest["entries"] if x["split"] == "validation"} == {
@@ -144,3 +150,17 @@ def test_bounded_json_read_and_no_raw_audio_payload(tmp_path, manifest):
     large.write_bytes(b"x" * (256 * 1024 + 1))
     with pytest.raises(ValueError, match="oversized"):
         _read(large)
+
+
+
+def test_split_coarse_hash_mismatch_and_cpu_metadata_is_bounded(manifest):
+    bad = copy.deepcopy(manifest)
+    bad["splits"]["train"]["bucket_0.001_sha256"] = "f" * 64
+    with pytest.raises(ValueError, match="quantized digest"):
+        validate_manifest(bad)
+    hardware = manifest["environment"]
+    assert hardware["machine"] and hardware["system"]
+    assert hardware["cpu_model"] is None or len(hardware["cpu_model"]) <= 128
+    assert set(hardware["threads"]) == {
+        "OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS"
+    }
