@@ -106,3 +106,10 @@ completed **128 codec and 256 denoiser updates per model per seed** with all
 zero-predictor control, but cross-domain results cannot select a winner.
 No real-world recordings, subjective listening tests or weight files were
 included. Four GitHub workflows passed on the experiment commit.
+
+
+A numerical [in-memory generative audio audit](EXTENDED_SYNTHETIC_TRAINING.md#in-memory-neural-generation-health-audit)
+now runs after model training, before weights are discarded. It checks
+actually sampled 8-kHz one-second waveform duration, finite samples,
+clipping, silence, simple spectrum and prompt-change sensitivity. These
+do not replace real listening or independent audio-class relevance tests.

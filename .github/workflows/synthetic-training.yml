@@ -43,7 +43,7 @@ jobs:
             --seeds 17,29,41 \
             --codec-steps 128 --denoiser-steps 256 \
             --schedule-steps 8 --channels 16 \
-            --evaluation-combinations 21 \
+            --evaluation-combinations 21 --audit-generated-audio \
             --output checkpoints/private-research/extended-synthetic-training.json
       - name: Validate full held-out grid, report and no weight files
         run: |
@@ -56,10 +56,11 @@ jobs:
           report_path = root / 'private-research' / 'extended-synthetic-training.json'
           report = json.loads(report_path.read_text(encoding='utf-8'))
           assert report['seed_count'] == 3 and report['seeds'] == [17, 29, 41]
-          assert report['protocol'] == 'raw-vs-latent-multi-seed-diagnostics-v2'
+          assert report['protocol'] == 'raw-vs-latent-multi-seed-diagnostics-v3'
           assert report['shared_data']['evaluated_source_combinations'] == 21
           assert report['shared_data']['evaluated_caption_pairs'] == 84
           assert report['shared_data']['category_disjoint_hard_negatives'] is True
+          assert report['generation_audit_enabled'] is True
           assert report['weights_saved'] is False
           assert report['weights_published'] is False
           assert report['model_generation'] is None
@@ -70,6 +71,10 @@ jobs:
               assert single['train_recordings'] == 42
               assert single['validation_recordings_total'] == 42
               assert single['train_eval_exact_byte_overlap'] == 0
+              assert single['generation_audit']['audio_files_saved'] is False
+              assert single['generation_audit']['neural_weights_saved'] is False
+              for arm in ('raw', 'latent'):
+                  assert len(single['generation_audit']['generated'][arm]) == 4
               assert math.isfinite(single['codec']['eval_waveform_mae'])
           materialized = [p for p in root.rglob('*') if p.is_file()]
           assert materialized == [report_path], materialized

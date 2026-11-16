@@ -223,3 +223,13 @@ a rights-cleared, independently validated real-world recording corpus.
 documents a verified three-seed run (128 codec and 256 denoiser updates,
 full 21-combination validation) and honest limitations. All four CI
 workflows passed; no trained neural weights or model releases were published.
+
+
+### Actual generated-waveform diagnostics (experimental)
+
+The development branch now uses an [in-memory generation audit](docs/GENERATED_AUDIO_AUDIT.md)
+to inspect waveforms produced after neural training, not only DDPM
+noise-prediction loss. This checks silence/clipping/spectral health and
+whether different bilingual prompts yield different generated samples.
+It **does not** prove realistic sound effects or reliable prompt meaning,
+and saves neither WAV samples nor model weights.

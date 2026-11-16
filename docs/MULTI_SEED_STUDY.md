@@ -137,3 +137,16 @@ See the [three-initialization experimental results](MULTI_SEED_PILOT_RESULTS.md)
 for the verified 24-codec-update/48-denoiser-update CPU run, exact
 configuration hash, category-disjoint caption scores and limitations.
 This result does **not** establish usable generated-audio quality.
+
+
+## Generation-audit option (v3)
+
+Add \`--audit-generated-audio\` to the multi-seed study to sample English/
+Hindi rain/wind text prompts from each trained raw and latent model
+**in memory**, before their weights are discarded. The numerical results
+are checked and summarized separately by model; raw-vs-latent MSE is
+still not directly comparable. See [generated waveform audit](GENERATED_AUDIO_AUDIT.md).
+
+The study protocol is now \`raw-vs-latent-multi-seed-diagnostics-v3\`.
+Historical pilot and extended training results in v2 remain valid
+**historical evidence**, but did **not** include this generation audit.

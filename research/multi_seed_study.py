@@ -26,7 +26,7 @@ import torch
 
 from research.architecture_compare import PROTOCOL as SINGLE_RUN_PROTOCOL, compare
 
-PROTOCOL = 'raw-vs-latent-multi-seed-diagnostics-v2'
+PROTOCOL = 'raw-vs-latent-multi-seed-diagnostics-v3'
 MIN_SEEDS = 2
 MAX_SEEDS = 8
 BENCHMARK_METRICS = (
@@ -96,6 +96,7 @@ def summarize_runs(runs: list[dict], seeds: tuple[int, ...]) -> dict:
     if len(runs) != len(seeds):
         raise ValueError('Runs/seeds count mismatch')
     canonical: tuple | None = None
+    audited_count = 0
     for seed, run in zip(seeds, runs):
         if not isinstance(run, dict) or run.get('protocol') != SINGLE_RUN_PROTOCOL:
             raise ValueError('A run has an incompatible single-run benchmark protocol')
@@ -132,6 +133,44 @@ def summarize_runs(runs: list[dict], seeds: tuple[int, ...]) -> dict:
                 or run.get('weights_published') is not False
                 or run.get('model_generation') is not None):
             raise ValueError('Unsafe run: possible overlap, saved weights or model generation')
+        if run.get('generation_audit') is not None:
+            audit = run['generation_audit']
+            if (not isinstance(audit, dict)
+                    or audit.get('protocol') != 'in-memory-generated-waveform-numerical-audit-v1'
+                    or audit.get('seeds') != [seed + 1500]
+                    or audit.get('sample_rate') != 8000
+                    or audit.get('duration_seconds') != 1.024
+                    or audit.get('audio_files_saved') is not False
+                    or audit.get('neural_weights_saved') is not False):
+                raise ValueError('Incompatible or unsafe generated-waveform audit')
+            for arm in ('raw', 'latent'):
+                samples = audit.get('generated', {}).get(arm, [])
+                contrasts = audit.get('paired_prompt_contrasts', {}).get(arm, [])
+                if len(samples) != 4 or len(contrasts) != 4:
+                    raise ValueError('Incomplete generated-waveform audit')
+                if {(x.get('category'), x.get('language'))
+                        for x in samples} != {
+                            ('rain', 'en'), ('rain', 'hi'), ('wind', 'en'), ('wind', 'hi')
+                        }:
+                    raise ValueError('Unexpected generated-audio caption controls')
+                for sample in samples:
+                    stats = sample.get('stats', {})
+                    if not isinstance(stats.get('sha256'), str) or len(stats['sha256']) != 64:
+                        raise ValueError('Missing generated waveform digest')
+                    for metric in ('rms', 'peak', 'clipping_fraction',
+                                   'near_silence_fraction', 'spectral_centroid_hz'):
+                        _bounded_float(stats.get(metric), f'{arm}/{metric}')
+                    if (not 0 <= stats['rms'] <= 1.0001
+                            or not 0 <= stats['peak'] <= 1.0001
+                            or not 0 <= stats['clipping_fraction'] <= 1
+                            or not 0 <= stats['near_silence_fraction'] <= 1):
+                        raise ValueError('Impossible generated waveform health statistic')
+                for contrast in contrasts:
+                    difference = _bounded_float(contrast.get('mean_absolute_difference'),
+                                                'prompt difference')
+                    if not 0 <= difference <= 2.0001:
+                        raise ValueError('Invalid generated-waveform prompt difference')
+            audited_count += 1
         for arm in ('raw', 'latent'):
             details = run.get(arm)
             if not isinstance(details, dict):
@@ -161,6 +200,8 @@ def summarize_runs(runs: list[dict], seeds: tuple[int, ...]) -> dict:
                     if not math.isclose(metrics[name], expectation,
                                         rel_tol=1e-5, abs_tol=1e-6):
                         raise ValueError('Inconsistent derived noise diagnostic: ' + name)
+    if audited_count not in (0, len(runs)):
+        raise ValueError('Cannot combine audited and unaudited research runs')
     aggregated = {}
     for arm in ('raw', 'latent'):
         aggregated[arm] = {
@@ -193,6 +234,7 @@ def summarize_runs(runs: list[dict], seeds: tuple[int, ...]) -> dict:
             for run in runs
         ]),
         'individual_runs': runs,
+        'generation_audit_enabled': audited_count == len(runs),
         'weights_saved': False,
         'weights_published': False,
         'model_generation': None,
@@ -207,6 +249,31 @@ def summarize_runs(runs: list[dict], seeds: tuple[int, ...]) -> dict:
             'model_selection_authorized': False,
         },
     }
+    if audited_count:
+        result['generated_audio_health_by_model'] = {
+            arm: {
+                metric: summarize_values([
+                    float(statistics.fmean(
+                        row['stats'][metric]
+                        for row in run['generation_audit']['generated'][arm]
+                    )) for run in runs
+                ]) for metric in ('rms', 'peak', 'clipping_fraction',
+                                 'near_silence_fraction', 'spectral_centroid_hz')
+            } for arm in ('raw', 'latent')
+        }
+        result['generated_prompt_waveform_difference_by_model'] = {
+            arm: summarize_values([
+                float(statistics.fmean(
+                    row['mean_absolute_difference']
+                    for row in run['generation_audit']['paired_prompt_contrasts'][arm]
+                )) for run in runs
+            ]) for arm in ('raw', 'latent')
+        }
+        result['generation_audit_interpretation'] = (
+            'Numerical generated-waveform and prompt-change controls only; '
+            'a changed waveform does not establish semantic correctness, '
+            'perceptual quality, originality or model readiness'
+        )
     # Fingerprint the experiment inputs, not system-dependent timings or output
     # noise values. Sorting keys ensures a stable protocol ID across machines.
     fingerprint_material = {
@@ -216,6 +283,10 @@ def summarize_runs(runs: list[dict], seeds: tuple[int, ...]) -> dict:
         'steps': [canonical[7], canonical[8], canonical[9]],
         'category_disjoint_negative_sha256': canonical[16],
         'channels': canonical[10],
+        'generation_audit_enabled': bool(audited_count),
+        'generation_audit_protocol': (
+            'in-memory-generated-waveform-numerical-audit-v1' if audited_count else None
+        ),
         'model_parameters': [canonical[13], canonical[14], canonical[15]],
     }
     result['configuration_sha256'] = hashlib.sha256(
@@ -228,6 +299,7 @@ def run_study(*, seeds: tuple[int, ...] = (17, 29, 41),
               codec_steps: int = 2, denoiser_steps: int = 2,
               schedule_steps: int = 8, channels: int = 16,
               evaluation_combinations: int = 4,
+              generation_probe: bool = False,
               runner: Callable[..., dict] = compare) -> dict:
     """Repeat the same research design with distinct model-initialization seeds.
 
@@ -235,14 +307,19 @@ def run_study(*, seeds: tuple[int, ...] = (17, 29, 41),
     normal CLI execution always invokes the actual two-model training code.
     """
     _check_seeds(seeds)
+    if type(generation_probe) is not bool:
+        raise ValueError('generation_probe must be boolean')
     collected = []
     for seed in seeds:
-        report = runner(
-            codec_steps=codec_steps, denoiser_steps=denoiser_steps,
-            schedule_steps=schedule_steps, seed=seed, channels=channels,
-            evaluation_combinations=evaluation_combinations,
-        )
-        collected.append(report)
+        options = {
+            'codec_steps': codec_steps, 'denoiser_steps': denoiser_steps,
+            'schedule_steps': schedule_steps, 'seed': seed,
+            'channels': channels,
+            'evaluation_combinations': evaluation_combinations,
+        }
+        if generation_probe:
+            options['generation_probe'] = True
+        collected.append(runner(**options))
     summary = summarize_runs(collected, seeds)
     summary['runtime_environment'] = {
         'python': platform.python_version(), 'torch': torch.__version__,
@@ -261,12 +338,15 @@ def main() -> None:
     parser.add_argument('--schedule-steps', type=int, default=8)
     parser.add_argument('--channels', type=int, default=16, choices=(16, 24, 32))
     parser.add_argument('--evaluation-combinations', type=int, default=4)
+    parser.add_argument('--audit-generated-audio', action='store_true',
+                        help='Numerical audit of neural waveforms generated in RAM, no WAV files')
     parser.add_argument('--output', type=Path, default=None, help='Optional local JSON report only; no model weights')
     args = parser.parse_args()
     report = run_study(
         seeds=args.seeds, codec_steps=args.codec_steps,
         denoiser_steps=args.denoiser_steps, schedule_steps=args.schedule_steps,
         channels=args.channels, evaluation_combinations=args.evaluation_combinations,
+        generation_probe=args.audit_generated_audio,
     )
     serialized = json.dumps(report, indent=2, ensure_ascii=False, allow_nan=False) + '\n'
     if args.output is not None:

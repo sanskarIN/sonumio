@@ -105,3 +105,25 @@ metrics and no model artifacts. Read the
 [measured three-seed extended-training report](EXTENDED_SYNTHETIC_RESULTS.md)
 and [successful GitHub Actions run](https://github.com/sanskarIN/sonumio/actions/runs/43848233806).
 Synthetic noise-prediction success is not generalizable audio quality.
+
+
+## In-memory neural generation health audit
+
+The extended workflow now includes \`--audit-generated-audio\`: immediately
+after the actual model updates, the trained raw-waveform and latent DDPMs
+sample **1.024-second 8 kHz waveforms in RAM** for two original sound
+categories (rain and wind), with English/Hindi prompts under the same
+sampling seed. It records numerical waveform diagnostics and hashes only.
+
+The fixed numerical panel measures output RMS, peak, clipping fraction,
+near-silence fraction, spectral centroid, low-frequency energy fraction,
+spectral flatness, and same-noise-seed between-prompt waveform differences.
+It also records the same indicators for a held-out Sonumio procedural DSP
+reference so obvious collapse/silence/energy issues can be observed.
+
+The audit **does not** prove that "rain" sounds like rain, that English/Hindi
+prompts mean the same thing, or that a real listener likes the output.
+Output waveforms and weights are **never saved, uploaded or released**.
+A changed waveform is not a successful sound-category classifier.
+The per-seed audit is retained only as an ephemeral JSON metrics report,
+with summary statistics across the three initialization seeds.

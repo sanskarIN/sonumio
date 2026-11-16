@@ -164,3 +164,20 @@ def test_eval_accepts_explicit_disjoint_caption_control_and_rejects_wrong_layout
     with pytest.raises(ValueError, match='Counterfactual'):
         evaluate_denoiser(model, DiffusionSchedule(8), audio, tokens,
                           wrong_tokens=negatives[:4])
+
+
+
+def test_optional_actual_generation_probe_has_no_saved_artifacts():
+    report = compare(codec_steps=1, denoiser_steps=1, schedule_steps=8,
+                     channels=16, seed=17, evaluation_combinations=2,
+                     generation_probe=True)
+    audit = report['generation_audit']
+    assert audit['protocol'] == 'in-memory-generated-waveform-numerical-audit-v1'
+    assert audit['seeds'] == [1517]
+    assert audit['audio_files_saved'] is False
+    assert audit['neural_weights_saved'] is False
+    assert len(audit['generated']['raw']) == 4
+    assert len(audit['generated']['latent']) == 4
+    assert not report['weights_saved'] and not report['weights_published']
+    with pytest.raises(ValueError, match='boolean'):
+        compare(generation_probe=1)

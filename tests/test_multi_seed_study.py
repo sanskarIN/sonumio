@@ -168,3 +168,66 @@ def test_reject_arithmetically_inconsistent_derived_advantage():
     runs[1]['raw']['evaluation']['noise_levels']['low']['shuffled_minus_paired_mse'] = 42.0
     with pytest.raises(ValueError, match='Inconsistent derived'):
         summarize_runs(runs, (17, 29))
+
+
+
+def fake_generation_audit(seed: int) -> dict:
+    samples = [
+        {'category': category, 'language': lang,
+         'stats': {'sha256': 'a' * 64,
+                   'rms': 0.1 + seed / 10000,
+                   'peak': 0.4,
+                   'clipping_fraction': 0.0,
+                   'near_silence_fraction': 0.1,
+                   'spectral_centroid_hz': 200.0}}
+        for category in ('rain', 'wind') for lang in ('en', 'hi')
+    ]
+    contrasts = [{'mean_absolute_difference': 0.02} for _ in range(4)]
+    return {
+        'protocol': 'in-memory-generated-waveform-numerical-audit-v1',
+        'seeds': [seed + 1500], 'sample_rate': 8000,
+        'duration_seconds': 1.024,
+        'audio_files_saved': False, 'neural_weights_saved': False,
+        'generated': {'raw': samples, 'latent': samples},
+        'paired_prompt_contrasts': {'raw': contrasts, 'latent': contrasts},
+    }
+
+
+def test_multi_seed_generation_audit_is_aggregated_only_with_matching_safe_runs():
+    seeds = (17, 29)
+    runs = [report_for_seed(s) for s in seeds]
+    for seed, run in zip(seeds, runs):
+        run['generation_audit'] = fake_generation_audit(seed)
+    summary = summarize_runs(runs, seeds)
+    assert summary['generation_audit_enabled'] is True
+    assert summary['generated_audio_health_by_model']['raw']['rms']['count'] == 2
+    assert summary['generated_prompt_waveform_difference_by_model']['latent']['mean'] == 0.02
+    assert not summary['interpretation']['audio_quality_claim_supported']
+    incomplete = copy.deepcopy(runs)
+    incomplete[1]['generation_audit'] = None
+    with pytest.raises(ValueError, match='audited and unaudited'):
+        summarize_runs(incomplete, seeds)
+    unsafe = copy.deepcopy(runs)
+    unsafe[1]['generation_audit']['audio_files_saved'] = True
+    with pytest.raises(ValueError, match='unsafe generated'):
+        summarize_runs(unsafe, seeds)
+    invalid = copy.deepcopy(runs)
+    invalid[1]['generation_audit']['generated']['raw'][0]['stats']['peak'] = float('nan')
+    with pytest.raises(ValueError):
+        summarize_runs(invalid, seeds)
+
+
+def test_generation_audit_flag_is_forwarded_to_runner_only_when_enabled():
+    seen = []
+    def fake(**options):
+        seen.append(options)
+        report = report_for_seed(options['seed'])
+        if options.get('generation_probe'):
+            report['generation_audit'] = fake_generation_audit(options['seed'])
+        return report
+    output = run_study(seeds=(17, 29), runner=fake, generation_probe=True)
+    assert output['generation_audit_enabled']
+    assert len(seen) == 2
+    assert all(x['generation_probe'] is True for x in seen)
+    with pytest.raises(ValueError, match='boolean'):
+        run_study(generation_probe=1, runner=fake)

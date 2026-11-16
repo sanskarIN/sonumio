@@ -94,3 +94,13 @@ three initialization seeds, 128 codec updates, 256 denoiser updates,
 and all 21 sound-combination holdouts, without any neural weight export.
 Its results must be inspected before drawing conclusions; synthetic
 denoising improvements alone do not certify actual generation fidelity.
+
+
+## Generated waveform health after neural training
+
+The [numerical generation audit](GENERATED_AUDIO_AUDIT.md) samples actual
+raw-waveform and latent-DDPM outputs after training and reports finite/range
+validation, RMS, clipping, silence, spectral characteristics, and
+same-noise-seed prompt-change sensitivity for English/Hindi rain/wind
+prompts. This does not replace independent listening or rights-reviewed
+reference audio. No waveform or model-weight artifacts are published.

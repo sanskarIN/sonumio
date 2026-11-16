@@ -32,7 +32,7 @@ from research.latent_audio import latent_noise_loss
 from research.text_audio import SYNTHETIC_COMBINATIONS
 from research.wave_diffusion import DiffusionSchedule, SAMPLE_RATE
 
-PROTOCOL = 'shared-data-raw-vs-latent-text-ddpm-v2'
+PROTOCOL = 'shared-data-raw-vs-latent-text-ddpm-v3'
 MAX_OPTIMIZER_STEPS = 1000
 MAX_EVAL_COMBINATIONS = len(SYNTHETIC_COMBINATIONS)
 
@@ -189,7 +189,8 @@ def evaluate_denoiser(model: nn.Module, schedule: DiffusionSchedule,
 
 def compare(*, codec_steps: int = 2, denoiser_steps: int = 2,
             schedule_steps: int = 8, seed: int = 17, channels: int = 16,
-            evaluation_combinations: int = 4) -> dict:
+            evaluation_combinations: int = 4,
+            generation_probe: bool = False) -> dict:
     """Train two experimental models and measure diagnostics without weights.
 
     Shared training pairs, update count, text encoder architecture, schedule,
@@ -197,6 +198,8 @@ def compare(*, codec_steps: int = 2, denoiser_steps: int = 2,
     Unmatched: parameter counts, receptive fields, codec cost, tensor sizes,
     and compute. This is a diagnostic, not a controlled winning-model trial.
     """
+    if type(generation_probe) is not bool:
+        raise ValueError('generation_probe must be a boolean')
     _validate(codec_steps=codec_steps, denoiser_steps=denoiser_steps,
               schedule_steps=schedule_steps, seed=seed, channels=channels,
               evaluation_combinations=evaluation_combinations)
@@ -297,6 +300,12 @@ def compare(*, codec_steps: int = 2, denoiser_steps: int = 2,
                                         selected_tokens, seed=seed + 991,
                                         wrong_tokens=negatives)
         latent_eval_seconds = perf_counter() - started_eval
+        generated = None
+        if generation_probe:
+            # Import here to keep the default noise-only experiment cheap and
+            # avoid any circular dependency with the bounded DDPM samplers.
+            from research.generation_audit import generation_audit
+            generated = generation_audit(raw, model, schedule, seeds=(seed + 1500,))
         return {
             'protocol': PROTOCOL,
             'data_recipe': DATA_RECIPE,
@@ -349,13 +358,14 @@ def compare(*, codec_steps: int = 2, denoiser_steps: int = 2,
             'weights_saved': False,
             'weights_published': False,
             'model_generation': None,
+            'generation_audit': generated,
             'limitations': [
                 'Raw and latent noise MSE are on different representations: never rank their absolute values',
                 'The branches have unequal parameter counts and compute, and latent requires codec pretraining',
                 'Short optimizer runs are smoke tests, not convergence or meaningful prompt alignment',
                 'All examples are synthetic DSP; no natural-language or real-world sound generalization',
                 'CPU wall times from one short run are not reliable throughput benchmarks',
-                'No listening, perceptual audio metrics, or generated-waveform quality comparison',
+                'Generated waveform numeric health can be audited, but no perceptual, FAD/CLAP or listener test',
             ],
         }
 
@@ -368,12 +378,15 @@ def main() -> None:
     parser.add_argument('--channels', type=int, default=16, choices=(16, 24, 32))
     parser.add_argument('--seed', type=int, default=17)
     parser.add_argument('--evaluation-combinations', type=int, default=4)
+    parser.add_argument('--audit-generated-audio', action='store_true',
+                        help='Inspect 8 in-memory generated waveforms per seed, without saving audio')
     parser.add_argument('--output', type=Path, default=None,
                         help='Optional local JSON report only; no models/weights are saved')
     args = parser.parse_args()
     report = compare(codec_steps=args.codec_steps, denoiser_steps=args.denoiser_steps,
                      schedule_steps=args.schedule_steps, seed=args.seed,
-                     channels=args.channels, evaluation_combinations=args.evaluation_combinations)
+                     channels=args.channels, evaluation_combinations=args.evaluation_combinations,
+                     generation_probe=args.audit_generated_audio)
     serialized = json.dumps(report, indent=2, ensure_ascii=False, allow_nan=False) + '\n'
     if args.output is not None:
         args.output.parent.mkdir(parents=True, exist_ok=True)
