@@ -86,3 +86,13 @@ records the actual reproducible CI configuration, observed within-model
 zero-noise prediction improvements, and small inconsistent bilingual
 caption-alignment effects. This is still a synthetic pilot, not a model or
 release readiness result.
+
+
+## Extended synthetic training (research-only)
+
+A [dedicated CPU workflow](EXTENDED_SYNTHETIC_TRAINING.md) runs three model
+initializations with 128 codec updates and 256 denoiser updates per
+architecture, using the full 21-combination synthetic evaluation grid.
+It writes only an ephemeral private metrics JSON on its runner, with no
+weight artifacts or publication. This is substantially longer training than
+the first experimental pilot, but still **not** a release or quality gate.

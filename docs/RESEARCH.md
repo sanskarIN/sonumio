@@ -84,3 +84,13 @@ no weights and valid numerical diagnostics before reporting descriptive
 mean/median/standard deviation/observed range and directional sign counts
 **within each representation**. The same data sources and captions appear
 in every run, so this measures initialization sensitivity **only**.
+
+
+## First-party synthetic training expansion
+
+A [prespecified extended-training study](EXTENDED_SYNTHETIC_TRAINING.md) now
+trains raw and latent English/Hindi text-conditioned audio DDPMs with
+three initialization seeds, 128 codec updates, 256 denoiser updates,
+and all 21 sound-combination holdouts, without any neural weight export.
+Its results must be inspected before drawing conclusions; synthetic
+denoising improvements alone do not certify actual generation fidelity.

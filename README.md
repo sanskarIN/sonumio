@@ -208,3 +208,12 @@ winner. It cannot certify generated-audio quality or model release readiness.
 The [recorded three-seed CPU pilot](docs/MULTI_SEED_PILOT_RESULTS.md)
 documents measured training diagnostics and the remaining evidence gaps.
 It does not demonstrate creator-quality generation or justify a release.
+
+
+### Extended training on the currently permitted synthetic dataset
+
+An isolated [128-codec / 256-denoiser-step multi-seed training protocol](docs/EXTENDED_SYNTHETIC_TRAINING.md)
+runs on Sonumio-owned sound samples using all 21 source combinations
+in held-out evaluation. It is research only, not high-quality audio generation,
+and produces no published model weights. Do not confuse synthetic audio with
+a rights-cleared, independently validated real-world recording corpus.

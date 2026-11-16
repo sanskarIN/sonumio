@@ -1,0 +1,90 @@
+name: Private synthetic audio training (CPU)
+
+# Runs only on development PRs changing experimental model/data code.
+# All checkpoints remain in process; the sole written output is an ephemeral
+# metrics JSON on the runner. No actions/upload-artifact, release, cache of
+# weights, trained model files, or outside dataset downloads.
+on:
+  pull_request:
+    paths:
+      - 'research/**'
+      - 'src/sonumio/engines/procedural.py'
+      - '.github/workflows/synthetic-training.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sonumio-synthetic-training-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  extended-synthetic-training:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      OMP_NUM_THREADS: '2'
+      MKL_NUM_THREADS: '2'
+      OPENBLAS_NUM_THREADS: '2'
+      PYTHONHASHSEED: '0'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install project and CPU-only research dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e '.[test]' 'scipy>=1.12,<2'
+          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+      - name: Train three real experiments on Sonumio-owned procedural data
+        run: |
+          python -m research.multi_seed_study \
+            --seeds 17,29,41 \
+            --codec-steps 128 --denoiser-steps 256 \
+            --schedule-steps 8 --channels 16 \
+            --evaluation-combinations 21 \
+            --output checkpoints/private-research/extended-synthetic-training.json
+      - name: Validate full held-out grid, report and no weight files
+        run: |
+          python - <<'PY'
+          import json
+          import math
+          from pathlib import Path
+
+          root = Path('checkpoints')
+          report_path = root / 'private-research' / 'extended-synthetic-training.json'
+          report = json.loads(report_path.read_text(encoding='utf-8'))
+          assert report['seed_count'] == 3 and report['seeds'] == [17, 29, 41]
+          assert report['protocol'] == 'raw-vs-latent-multi-seed-diagnostics-v2'
+          assert report['shared_data']['evaluated_source_combinations'] == 21
+          assert report['shared_data']['evaluated_caption_pairs'] == 84
+          assert report['shared_data']['category_disjoint_hard_negatives'] is True
+          assert report['weights_saved'] is False
+          assert report['weights_published'] is False
+          assert report['model_generation'] is None
+          for single in report['individual_runs']:
+              p = single['shared_parameters']
+              assert p['codec_pretraining_steps'] == 128
+              assert p['denoiser_updates_per_arm'] == 256
+              assert single['train_recordings'] == 42
+              assert single['validation_recordings_total'] == 42
+              assert single['train_eval_exact_byte_overlap'] == 0
+              assert math.isfinite(single['codec']['eval_waveform_mae'])
+          materialized = [p for p in root.rglob('*') if p.is_file()]
+          assert materialized == [report_path], materialized
+          for arm in ('raw', 'latent'):
+              for band in ('low', 'medium', 'high'):
+                  stats = report['mean_and_variability_by_model_and_noise_band'][arm][band]
+                  print(
+                      arm, band,
+                      'paired_vs_zero=', round(
+                          stats['paired_improvement_over_zero_fraction']['mean'], 6),
+                      'matched_vs_disjoint=', round(
+                          stats['shuffled_minus_paired_mse']['mean'], 6),
+                      'positive_caption_seeds=',
+                      stats['shuffled_minus_paired_mse']['positive_runs'], '/3'
+                  )
+          print('Synthetic training complete:', report['configuration_sha256'])
+          print('No neural weight files were written or published.')
+          PY
