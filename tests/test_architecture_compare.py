@@ -7,10 +7,10 @@ torch = pytest.importorskip('torch')
 
 from research.architecture_compare import (
     PROTOCOL, _audio_hashes, _validate, _validation_indices,
-    compare, evaluate_denoiser,
+    compare, evaluate_denoiser, disjoint_negative_tokens,
 )
 from research.latent_audio import FRAMES, LATENT_CHANNELS, LATENT_FRAMES
-from research.text_audio import ByteTextTokenizer
+from research.text_audio import ByteTextTokenizer, SYNTHETIC_COMBINATIONS
 from research.wave_diffusion import DiffusionSchedule
 
 
@@ -101,6 +101,8 @@ def test_one_step_architecture_comparison_reports_honest_metrics():
     assert report['evaluated_source_combinations'] == 2
     assert report['evaluated_caption_pairs'] == 8
     assert report['train_eval_exact_byte_overlap'] == 0
+    assert report['category_disjoint_hard_negatives'] is True
+    assert len(report['hard_negative_tokens_sha256']) == 64
     assert report['train_fingerprint'] != report['validation_fingerprint']
     assert report['codec']['trainable_parameters'] > 0
     assert report['raw']['parameters'] > 0 and report['latent']['parameters'] > 0
@@ -129,3 +131,36 @@ def test_exact_audio_overlap_is_rejected_before_training(monkeypatch):
     monkeypatch.setattr(module, 'synthetic_bilingual_waves', unsafe_loader)
     with pytest.raises(ValueError, match='Exact audio overlap'):
         compare(codec_steps=1, denoiser_steps=1, evaluation_combinations=2)
+
+
+def test_hard_negative_captions_never_share_true_sound_classes():
+    indices = _validation_indices(21)
+    encoded, counterfactuals = disjoint_negative_tokens(indices)
+    assert encoded.shape[0] == len(indices)
+    assert len(counterfactuals) == len(indices)
+    for row, negative in zip(indices, counterfactuals):
+        truth = SYNTHETIC_COMBINATIONS[row // 4]
+        assert len(truth) == len(negative)
+        assert set(truth).isdisjoint(negative)
+    again, same = disjoint_negative_tokens(indices)
+    assert torch.equal(encoded, again) and counterfactuals == same
+    assert not torch.equal(encoded[:2], encoded[2:4])
+    with pytest.raises(ValueError):
+        disjoint_negative_tokens([-1])
+    with pytest.raises(ValueError):
+        disjoint_negative_tokens([True])
+
+
+def test_eval_accepts_explicit_disjoint_caption_control_and_rejects_wrong_layout():
+    model = BlindDenoiser()
+    selected = _validation_indices(2)
+    tokens = ByteTextTokenizer().encode(['rain', 'बारिश', 'wind', 'हवा'] * 2)
+    negatives, members = disjoint_negative_tokens(selected)
+    assert members and negatives.shape == tokens.shape
+    audio = torch.zeros(8, 1, FRAMES)
+    evaluation = evaluate_denoiser(model, DiffusionSchedule(8), audio, tokens,
+                                  wrong_tokens=negatives)
+    assert 'category-disjoint' in evaluation['wrong_caption']
+    with pytest.raises(ValueError, match='Counterfactual'):
+        evaluate_denoiser(model, DiffusionSchedule(8), audio, tokens,
+                          wrong_tokens=negatives[:4])

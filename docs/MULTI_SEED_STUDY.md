@@ -117,3 +117,16 @@ holdouts, real sample generation, real listening panels, matched compute
 constraints, and CLAP/FAD or other properly licensed and documented
 reference metrics. Even if this synthetic experiment improves noise MSE, it
 would not establish Sonumio-1 readiness.
+
+
+## Corrected negative-caption protocol
+
+The former circular-caption shuffle did not always replace **every** sound
+mentioned by a caption. `v2` now requires the wrong caption to name
+**zero overlapping sound categories**, with the same number of sources and
+the same English/Hindi style. Each run includes the exact negative-token hash
+and the multi-seed aggregator rejects incompatible or older `v1` results.
+
+A caption advantage that improves under this correction would still be
+limited to known DSP sources and short templates. It is not proof of
+open-ended prompt understanding or usable generated-audio quality.

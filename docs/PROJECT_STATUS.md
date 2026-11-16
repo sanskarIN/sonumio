@@ -74,3 +74,9 @@ observed across-seed spread **within each model**, never a cross-domain
 MSE-based winner. The remaining major research dependencies still include
 independent rights-cleared audio, long training, generation/listening
 assessment, compute-matched comparisons and a human safety review.
+
+
+The replicated research study now also checks that **wrong-caption controls
+do not accidentally name a true source category**. Its updated protocol
+fingerprints those category-disjoint bilingual hard negatives before combining
+results across model-initialization seeds. It remains synthetic-only.

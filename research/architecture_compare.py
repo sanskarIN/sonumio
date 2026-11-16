@@ -26,13 +26,13 @@ from research.latent_audio import (
     DATA_RECIPE, FRAMES, LATENT_CHANNELS, LATENT_FRAMES, LatentResearchModel,
     TRAIN_SEEDS, VALIDATION_SEEDS, reconstruction_loss, synthetic_bilingual_waves,
 )
-from research.text_audio import TextWaveDenoiser
+from research.text_audio import ByteTextTokenizer, TextWaveDenoiser, _synth_prompts
 from research.text_audio import text_noise_loss
 from research.latent_audio import latent_noise_loss
 from research.text_audio import SYNTHETIC_COMBINATIONS
 from research.wave_diffusion import DiffusionSchedule, SAMPLE_RATE
 
-PROTOCOL = 'shared-data-raw-vs-latent-text-ddpm-v1'
+PROTOCOL = 'shared-data-raw-vs-latent-text-ddpm-v2'
 MAX_OPTIMIZER_STEPS = 1000
 MAX_EVAL_COMBINATIONS = len(SYNTHETIC_COMBINATIONS)
 
@@ -81,10 +81,43 @@ def _validation_indices(combinations: int) -> list[int]:
     return indices
 
 
+def disjoint_negative_tokens(indices: list[int]) -> tuple[torch.Tensor, tuple[tuple[int, ...], ...]]:
+    """Build genuinely wrong audio-category captions with matched length/language.
+
+    A circular prompt shuffle can be semantically wrong only in part:
+    combinations such as (rain) and (rain, wind) share a real sound. Here
+    neither a singleton nor either member of a two-source caption may be
+    present in the recording being scored.
+    """
+    if not indices or any(type(index) is not int or not 0 <= index < (
+        len(SYNTHETIC_COMBINATIONS) * len(VALIDATION_SEEDS) * 2)
+        for index in indices
+    ):
+        raise ValueError('Invalid held-out caption indices')
+    captions, negative_members = [], []
+    items_per_combination = len(VALIDATION_SEEDS) * 2
+    for row in indices:
+        combo_index = row // items_per_combination
+        members = SYNTHETIC_COMBINATIONS[combo_index]
+        seed = VALIDATION_SEEDS[(row // 2) % len(VALIDATION_SEEDS)]
+        language = 'en' if row % 2 == 0 else 'hi'
+        options = [
+            candidate for candidate in SYNTHETIC_COMBINATIONS
+            if len(candidate) == len(members) and set(candidate).isdisjoint(members)
+        ]
+        if not options:
+            raise ValueError('No disjoint counterfactual caption exists')
+        counterfactual = options[(combo_index + seed) % len(options)]
+        captions.append(_synth_prompts(counterfactual, language, seed))
+        negative_members.append(counterfactual)
+    return ByteTextTokenizer().encode(captions), tuple(negative_members)
+
+
 @torch.no_grad()
 def evaluate_denoiser(model: nn.Module, schedule: DiffusionSchedule,
                       clean: torch.Tensor, tokens: torch.Tensor, *,
-                      seed: int = 991) -> dict:
+                      seed: int = 991,
+                      wrong_tokens: torch.Tensor | None = None) -> dict:
     """Compare prompts within ONE representation against identical noisy data.
 
     A fixed four-example roll replaces each source-combination's captions
@@ -105,7 +138,12 @@ def evaluate_denoiser(model: nn.Module, schedule: DiffusionSchedule,
     if tokens.device.type != 'cpu' or clean.device.type != 'cpu':
         raise ValueError('CPU benchmark only')
     rng = torch.Generator().manual_seed(seed)
-    wrong = tokens.roll(4, 0)
+    if wrong_tokens is not None and (
+        wrong_tokens.shape != tokens.shape or wrong_tokens.dtype != tokens.dtype
+        or wrong_tokens.device != tokens.device
+    ):
+        raise ValueError('Counterfactual caption tokens must match the original batch')
+    wrong = tokens.roll(4, 0) if wrong_tokens is None else wrong_tokens
     blank = torch.zeros_like(tokens)
     levels = {'low': max(0, schedule.steps // 8),
               'medium': schedule.steps // 2, 'high': schedule.steps - 1}
@@ -139,7 +177,11 @@ def evaluate_denoiser(model: nn.Module, schedule: DiffusionSchedule,
         model.train(was_training)
     return {
         'cases_per_noise_level': len(clean),
-        'wrong_caption': '4-row roll to a different source combination',
+        'wrong_caption': (
+            'category-disjoint same-count bilingual counterfactual'
+            if wrong_tokens is not None else
+            '4-row circular shuffle (not guaranteed category-disjoint)'
+        ),
         'noise_levels': output,
         'warning': 'Noise MSE is domain-specific; these scores are not audio quality',
     }
@@ -170,6 +212,15 @@ def compare(*, codec_steps: int = 2, denoiser_steps: int = 2,
         indices = _validation_indices(evaluation_combinations)
         selected_waves = validation.waves[indices]
         selected_tokens = validation.tokens[indices]
+        negatives, negative_members = disjoint_negative_tokens(indices)
+        if negatives.shape != selected_tokens.shape or torch.equal(negatives, selected_tokens):
+            raise ValueError('The hard-negative text control is malformed')
+        for row, candidate in zip(indices, negative_members):
+            source_members = SYNTHETIC_COMBINATIONS[
+                row // (len(VALIDATION_SEEDS) * 2)
+            ]
+            if len(candidate) != len(source_members) or not set(candidate).isdisjoint(source_members):
+                raise ValueError('Counterfactual source categories overlap with true audio')
         model = LatentResearchModel(channels)
         codec = model.codec
         raw = TextWaveDenoiser(channels)
@@ -239,11 +290,12 @@ def compare(*, codec_steps: int = 2, denoiser_steps: int = 2,
             latent_losses.append(float(loss.detach()))
         started_eval = perf_counter()
         raw_eval = evaluate_denoiser(raw, schedule, selected_waves, selected_tokens,
-                                     seed=seed + 991)
+                                     seed=seed + 991, wrong_tokens=negatives)
         raw_eval_seconds = perf_counter() - started_eval
         started_eval = perf_counter()
         latent_eval = evaluate_denoiser(latent, schedule, encoded_validation,
-                                        selected_tokens, seed=seed + 991)
+                                        selected_tokens, seed=seed + 991,
+                                        wrong_tokens=negatives)
         latent_eval_seconds = perf_counter() - started_eval
         return {
             'protocol': PROTOCOL,
@@ -261,6 +313,9 @@ def compare(*, codec_steps: int = 2, denoiser_steps: int = 2,
             'train_fingerprint': train_set.fingerprint,
             'validation_fingerprint': validation.fingerprint,
             'train_eval_exact_byte_overlap': 0,
+            'category_disjoint_hard_negatives': True,
+            'hard_negative_tokens_sha256': hashlib.sha256(
+                negatives.numpy().tobytes()).hexdigest(),
             'shared_parameters': {
                 'denoiser_updates_per_arm': denoiser_steps,
                 'codec_pretraining_steps': codec_steps,

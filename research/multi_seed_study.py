@@ -26,7 +26,7 @@ import torch
 
 from research.architecture_compare import PROTOCOL as SINGLE_RUN_PROTOCOL, compare
 
-PROTOCOL = 'raw-vs-latent-multi-seed-diagnostics-v1'
+PROTOCOL = 'raw-vs-latent-multi-seed-diagnostics-v2'
 MIN_SEEDS = 2
 MAX_SEEDS = 8
 BENCHMARK_METRICS = (
@@ -116,6 +116,7 @@ def summarize_runs(runs: list[dict], seeds: tuple[int, ...]) -> dict:
             run.get('raw', {}).get('parameters'),
             run.get('latent', {}).get('parameters'),
             run.get('codec', {}).get('trainable_parameters'),
+            run.get('hard_negative_tokens_sha256'),
         )
         if any(x is None for x in signature):
             raise ValueError('Missing shared configuration or model metadata')
@@ -124,6 +125,9 @@ def summarize_runs(runs: list[dict], seeds: tuple[int, ...]) -> dict:
         elif signature != canonical:
             raise ValueError('Runs do not share dataset, architecture or training protocol')
         if (run.get('train_eval_exact_byte_overlap') != 0
+                or run.get('category_disjoint_hard_negatives') is not True
+                or not isinstance(run.get('hard_negative_tokens_sha256'), str)
+                or len(run['hard_negative_tokens_sha256']) != 64
                 or run.get('weights_saved') is not False
                 or run.get('weights_published') is not False
                 or run.get('model_generation') is not None):
@@ -180,6 +184,8 @@ def summarize_runs(runs: list[dict], seeds: tuple[int, ...]) -> dict:
             'audio_frames': canonical[4],
             'evaluated_source_combinations': canonical[5],
             'evaluated_caption_pairs': canonical[6],
+            'hard_negative_tokens_sha256': canonical[16],
+            'category_disjoint_hard_negatives': True,
         },
         'mean_and_variability_by_model_and_noise_band': aggregated,
         'codec_reconstruction_waveform_mae': summarize_values([
@@ -208,6 +214,7 @@ def summarize_runs(runs: list[dict], seeds: tuple[int, ...]) -> dict:
         'seeds': list(seeds),
         'shared_data': result['shared_data'],
         'steps': [canonical[7], canonical[8], canonical[9]],
+        'category_disjoint_negative_sha256': canonical[16],
         'channels': canonical[10],
         'model_parameters': [canonical[13], canonical[14], canonical[15]],
     }

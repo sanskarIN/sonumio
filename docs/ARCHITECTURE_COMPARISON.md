@@ -134,3 +134,23 @@ Results are summarized **within** the raw and latent model representations,
 with the 42 training recordings and held-out data identical across runs.
 Do not interpret variation across initializations as generalization to
 different sound datasets. Both arms still differ in FLOPs and codec cost.
+
+
+## Category-disjoint hard-negative correction (v2)
+
+An earlier counterfactual simply circularly rotated captions across selected
+source combinations. That was not consistently a truly wrong caption:
+`rain` and `rain + wind`, for instance, share a sound. This can make
+shuffled-minus-paired error a misleading indicator of learned text specificity.
+
+The **v2** protocol constructs explicit counterfactual English/Hindi captions
+using source classes that share **zero actual categories** with the recording,
+while preserving the source-count (one or two), caption language, seed-based
+template variant, noise and timestep. It verifies the disjointness for each
+selected recording, fingerprints all negative-caption tokens, and preserves
+that fingerprint across repeated initialization seeds.
+
+Older `v1` caption-shuffle advantage numbers are not directly comparable
+with `v2` hard-negative results. The paired and zero-noise control still
+measure denoising, not perceptual fidelity, and even corrected negatives use
+a limited set of synthetic source names.

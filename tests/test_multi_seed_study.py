@@ -48,6 +48,8 @@ def report_for_seed(seed: int) -> dict:
             'optimizer': 'AdamW',
         },
         'train_eval_exact_byte_overlap': 0,
+        'category_disjoint_hard_negatives': True,
+        'hard_negative_tokens_sha256': 'c' * 64,
         'codec': {'trainable_parameters': 33, 'eval_waveform_mae': 0.13 + seed / 1000},
         'raw': arm('raw'), 'latent': arm('latent'),
         'model_generation': None, 'weights_saved': False, 'weights_published': False,
