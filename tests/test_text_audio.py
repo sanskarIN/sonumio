@@ -229,7 +229,7 @@ def test_corrupt_tensor_name_is_rejected_even_with_valid_hash(tmp_path):
     data = json.loads(manifest.read_text())
     data['weights_sha256'] = hashlib.sha256(file.read_bytes()).hexdigest()
     manifest.write_text(json.dumps(data))
-    with pytest.raises(ValueError, match='Unexpected text checkpoint tensor names'):
+    with pytest.raises(ValueError, match='Unexpected checkpoint tensor names'):
         load_checkpoint(tmp_path)
 
 
