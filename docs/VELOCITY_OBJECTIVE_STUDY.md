@@ -66,16 +66,32 @@ steps and **256 denoiser steps for each objective of each model arm**,
 eight cosine diffusion steps, and two fixed English/Hindi
 categories: rain/बारिश and wind/हवा.
 
-## Actual generated-audio audit before and after clipping
+## Actual generated-audio audit before and after limiting
 
 The [generation code](../research/velocity_prediction.py) returns
-**unclipped** 1.024-second raw waveforms or decoded latent waveforms
-before any volume limiter. The comparator computes:
+**unclipped** 1.024-second raw waveforms and decodes latent waveforms
+using the real trained convolutional codec. Importantly, that codec
+**already includes an internal Tanh final layer**. Merely removing an
+external output clamp would conceal arbitrary decoder pre-Tanh values.
 
-- Preclip peak amplitude and root mean square.
-- Fraction of samples strictly outside [-1, 1] **before** limiting.
-- Postclip peak, RMS, hard-clipping fraction and near-silence fraction.
-- Postclip spectral centroid.
+Therefore the updated audit records two different, explicitly labeled
+pre-limiter signals:
+
+- **Raw arm:** DDPM output before the final hard clamp.
+- **Latent arm:** waveform decoder activations **before internal Tanh**,
+  alongside the actual `Tanh`-decoded audio that the model produces.
+
+For each, the comparator records:
+
+- Pre-limiter peak and RMS.
+- The fraction of pre-limiter values with absolute value above 1;
+  for latent, this is **not** a fraction of audio samples outside the
+  allowed WAV range—it is a decoder preactivation threshold.
+- For latent, fraction of pre-Tanh activations with abs ≥ atanh(0.999),
+  directly measuring internal decoder saturation.
+- Actual output's peak, RMS, hard-clipping/saturation fraction and
+  near-silence fraction.
+- Actual decoded/clamped output spectral centroid.
 - Same-noise-seed rain-versus-wind change for English and Hindi.
 - Observed per-seed metric differences (v − epsilon) with
   mean, median, standard deviation, range and sign counts.

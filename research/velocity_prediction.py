@@ -83,8 +83,9 @@ def posterior_v_step(noisy: torch.Tensor, v_pred: torch.Tensor, timestep: int,
 @torch.no_grad()
 def sample_velocity(denoiser: nn.Module, schedule: DiffusionSchedule,
                     caption: str, *, seed: int = 0, guidance: float = 1.0,
-                    latent: bool = False, codec: nn.Module | None = None
-                    ) -> torch.Tensor:
+                    latent: bool = False, codec: nn.Module | None = None,
+                    return_preactivation: bool = False
+                    ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
     """Private in-memory waveform: no clipping, saving, or checkpoint output.
 
     Use matching v-trained weights only. Never call with an epsilon-trained
@@ -96,6 +97,8 @@ def sample_velocity(denoiser: nn.Module, schedule: DiffusionSchedule,
         raise ValueError('Guidance must be finite within [0, 4]')
     if type(latent) is not bool or (latent and codec is None) or (not latent and codec is not None):
         raise ValueError('Latent generation needs an explicit frozen decoder')
+    if type(return_preactivation) is not bool or (return_preactivation and not latent):
+        raise ValueError('Only the latent decoder supports pre-tanh measurements')
     if not 8 <= schedule.steps <= 256:
         raise ValueError('Research sampler needs 8..256 diffusion steps')
     if (schedule.betas.device.type != 'cpu'
@@ -121,10 +124,15 @@ def sample_velocity(denoiser: nn.Module, schedule: DiffusionSchedule,
                 v_pred = blank + guidance * (v_pred - blank)
             audio = posterior_v_step(
                 audio, v_pred, index, schedule, generator=generator)
-        result = codec.decode(audio)[0, 0] if codec is not None else audio[0, 0]
+        if codec is not None and return_preactivation:
+            pre, decoded = codec.decode_with_preactivation(audio)
+            result, preactivation = decoded[0, 0], pre[0, 0]
+        else:
+            result = codec.decode(audio)[0, 0] if codec is not None else audio[0, 0]
         if result.shape != (FRAMES,) or not torch.isfinite(result).all():
             raise ValueError('Invalid v-predicted generated waveform')
-        return result.cpu()
+        output = result.cpu()
+        return (output, preactivation.cpu()) if return_preactivation else output
     finally:
         denoiser.train(was_training)
         if codec is not None:

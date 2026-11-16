@@ -55,24 +55,46 @@ def _check_settings(*, codec_steps: int, denoiser_steps: int,
         raise ValueError('Model width must be 16, 24 or 32')
 
 
-def _record_unclipped(wave: torch.Tensor) -> dict:
-    """Separate severe raw saturation from post-clamp, fixed-range waveform stats."""
-    if (wave.device.type != 'cpu' or wave.requires_grad
-            or wave.ndim != 1 or wave.shape != (FRAMES,)
-            or wave.dtype != torch.float32 or not torch.isfinite(wave).all()):
-        raise ValueError('Generated waveform must be finite, detached CPU float32')
-    max_abs = float(wave.abs().max())
-    if not math.isfinite(max_abs) or max_abs > 1e12:
-        raise ValueError('Unbounded generated waveform is numerically unstable')
-    # With extreme amplitude, float64 avoids overflow in power calculations.
-    samples = wave.numpy().astype(np.float64)
-    return {
-        'preclip_peak': max_abs,
-        'preclip_rms': float(np.sqrt(np.square(samples).mean())),
-        'preclip_out_of_range_fraction': float((np.abs(samples) > 1).mean()),
+def _record_unclipped(wave: torch.Tensor, *,
+                      decoder_preactivation: torch.Tensor | None = None) -> dict:
+    """Expose limiter *input* rather than mistaking a tanh-capped decoder for safety.
+
+    For raw DDPM, this is audio before the final hard clamp. For latent DDPM,
+    it is the decoder output BEFORE the codec's internal tanh. Hence the
+    latent prelimit out-of-range fraction describes *decoder activation*,
+    not final waveform samples above 1; compare objectives within each arm.
+    """
+    def valid_audio(audio: torch.Tensor) -> np.ndarray:
+        if (audio.device.type != 'cpu' or audio.requires_grad
+                or audio.ndim != 1 or audio.shape != (FRAMES,)
+                or audio.dtype != torch.float32 or not torch.isfinite(audio).all()):
+            raise ValueError('Generated signal must be detached finite CPU float32')
+        values = audio.numpy().astype(np.float64)
+        if float(np.max(np.abs(values))) > 1e12:
+            raise ValueError('Generated signal has unstable unbounded amplitude')
+        return values
+
+    output = valid_audio(wave)
+    if decoder_preactivation is not None:
+        internal = valid_audio(decoder_preactivation)
+        if not np.allclose(np.tanh(internal), output, atol=2e-6, rtol=2e-6):
+            raise ValueError('Codec pre-tanh activation does not reproduce waveform')
+        before = internal
+        source = 'latent_codec_decoder_before_tanh'
+    else:
+        before = output
+        source = 'raw_ddpm_before_final_clamp'
+    report = {
+        'prelimiter_signal_source': source,
+        'preclip_peak': float(np.abs(before).max()),
+        'preclip_rms': float(np.sqrt(np.square(before).mean())),
+        'preclip_out_of_range_fraction': float((np.abs(before) > 1).mean()),
         'postclip': waveform_statistics(wave.clamp(-1, 1)),
     }
-
+    if decoder_preactivation is not None:
+        report['codec_tanh_saturation_fraction'] = float(
+            (np.abs(before) >= np.arctanh(0.999)).mean())
+    return report
 
 def _train_single(*, seed: int, codec_steps: int, denoiser_steps: int,
                   schedule_steps: int, channels: int) -> dict:
@@ -189,21 +211,26 @@ def _train_single(*, seed: int, codec_steps: int, denoiser_steps: int,
                     for caption, language in ((english, 'en'), (hindi, 'hi')):
                         if objective == 'epsilon':
                             if arm == 'raw':
-                                waveform = sample_raw_full(
+                                sampled = sample_raw_full(
                                     model, schedule, caption, seed=sample_seed,
                                     clamp_output=False)
                             else:
-                                # This uses the SAME separately trained codec.
+                                # Same separately trained codec, before its Tanh.
                                 base_latent.denoiser = model
-                                waveform = sample_latent(
+                                sampled = sample_latent(
                                     base_latent, schedule, caption,
-                                    seed=sample_seed, clamp_output=False)
+                                    seed=sample_seed, clamp_output=False,
+                                    return_preactivation=True)
                         else:
-                            waveform = sample_velocity(
+                            sampled = sample_velocity(
                                 model, schedule, caption, seed=sample_seed,
                                 latent=arm == 'latent',
-                                codec=codec if arm == 'latent' else None)
-                        assessment = _record_unclipped(waveform)
+                                codec=codec if arm == 'latent' else None,
+                                return_preactivation=arm == 'latent')
+                        waveform, preactivation = (
+                            sampled if isinstance(sampled, tuple) else (sampled, None))
+                        assessment = _record_unclipped(
+                            waveform, decoder_preactivation=preactivation)
                         entries.append({
                             'category': category, 'language': language,
                             **assessment,
@@ -311,6 +338,22 @@ def _reduce_single(run: dict, *, seed: int, steps: int) -> dict:
                 _safe_float(x.get('mean_absolute_difference'), 'prompt change', upper=2.0001)
                 for x in changes
             ) / 2
+        if arm == 'latent':
+            for objective, source in (('epsilon', eps), ('velocity', vel)):
+                samples = source['samples']
+                if any(x.get('prelimiter_signal_source') != 'latent_codec_decoder_before_tanh'
+                       or 'codec_tanh_saturation_fraction' not in x
+                       for x in samples):
+                    raise ValueError('Missing pre-tanh codec saturation audit')
+                metrics[objective]['codec_tanh_saturation_fraction'] = sum(
+                    _safe_float(x['codec_tanh_saturation_fraction'], 'codec tanh saturation',
+                                upper=1) for x in samples
+                ) / len(samples)
+        else:
+            for source in (eps, vel):
+                if any(x.get('prelimiter_signal_source') != 'raw_ddpm_before_final_clamp'
+                       for x in source['samples']):
+                    raise ValueError('Missing raw pre-clamp measurement origin')
         for key in metrics['epsilon']:
             a, b = metrics['epsilon'][key], metrics['velocity'][key]
             comparison[arm][key] = {

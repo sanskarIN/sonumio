@@ -16,7 +16,7 @@ from research.velocity_ablation import (
     run_ablation,
 )
 from research.wave_diffusion import DiffusionSchedule
-from research.latent_audio import FRAMES, LatentResearchModel
+from research.latent_audio import FRAMES, LatentResearchModel, sample_latent
 from research.text_audio import TextWaveDenoiser
 
 
@@ -173,3 +173,51 @@ def test_reject_forged_paired_model_evidence():
     bad['audio_files_saved'] = True
     with pytest.raises(ValueError, match='Invalid/incompatible'):
         _reduce_single(bad, seed=17, steps=1)
+
+
+
+def test_latent_internal_tanh_saturation_is_not_hidden_by_valid_output_range():
+    from research.velocity_ablation import _record_unclipped
+    pre = torch.full((FRAMES,), 8.0, dtype=torch.float32)
+    post = torch.tanh(pre)
+    report = _record_unclipped(post, decoder_preactivation=pre)
+    assert report['prelimiter_signal_source'] == 'latent_codec_decoder_before_tanh'
+    assert report['preclip_peak'] == 8
+    assert report['preclip_out_of_range_fraction'] == 1
+    assert report['codec_tanh_saturation_fraction'] == 1
+    assert report['postclip']['peak'] < 1
+    assert report['postclip']['clipping_fraction'] == 1
+    with pytest.raises(ValueError, match='does not reproduce'):
+        _record_unclipped(torch.zeros(FRAMES), decoder_preactivation=pre)
+
+
+def test_explicit_raw_and_latent_sampler_limiter_bypass_preserves_defaults():
+    raw = TextWaveDenoiser(16)
+    latent = LatentResearchModel(16)
+    diffusion = DiffusionSchedule(8, profile='cosine_zero_terminal_v1')
+    seed = 42
+    initial_mode = latent.training
+    plain = sample_latent(latent, diffusion, 'wind', seed=seed)
+    decoded, pre = sample_latent(latent, diffusion, 'wind', seed=seed,
+                                 clamp_output=False, return_preactivation=True)
+    assert torch.allclose(plain, decoded.clamp(-1, 1))
+    assert torch.allclose(decoded, torch.tanh(pre), rtol=1e-6, atol=1e-6)
+    assert latent.training == initial_mode
+    direct, raw_pre = sample_velocity(latent.denoiser, diffusion, 'wind',
+                                      seed=seed, latent=True, codec=latent.codec,
+                                      return_preactivation=True)
+    assert torch.allclose(direct, torch.tanh(raw_pre), rtol=1e-6, atol=1e-6)
+    assert latent.training == initial_mode
+    with pytest.raises(ValueError):
+        sample_velocity(raw, diffusion, 'rain', seed=seed,
+                        return_preactivation=True)
+
+
+def test_objective_train_and_sampling_methods_do_not_publish_or_write_assets(tmp_path):
+    # No filesystem output argument is accepted by the generation samplers.
+    assert not list(tmp_path.iterdir())
+    model = TextWaveDenoiser(16)
+    schedule = DiffusionSchedule(8, profile='cosine_zero_terminal_v1')
+    waveform = sample_velocity(model, schedule, 'rain', seed=10)
+    assert waveform.shape == (FRAMES,)
+    assert not list(tmp_path.iterdir())

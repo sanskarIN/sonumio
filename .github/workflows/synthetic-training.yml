@@ -68,10 +68,13 @@ jobs:
           assert len(report['per_seed']) == 3
           assert [p for p in root.rglob('*') if p.is_file()] == [path]
           for arm in ('raw', 'latent'):
-              for metric in ('preclip_peak','preclip_rms',
-                             'preclip_out_of_range_fraction',
-                             'postclip_clipping_fraction', 'postclip_rms',
-                             'rain_vs_wind_mae'):
+              measures = ('preclip_peak', 'preclip_rms',
+                          'preclip_out_of_range_fraction',
+                          'postclip_clipping_fraction', 'postclip_rms',
+                          'rain_vs_wind_mae')
+              if arm == 'latent':
+                  measures += ('codec_tanh_saturation_fraction',)
+              for metric in measures:
                   stat = report['within_arm_difference_summary'][arm][metric]
                   assert stat['count'] == 3 and math.isfinite(stat['mean'])
                   print(arm, metric, 'v_minus_eps=', round(stat['mean'], 6),

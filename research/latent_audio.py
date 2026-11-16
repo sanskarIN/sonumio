@@ -77,6 +77,23 @@ class TinyAudioAutoencoder(nn.Module):
             raise ValueError('Latents must be finite')
         return self.decoder(latents)
 
+    def decode_with_preactivation(self, latents: torch.Tensor
+                                  ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Expose internal decoder values before tanh without changing output.
+
+        The decoder's Tanh is part of the trained codec architecture: its
+        saturation may conceal arbitrarily large internal activations.
+        """
+        if latents.ndim != 3 or latents.shape[1:] != (LATENT_CHANNELS, LATENT_FRAMES):
+            raise ValueError('Invalid latent layout')
+        if not torch.isfinite(latents).all():
+            raise ValueError('Latents must be finite')
+        preactivation = self.decoder[:-1](latents)
+        if not torch.isfinite(preactivation).all():
+            raise ValueError('Nonfinite decoder pre-tanh activations')
+        decoded = self.decoder[-1](preactivation)
+        return preactivation, decoded
+
     def forward(self, waveform: torch.Tensor) -> torch.Tensor:
         return self.decode(self.encode(waveform))
 
@@ -224,14 +241,16 @@ def latent_noise_loss(denoiser: TextLatentDenoiser, schedule: DiffusionSchedule,
 @torch.no_grad()
 def sample_latent(model: LatentResearchModel, schedule: DiffusionSchedule,
                   caption: str, *, seed: int = 0, guidance: float = 1.0,
-                  clamp_output: bool = True) -> torch.Tensor:
+                  clamp_output: bool = True,
+                  return_preactivation: bool = False
+                  ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
     """One-second neural research sample, NOT high-quality generative output."""
     if type(seed) is not int or not 0 <= seed < 2**32:
         raise ValueError('Seed must be an unsigned 32-bit integer')
     if not math.isfinite(guidance) or not 0 <= guidance <= 4:
         raise ValueError('Guidance must be finite and in [0, 4]')
-    if type(clamp_output) is not bool:
-        raise ValueError('clamp_output must be boolean')
+    if type(clamp_output) is not bool or type(return_preactivation) is not bool:
+        raise ValueError('Sampling output flags must be boolean')
     device = next(model.parameters()).device
     tokens = ByteTextTokenizer().encode([caption]).to(device)
     generator = torch.Generator(device=device).manual_seed(seed)
@@ -253,10 +272,15 @@ def sample_latent(model: LatentResearchModel, schedule: DiffusionSchedule,
                 x = mean + variance.sqrt() * torch.randn(x.shape, generator=generator, device=device)
             else:
                 x = mean
+        if return_preactivation:
+            pre, output = model.codec.decode_with_preactivation(x)
+            waveform, pre_tanh = output[0, 0].cpu(), pre[0, 0].cpu()
+        else:
+            waveform = model.codec.decode(x)[0, 0].cpu()
     finally:
         model.train(previous_mode)
-    waveform = model.codec.decode(x)[0, 0].cpu()
-    return waveform.clamp(-1, 1) if clamp_output else waveform
+    result = waveform.clamp(-1, 1) if clamp_output else waveform
+    return (result, pre_tanh) if return_preactivation else result
 
 
 def _save_checkpoint(path: Path, model: LatentResearchModel,
