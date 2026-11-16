@@ -32,6 +32,14 @@ jobs:
           python -m pip install -e '.[test]' 'scipy>=1.12,<2'
           python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
       - name: Execute PyTorch research tests
-        run: python -m pytest -q tests/test_research.py tests/test_wave_diffusion.py tests/test_audio_dataset.py tests/test_multi_condition.py tests/test_text_audio.py tests/test_latent_audio.py tests/test_latent_alignment.py tests/test_latent_quality.py tests/test_architecture_compare.py
+        run: python -m pytest -q tests/test_research.py tests/test_wave_diffusion.py tests/test_audio_dataset.py tests/test_multi_condition.py tests/test_text_audio.py tests/test_latent_audio.py tests/test_latent_alignment.py tests/test_latent_quality.py tests/test_architecture_compare.py tests/test_multi_seed_study.py
       - name: Run one-step raw-vs-latent research diagnostic (no saved model artifacts)
         run: python -m research.architecture_compare --codec-steps 1 --denoiser-steps 1 --evaluation-combinations 2 --seed 17
+      - name: Run 3-seed controlled architecture study (JSON only, no model weights)
+        run: |
+          python -m research.multi_seed_study \
+            --seeds 17,29,41 \
+            --codec-steps 24 --denoiser-steps 48 \
+            --schedule-steps 8 --evaluation-combinations 4 \
+            --output checkpoints/private-research/multi-seed-ci.json
+          python -c "import json; from pathlib import Path; p=Path('checkpoints/private-research/multi-seed-ci.json'); j=json.loads(p.read_text()); assert j['seed_count']==3 and not j['weights_saved'] and not j['weights_published']; print('Multiseed report validated:', j['configuration_sha256'])"

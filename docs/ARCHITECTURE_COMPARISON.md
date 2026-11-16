@@ -124,3 +124,13 @@ Do not interpret a 1–2 step smoke test as convergence or audio quality.
 convergence experiments with multiple seeds, trained model sampling, blind
 human evaluation, audited data rights and memorization testing. Do not
 publish a release, model tag or weights until independently authorized.
+
+
+## Follow-up: multiple initialization seeds
+
+Use the [replicated study](MULTI_SEED_STUDY.md) when exploring whether
+caption improvements are robust to different model initialization seeds.
+Results are summarized **within** the raw and latent model representations,
+with the 42 training recordings and held-out data identical across runs.
+Do not interpret variation across initializations as generalization to
+different sound datasets. Both arms still differ in FLOPs and codec cost.

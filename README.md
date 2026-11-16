@@ -194,3 +194,13 @@ absolute noise MSE values **must not** be ranked against each other.
 
 See the [project development status and remaining gates](docs/PROJECT_STATUS.md).
 No audio model weights or release artifacts are created by this benchmark.
+
+
+### Replicated raw/latent audio research
+
+The draft branch adds a [multi-seed research protocol](docs/MULTI_SEED_STUDY.md)
+to repeat controlled raw-vs-latent DDPM experiments with three or more
+prespecified initialization seeds. It reports **within-model** prompt/blank/
+zero-predictor comparisons, observed seed variability and exact data
+fingerprints; it never compares raw and latent noise MSE directly to pick a
+winner. It cannot certify generated-audio quality or model release readiness.

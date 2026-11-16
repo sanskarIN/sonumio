@@ -62,3 +62,15 @@ Keep PR #1 as a draft and develop/tests there. Merge only after explicit
 approval and release-readiness gates; never publish model weights, tags,
 pre-releases or stable artifacts by implication. Synthetic procedural audio is
 a development test substrate, not proof of Sonumio's final capability.
+
+
+## Multi-initialization follow-up (development branch)
+
+A [replicable multi-seed experiment](MULTI_SEED_STUDY.md) now runs both raw
+and latent audio DDPM benchmarks for multiple prespecified initialization
+seeds, preserving per-seed outputs and checking schema, dataset fingerprints,
+numeric metric consistency and absence of published weights. It reports
+observed across-seed spread **within each model**, never a cross-domain
+MSE-based winner. The remaining major research dependencies still include
+independent rights-cleared audio, long training, generation/listening
+assessment, compute-matched comparisons and a human safety review.

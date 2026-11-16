@@ -73,3 +73,14 @@ It reports per-arm paired/wrong/blank caption errors against a zero-noise
 predictor control, separate codec overhead, parameter counts and raw/latent
 CPU timings. **It is not parameter/FLOP matched and does not allow
 cross-domain numerical MSE ranking or claims about perceptual quality.**
+
+
+## Replicated architecture diagnostics
+
+The [multi-seed study](MULTI_SEED_STUDY.md) repeats the shared-data raw/
+latent experiments with independent model-initialization seeds. It enforces
+matching source-data fingerprints, selected captions, model configurations,
+no weights and valid numerical diagnostics before reporting descriptive
+mean/median/standard deviation/observed range and directional sign counts
+**within each representation**. The same data sources and captions appear
+in every run, so this measures initialization sensitivity **only**.
