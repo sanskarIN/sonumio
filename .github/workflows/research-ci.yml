@@ -32,7 +32,33 @@ jobs:
           python -m pip install -e '.[test]' 'scipy>=1.12,<2'
           python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
       - name: Execute PyTorch research tests
-        run: python -m pytest -q tests/test_research.py tests/test_wave_diffusion.py tests/test_audio_dataset.py tests/test_multi_condition.py tests/test_text_audio.py tests/test_latent_audio.py tests/test_latent_alignment.py tests/test_latent_quality.py tests/test_architecture_compare.py tests/test_multi_seed_study.py tests/test_generation_audit.py tests/test_schedule_ablation.py tests/test_velocity_prediction.py
+        run: python -m pytest -q tests/test_research.py tests/test_wave_diffusion.py tests/test_audio_dataset.py tests/test_multi_condition.py tests/test_text_audio.py tests/test_latent_audio.py tests/test_latent_alignment.py tests/test_latent_quality.py tests/test_architecture_compare.py tests/test_multi_seed_study.py tests/test_generation_audit.py tests/test_schedule_ablation.py tests/test_velocity_prediction.py tests/test_data_reproducibility.py
+      - name: Compare independently regenerated DSP recordings across Python processes
+        run: |
+          mkdir -p /tmp/sonumio-repro
+          python -m research.data_reproducibility --output /tmp/sonumio-repro/first.json > /dev/null
+          python -m research.data_reproducibility --output /tmp/sonumio-repro/repeat.json > /dev/null
+          python -m research.data_reproducibility --compare /tmp/sonumio-repro/first.json /tmp/sonumio-repro/repeat.json --strict-exact --output /tmp/sonumio-repro/strict.json > /dev/null
+          OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 python -m research.data_reproducibility --output /tmp/sonumio-repro/single-thread.json > /dev/null
+          python -m research.data_reproducibility --compare /tmp/sonumio-repro/first.json /tmp/sonumio-repro/single-thread.json --output /tmp/sonumio-repro/thread-compare.json > /dev/null
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          folder = Path('/tmp/sonumio-repro')
+          one = json.loads((folder / 'first.json').read_text(encoding='utf-8'))
+          repeated = json.loads((folder / 'strict.json').read_text(encoding='utf-8'))
+          threads = json.loads((folder / 'thread-compare.json').read_text(encoding='utf-8'))
+          assert repeated['recordings_compared'] == 84
+          assert repeated['exact_recording_bytes_equal']
+          assert repeated['exact_dataset_fingerprints_equal']
+          print('Same-environment two-process exact DSP reproducibility:', repeated['exact_recording_bytes_equal'])
+          print('Training source fingerprint:', one['splits']['train']['dataset_fingerprint'])
+          print('Heldout source fingerprint:', one['splits']['validation']['dataset_fingerprint'])
+          print('Different threading environment exact waveform identity:', threads['exact_recording_bytes_equal'])
+          print('Coarse bucket disagreement counts (0.001 and 0.01 amplitude):', threads['quantized_bucket_mismatch_counts'])
+          print('Per-recording drift examples:', threads['illustrative_exact_mismatches'][:3])
+          print('Coarse buckets are NOT evidence of byte identity or a bound on errors.')
+          PY
       - name: Run one-step raw-vs-latent research diagnostic (no saved model artifacts)
         run: python -m research.architecture_compare --codec-steps 1 --denoiser-steps 1 --evaluation-combinations 2 --seed 17
       - name: Run 3-seed controlled architecture study (JSON only, no model weights)

@@ -145,3 +145,17 @@ research direction**, not an approved production model. Next:
 
 **Draft PR #1 remains unmerged. No prerelease, stable release, tag, or
 model weight publication follows from passing this experiment.**
+
+
+## Following up the unexplained byte-fingerprint drift
+
+The [independent dataset reproducibility workflow](DATA_REPRODUCIBILITY.md)
+now records exact SHA256 per source/recording seed, coarse numerical
+bucket hashes, and allowlisted runtime details to help localize
+different fingerprints across executions. It runs two independent
+same-environment Python processes, a diagnostic single-thread comparison,
+and a separate preflight-vs-actual-training exact fingerprint check.
+The latter fails CI if training silently receives different data.
+Until independently verified, **do not claim byte-identical DSP inputs
+across independent GitHub runners**, even when the paired model
+metrics appear nearly the same.

@@ -37,6 +37,20 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -e '.[test]' 'scipy>=1.12,<2'
           python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+      - name: Record independent exact training and evaluation data fingerprints
+        run: |
+          python -m research.data_reproducibility --output /tmp/sonumio-input-data.json > /dev/null
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          data = json.loads(Path('/tmp/sonumio-input-data.json').read_text(encoding='utf-8'))
+          assert data['no_audio_or_weights_saved']
+          assert data['splits']['train']['recording_count'] == 42
+          assert data['splits']['validation']['recording_count'] == 42
+          print('Independent train SHA256:', data['splits']['train']['dataset_fingerprint'])
+          print('Independent heldout SHA256:', data['splits']['validation']['dataset_fingerprint'])
+          print('Synthetic research input provenance audited before training.')
+          PY
       - name: Train paired epsilon and velocity models from identical weights and noise
         run: |
           python -m research.velocity_ablation \
@@ -54,6 +68,11 @@ jobs:
           report = json.loads(path.read_text(encoding='utf-8'))
           assert report['protocol'] == 'paired-epsilon-v-objective-cosine-v1'
           assert report['seeds'] == [17, 29, 41]
+          manifest = json.loads(Path('/tmp/sonumio-input-data.json').read_text(encoding='utf-8'))
+          assert report['configuration']['train_fingerprint'] == manifest['splits']['train']['dataset_fingerprint']
+          assert report['configuration']['validation_fingerprint'] == manifest['splits']['validation']['dataset_fingerprint']
+          print('Training input SHA256 matches separately regenerated first-party corpus.')
+
           assert report['configuration']['codec_steps'] == 128
           assert report['configuration']['denoiser_steps_per_arm_objective'] == 256
           assert report['configuration']['diffusion_steps'] == 8

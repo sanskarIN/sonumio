@@ -159,3 +159,15 @@ exposes decoder **pre-Tanh** activations (rather than falsely treating
 a Tanh-bounded waveform as an unclipped decoder output).
 The experiment is synthetic-only; human listening, semantic prompting,
 rights-audited real audio and extended training still remain.
+
+
+## Synthetic-data provenance and cross-process reproducibility
+
+The [dataset reproducibility gate](DATA_REPRODUCIBILITY.md) records
+per-recording exact and bucketed hashes on all 42 training and 42 held-out
+original DSP sounds. New research CI regenerates the dataset in separate
+Python processes, requires exact agreement within the same runtime
+configuration and reports thread-profile differences separately.
+The private training CI also checks its actual model input fingerprints
+against an independent preflight. Coarse bucketed hash agreement is not
+a byte-identity claim or proof of real-world independent test coverage.

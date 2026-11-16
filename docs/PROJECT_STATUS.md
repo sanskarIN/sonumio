@@ -170,3 +170,15 @@ The measured velocity result is promising for numerical stability
 but does not establish actual sound fidelity or prompt meaning.
 A mismatch in exact synthetic data fingerprints across separate
 CI executions is recorded as an unresolved reproducibility issue.
+
+
+### Training dataset exactness and provenance
+
+A [source-level reproducibility audit](DATA_REPRODUCIBILITY.md) now guards
+training integrity. It enumerates all 84 distinct source/seed records,
+validates bilingual pairing and split uniqueness, logs exact little-endian
+float32 recording hashes separately from coarse numerical bucket hashes,
+and checks independently regenerated datasets across Python processes.
+The training workflow refuses a mismatch between the separately
+regenerated dataset and the corpus actually seen by the paired trainer.
+This is a research integrity gate, not a sound-quality improvement.

@@ -280,3 +280,14 @@ and latent internal-Tanh saturation from **71.13% to 0%**
 under matched cosine-schedule training. This is *numerical
 signal-health improvement*, not proof of realistic audible sound,
 prompt fidelity, or Sonumio-1 readiness. No weights were published.
+
+
+### Synthetic research data reproducibility gate
+
+The development branch includes a [recording-level data reproducibility audit](docs/DATA_REPRODUCIBILITY.md)
+to inspect exact SHA256 hashes of all **84 unique** first-party DSP
+train/validation recordings, plus separate coarse quantized diagnostics.
+CI checks independently regenerated data across Python processes and
+compares actual model-training source hashes with an independent preflight
+manifest. This addresses unresolved cross-run fingerprint drift without
+altering model input audio or releasing recordings/weights.
