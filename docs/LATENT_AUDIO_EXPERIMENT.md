@@ -32,8 +32,10 @@ API, outside recording or third-party weight is included or downloaded.
 
 ## Training protocol
 
-1. DSP audio is generated at 24 kHz and downsampled to 8 kHz, preserving a
-   **1.024-second** waveform for each source combination and deterministic seed.
+1. DSP audio is generated for 1.5 seconds at 24 kHz and downsampled to 8 kHz.
+   A deterministic **seed-dependent crop** preserves a **1.024-second** waveform
+   for each source combination. This is necessary because the uncropped
+   ambient synthesizer ignores seeds and otherwise duplicates evaluation audio.
 2. A codec learns reconstructions using waveform and multi-resolution spectral
    objectives. The encoder is then frozen for the next stage.
 3. The DDPM learns to predict noise on encoded latents, conditioned on

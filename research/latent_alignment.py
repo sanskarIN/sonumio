@@ -16,13 +16,13 @@ import torch
 
 from research.latent_audio import (
     FRAMES, SAMPLE_RATE, LatentResearchModel, ByteTextTokenizer,
-    _downsample_24k_to_8k, dsp_generate, load_checkpoint,
+    render_seeded_waveform, load_checkpoint,
 )
 from research.text_alignment import (
     CAPTION_VARIANTS, CaptionScores, _caption, _hard_negatives,
 )
 from research.text_audio import SYNTHETIC_COMBINATIONS
-from research.wave_diffusion import CATEGORIES, DiffusionSchedule
+from research.wave_diffusion import DiffusionSchedule
 
 BENCHMARK_VERSION = 'latent-one-second-hard-negatives-v1'
 RECORDING_SEEDS = (1001, 1002)
@@ -96,9 +96,7 @@ def evaluate(model: LatentResearchModel, schedule: DiffusionSchedule, *,
             alternatives = (members, *_hard_negatives(members))
             count = len(alternatives)
             for seed in seeds:
-                waveform = dsp_generate(' and '.join(CATEGORIES[i] for i in members),
-                                        FRAMES / SAMPLE_RATE, seed).samples
-                samples = _downsample_24k_to_8k(waveform)
+                samples = render_seeded_waveform(members, seed)
                 if samples.shape != (FRAMES,):
                     raise ValueError('Benchmark waveform is not a 1.024-second clip')
                 reference = torch.from_numpy(samples.copy()).view(1, 1, FRAMES)

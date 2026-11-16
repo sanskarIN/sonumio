@@ -124,3 +124,16 @@ def test_rejects_invalid_training_parameters():
                    dict(schedule_steps=2), dict(channels=64), dict(seed=2**32)]:
         with pytest.raises(ValueError):
             train(**values)
+
+
+def test_seeded_window_eliminates_exact_ambient_duplicates_across_splits():
+    from research.latent_audio import render_seeded_waveform
+    from research.wave_diffusion import CATEGORIES
+    from hashlib import sha256
+    ambient = (CATEGORIES.index('ambient'),)
+    seeds = (0, 1, 101, 102, 1001, 1002)
+    digests = [sha256(render_seeded_waveform(ambient, seed).tobytes()).hexdigest()
+               for seed in seeds]
+    assert len(set(digests)) == len(seeds)
+    assert np.array_equal(render_seeded_waveform(ambient, 101),
+                          render_seeded_waveform(ambient, 101))

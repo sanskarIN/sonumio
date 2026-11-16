@@ -39,7 +39,7 @@ FRAMES = 8192                    # 1.024s at 8 kHz (NOT long-form)
 LATENT_FRAMES = FRAMES // 64
 LATENT_CHANNELS = 16
 CHECKPOINT_FORMAT = 'sonumio-latent-audio-experiment-1'
-DATA_RECIPE = 'one-second-dsp-latent-v1'
+DATA_RECIPE = 'seeded-window-dsp-latent-v2'
 TRAIN_SEEDS = (0, 1)
 VALIDATION_SEEDS = (101, 102)
 MAX_WEIGHTS_BYTES = 64 * 1024 * 1024
@@ -167,6 +167,24 @@ class BilingualWaves:
     examples: int
 
 
+def render_seeded_waveform(members: tuple[int, ...], seed: int) -> np.ndarray:
+    """Seed-specific crop prevents exact duplicates of seed-invariant ambient DSP.
+
+    Evaluation still uses the same source family: this is a narrow leakage
+    control, not proof of meaningful real-world generalization.
+    """
+    if members not in SYNTHETIC_COMBINATIONS or type(seed) is not int or not 0 <= seed < 2**32:
+        raise ValueError('Invalid source combination or recording seed')
+    prompt = ' and '.join(CATEGORIES[i] for i in members)
+    raw = dsp_generate(prompt, 1.5, seed).samples
+    downsampled = _downsample_24k_to_8k(raw)
+    offset = int(np.random.default_rng(seed).integers(400, 1601))
+    cropped = downsampled[offset:offset + FRAMES]
+    if cropped.shape != (FRAMES,) or not np.isfinite(cropped).all():
+        raise ValueError('DSP input failed latent research shape checks')
+    return cropped.copy()
+
+
 def synthetic_bilingual_waves(seeds: tuple[int, ...] = TRAIN_SEEDS) -> BilingualWaves:
     """Seed-disjoint synthetic full-clip training/evaluation pairs."""
     if (not seeds or len(seeds) > 32 or len(seeds) != len(set(seeds))
@@ -175,12 +193,8 @@ def synthetic_bilingual_waves(seeds: tuple[int, ...] = TRAIN_SEEDS) -> Bilingual
     fingerprint = hashlib.sha256(DATA_RECIPE.encode('ascii'))
     waves, prompts = [], []
     for members in SYNTHETIC_COMBINATIONS:
-        dsp_prompt = ' and '.join(CATEGORIES[i] for i in members)
         for seed in seeds:
-            generated = dsp_generate(dsp_prompt, FRAMES / SAMPLE_RATE, seed).samples
-            waveform = _downsample_24k_to_8k(generated)
-            if waveform.shape != (FRAMES,) or not np.isfinite(waveform).all():
-                raise ValueError('DSP input failed latent research shape checks')
+            waveform = render_seeded_waveform(members, seed)
             for language in ('en', 'hi'):
                 caption = _synth_prompts(members, language, seed)
                 waves.append(torch.from_numpy(waveform.copy()).view(1, FRAMES))
