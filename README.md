@@ -271,3 +271,12 @@ and cosine schedule, and differ only in target and corresponding reverse
 DDPM sampler. The experiment measures unclipped generated-waveform
 amplitudes and numerical clipping risk. **No model quality improvement
 is claimed before the actual training evidence is inspected.**
+
+
+**Measured neural-generation improvement:** the
+[paired velocity-objective results](docs/VELOCITY_OBJECTIVE_RESULTS.md)
+report raw-waveform clipping falling from **94.64% to 0.004%**
+and latent internal-Tanh saturation from **71.13% to 0%**
+under matched cosine-schedule training. This is *numerical
+signal-health improvement*, not proof of realistic audible sound,
+prompt fidelity, or Sonumio-1 readiness. No weights were published.

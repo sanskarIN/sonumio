@@ -141,3 +141,14 @@ and robust English/Hindi prompt generalization are outstanding.
 
 **No release, pretrained weights, pre-release tag, stable release,
 or merge of draft PR #1 is authorized or performed by this study.**
+
+
+## Verified objective experiment
+
+The [measured paired v-vs-epsilon study](VELOCITY_OBJECTIVE_RESULTS.md)
+completed successfully. Raw output clipping and latent decoder
+internal-Tanh saturation fell substantially across all three model
+initialization seeds. These numbers measure **signal saturation**
+and cannot establish perceptual quality or language understanding.
+The study also records an unresolved **cross-job data byte-fingerprint
+drift**; paired comparisons remain same-data within each job.

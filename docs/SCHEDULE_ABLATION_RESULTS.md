@@ -110,3 +110,17 @@ hypothesis is a legitimate scientific outcome.
 
 **No release, pre-release, version tag, model-weight upload, public WAV,
 or merge of draft PR #1 was authorized or performed.**
+
+
+## Next controlled result: objective matters, not just schedule
+
+The [independent v-versus-epsilon paired objective experiment](VELOCITY_OBJECTIVE_RESULTS.md)
+on the **same cosine schedule** showed that training v-prediction
+with the matching x0-based posterior substantially reduced clipping
+compared with epsilon prediction. Thus the earlier negative cosine
+finding must be read as *cosine plus epsilon under this training
+budget*, not as proof that any cosine schedule is universally inferior.
+The trained networks, timestep/noise draws, and codec were tightly
+matched within each model arm. Do not promote a production model
+without independent sound quality, prompt relevance and real-audio
+evaluations.

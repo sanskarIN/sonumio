@@ -148,3 +148,14 @@ terminal alpha factor used by the failed epsilon sampler. It records
 both pre-clamp out-of-range statistics and final clipping. Even if
 these improve, rights-cleared data and actual listening evaluation
 remain unfulfilled prerequisites.
+
+
+## Verified velocity-objective experiment
+
+The [measured three-seed v-versus-epsilon results](VELOCITY_OBJECTIVE_RESULTS.md)
+confirm substantially reduced waveform saturation under the near-zero
+terminal-SNR cosine schedule. The corrected codec audit additionally
+exposes decoder **pre-Tanh** activations (rather than falsely treating
+a Tanh-bounded waveform as an unclipped decoder output).
+The experiment is synthetic-only; human listening, semantic prompting,
+rights-audited real audio and extended training still remain.

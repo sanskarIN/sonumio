@@ -157,3 +157,16 @@ reverse posterior, while keeping the severely clipped cosine+epsilon
 configuration as the negative baseline. It additionally measures
 **pre-clamp** waveform peaks and out-of-range fractions so clipping is
 not hidden. Results remain synthetic-only, research-only and private.
+
+
+### Experimental velocity prediction reduced severe saturation
+
+The [verified paired objective report](VELOCITY_OBJECTIVE_RESULTS.md)
+shows numerical saturation improvements for 8-kHz 1.024-second
+synthetic samples on all three initializations: raw cosine+epsilon
+hard-clipping **94.64%**, raw cosine+velocity **0.004%**;
+latent decoder internal-Tanh saturation **71.13%** versus **0%**.
+The measured velocity result is promising for numerical stability
+but does not establish actual sound fidelity or prompt meaning.
+A mismatch in exact synthetic data fingerprints across separate
+CI executions is recorded as an unresolved reproducibility issue.
