@@ -113,3 +113,25 @@ Sonumio-1, realistic audio quality, open-ended prompting, speech,
 music, real-world data rights, and creator readiness **remain unproven**.
 No draft PR merge, prerelease, stable release, version tag or
 model weights publication is authorized.
+
+
+## Independent hosted-CPU matrix
+
+The [independent DSP CPU pipeline trace workflow](../.github/workflows/dsp-trace-matrix.yml)
+also schedules **four separate** Ubuntu 24.04 hosted jobs on the same
+GitHub commit. Each job installs the same Python/CPU research dependencies,
+runs the original 84-recording tracer twice in independent Python
+processes, strictly validates same-host byte identity, and prints the
+allowlisted CPU model, per-stage source hashes, and coarse bucket hashes.
+
+The individual jobs are separate machines; differing exact stage hashes
+between their logs are recorded as **data-environment evidence**, not as
+a failed neural model test or a reason to rewrite the DSP generator.
+A matching stage hash only certifies that stage's bytes; differences
+locate a first observed divergence but do not prove the causal
+instruction, compiler implementation, or libm/kernel behavior.
+
+No audio WAV, neural model weights, named models or releases are
+created. Workflow logs contain hash/CPU metadata only. The
+experiment is bounded to four parallel hosted machines and is not
+intended as ongoing large-scale CPU benchmarking.
