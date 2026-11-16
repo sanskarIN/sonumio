@@ -217,3 +217,9 @@ runs on Sonumio-owned sound samples using all 21 source combinations
 in held-out evaluation. It is research only, not high-quality audio generation,
 and produces no published model weights. Do not confuse synthetic audio with
 a rights-cleared, independently validated real-world recording corpus.
+
+
+**Measured training evidence:** the [extended synthetic training report](docs/EXTENDED_SYNTHETIC_RESULTS.md)
+documents a verified three-seed run (128 codec and 256 denoiser updates,
+full 21-combination validation) and honest limitations. All four CI
+workflows passed; no trained neural weights or model releases were published.

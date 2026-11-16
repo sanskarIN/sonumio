@@ -96,3 +96,12 @@ production resource limits; and explicit release approval.
 
 Passing this synthetic training workflow is **not** evidence that the model
 can create realistic SFX, speech or music for creators.
+
+
+## Verified run and measured outcomes
+
+The extended experiment has now **completed**, with validated private
+metrics and no model artifacts. Read the
+[measured three-seed extended-training report](EXTENDED_SYNTHETIC_RESULTS.md)
+and [successful GitHub Actions run](https://github.com/sanskarIN/sonumio/actions/runs/43848233806).
+Synthetic noise-prediction success is not generalizable audio quality.

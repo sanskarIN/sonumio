@@ -96,3 +96,13 @@ architecture, using the full 21-combination synthetic evaluation grid.
 It writes only an ephemeral private metrics JSON on its runner, with no
 weight artifacts or publication. This is substantially longer training than
 the first experimental pilot, but still **not** a release or quality gate.
+
+
+### Extended training executed and verified
+
+A [successful three-seed CPU experiment](EXTENDED_SYNTHETIC_RESULTS.md)
+completed **128 codec and 256 denoiser updates per model per seed** with all
+21 synthetic sound combinations evaluated. Every model exceeded its own
+zero-predictor control, but cross-domain results cannot select a winner.
+No real-world recordings, subjective listening tests or weight files were
+included. Four GitHub workflows passed on the experiment commit.
