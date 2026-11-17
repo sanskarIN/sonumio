@@ -445,3 +445,51 @@ holdout assertions. This correction does not alter source audio or SHA256s.
 A new `research/portable_dsp_reference.py` freezes the **four-host NumPy 2.4.6 SHA** for each of three numerical groups and both methods, but deliberately does not pin original host-sensitive NumPy float32 hashes or assert universal NumPy-version reproducibility. CI requires those frozen values on its four hosted CPU jobs. `research/portable_seed_stage_probe.py` separately fingerprints RNG states, individual layers, mix/fade, normalization, resampling and final crop for **5 seeds × 21 combinations × 2 oscillator methods = 210 staged traces**, enabling exact first-stage comparison under NumPy 1.26.4 and 2.4.6 on the same CPU. Its result remains **pending CI**.
 
 A completed intermediate research run [#44083400722](https://github.com/sanskarIN/sonumio/actions/runs/44083400722) passed **376 tests**. This is not the final CI result for the subsequent golden-reference and stage-trace additions. All experiments remain separate from inference, original training datasets and model weights.
+
+
+### 17 November 2026 — 378-case two-NumPy DSP reproducibility proven in first five-job run
+
+[Original five-job research matrix #44095705429](https://github.com/sanskarIN/sonumio/actions/runs/44095705429)
+completed successfully. The independent
+[forest-aware source study](FOREST_SINE_RESULTS.md)
+produced exactly the same complete 24-kHz float32
+and final 8-kHz crop SHA256s across all
+**189 source/seed cases per candidate method**, both
+NumPy 1.26.4 and 2.4.6 on one controlled
+CPU, and **four separately hosted
+NumPy-2.4.6 CPU jobs**. The earlier
+seed-41 thunder+forest and wind+forest
+differences were traced to the original
+forest chirp float32 `np.sin` result,
+whereas the original phase and random
+frequency inputs matched. Both isolated
+double-precision sine methods reproduced
+the same output fingerprint throughout.
+The complete measured hashes and exact
+CPU/NumPy scope are documented;
+the original DSP generator, neural data
+and model weights remain untouched.
+
+`research/portable_forest_reference.py`
+now pins the independently measured
+378-case raw and crop SHA aggregates
+for the two tested NumPy versions,
+and the four-runner plus same-CPU
+research CI now explicitly checks them.
+Those **subsequent strict regression
+gate runs must be verified separately**;
+the successful original five-job
+study did not itself execute the
+new golden assertions.
+
+The new [five-method isolated
+CPU resource profile](DSP_RESOURCE_PROFILE.md)
+completed on [research CI #44097168528](https://github.com/sanskarIN/sonumio/actions/runs/44097168528),
+with **411 passed tests**. Observed
+whole-process memory was roughly
+45 MB for the original procedural
+renderer versus 300 MB for variants
+that import research dependencies,
+so it is **not** a per-operation
+DSP allocation or neural-model
+memory measurement.
