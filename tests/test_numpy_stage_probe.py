@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import copy
+import json
 
 import pytest
 
@@ -82,3 +83,20 @@ def test_stage_identity_grid_and_nonfinite_metadata_fail_closed(trace):
     bad["recordings"][0]["seed"] = bad["recordings"][1]["seed"]
     with pytest.raises(ValueError, match="source trace"):
         study.validate_trace(bad)
+
+
+def test_first_differing_stage_uses_temporal_order_after_sorted_json(trace):
+    # JSON sort_keys is used by the CLI and MUST NOT reorder the diagnostic
+    # execution order when comparing original and changed stage bytes.
+    drift = copy.deepcopy(trace)
+    stages = drift["recordings"][0]["stages"]
+    stages["layer_rain"] = "f" * 64
+    stages["cropped_8k"] = "e" * 64
+    drift["stage_aggregate"] = study._aggregate(drift["recordings"])
+    encoded = json.dumps(drift, sort_keys=True)
+    restored = json.loads(encoded)
+    study.validate_trace(restored)
+    result = study.compare_traces(trace, restored)
+    assert result["first_divergent_stage_per_case"]["rain@0"] == "layer_rain"
+    assert result["paired_differing_recordings_by_stage"]["layer_rain"] == 1
+    assert result["paired_differing_recordings_by_stage"]["cropped_8k"] == 1
