@@ -148,3 +148,37 @@ def test_mutations_are_rejected_and_comparator_distinguishes_host_drift(report):
     assert result["same_input_and_kernel_hashes"]
     assert result["original_sampled_hashes_equal"]
     assert not result["candidate_sampled_hashes_equal"]
+
+
+# Independent golden arrays are constructed with specified integer sequences
+# and fixed rational scaling; neither input depends on the DSP RNG nor on
+# host-dependent NumPy convolution arithmetic. Their hashes were generated
+# with the scalar-reference specification and checked on an independent
+# local Python/NumPy environment before committing.
+@pytest.mark.parametrize(("taps", "mode", "expected"), [
+    (12, "same", "f2b8e9c8e146f5bd0c793cc2a5e0e5d2a82873edf1e2f16fef1b2c72b4eb88a3"),
+    (12, "full", "f9006353921257d6547da12dd650e8cb529e6a9d12ea5555a8116770c24d598f"),
+    (60, "same", "3cad22e4212f1c2e703d03ea1c9fe747d23b447ae17c4a3669c68432eebc3776"),
+    (60, "full", "5dca0102428997244d36cb1aacf10506256dcc793f60eb042987739438a2862d"),
+    (140, "same", "5822af554e15c0c6ed6f377c266be0985b67c4589d2430c809890985d7b660f8"),
+    (140, "full", "d070d847417da786e761748d4b547bcb3301fc1088a04d87378ca337c3caa03e"),
+    (180, "same", "dc326e27d81de462f6db86d3063b29cc70930bcb7bd67e54d5a80f760a3356d6"),
+    (180, "full", "9e8dd4ddd53763f39ece75e7f4c1cef52a0ac87547aae050d681053af5cd3d07"),
+])
+def test_golden_float32_sample_bytes(taps, mode, expected):
+    import hashlib
+
+    samples = np.asarray(
+        [((i * 41) % 157 - 78) / 53.0 for i in range(257)],
+        dtype=np.float32,
+    )
+    kernel = np.asarray(
+        [((j * 23) % 71 - 35) / 97.0 for j in range(taps)],
+        dtype=np.float32,
+    )
+    frames = len(samples) if mode == "same" else len(samples) + taps - 1
+    observed = selected_scalar_convolution(
+        samples, kernel, tuple(range(frames)), mode=mode
+    )
+    sha = hashlib.sha256(np.asarray(observed, dtype="<f4").tobytes()).hexdigest()
+    assert sha == expected
