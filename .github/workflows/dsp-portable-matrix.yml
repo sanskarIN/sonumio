@@ -7,6 +7,7 @@ on:
       - 'research/portable_seed_stage_probe.py'
       - 'research/forest_sine_probe.py'
       - 'research/portable_forest_candidate.py'
+      - 'research/portable_forest_reference.py'
       - 'research/portable_dsp_reference.py'
       - 'research/ambient_sine_candidate.py'
       - 'research/fast_dsp_candidate.py'
@@ -14,6 +15,7 @@ on:
       - 'tests/test_portable_seed_stage_probe.py'
       - 'tests/test_forest_sine_probe.py'
       - 'tests/test_portable_forest_candidate.py'
+      - 'tests/test_portable_forest_reference.py'
       - 'tests/test_portable_dsp_reference.py'
       - '.github/workflows/dsp-portable-matrix.yml'
   workflow_dispatch:
@@ -89,6 +91,7 @@ jobs:
           import json
           from pathlib import Path
           from research.portable_forest_candidate import validate_report, METHODS
+          from research.portable_forest_reference import verify_reference as verify_forest_reference
           data = json.loads(Path('/tmp/sonumio-forest-aware.json').read_text())
           validate_report(data)
           assert len(data['recordings']) == 378
@@ -96,6 +99,9 @@ jobs:
           assert not data['original_neural_data_modified']
           assert not data['candidate_used_for_neural_training']
           assert not data['audio_files_saved'] and not data['model_weights_saved']
+          checked = verify_forest_reference(data)
+          assert checked['matched_verified_full_raw_and_crop_reference']
+          print('FOREST_AWARE_GOLDEN_REFERENCE:', True)
           print('FOREST_AWARE_CPU:', data['environment']['cpu_model'])
           print('FOREST_AWARE_NUMPY:', data['environment']['numpy'])
           for method in METHODS:
@@ -177,6 +183,13 @@ jobs:
           forest_aware = compare_forest_aware(before_forest_aware, after_forest_aware)
           assert forest_aware['same_cpu_model'] and forest_aware['cases_per_method'] == 189
           print('FOREST_AWARE_VERSION_CPU:', before_forest_aware['environment']['cpu_model'])
+          from research.portable_forest_reference import verify_reference as verify_forest_reference
+          assert forest_aware['all_candidate_bytes_match'], (
+              'Forest-aware 189-case source/crop bytes changed across NumPy versions'
+          )
+          assert verify_forest_reference(before_forest_aware)['matched_verified_full_raw_and_crop_reference']
+          assert verify_forest_reference(after_forest_aware)['matched_verified_full_raw_and_crop_reference']
+          print('FOREST_AWARE_CROSS_NUMPY_GOLDEN_REFERENCE:', True)
           print('FOREST_AWARE_VERSION_MATCH:', forest_aware['all_candidate_bytes_match'])
           print('FOREST_AWARE_PREVIOUS_VERSION_MATCH:', forest_aware['previous_candidate_hashes_match'])
           for method, splits in forest_aware['by_method_split'].items():
