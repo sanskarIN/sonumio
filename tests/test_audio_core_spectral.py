@@ -42,6 +42,16 @@ def test_centered_hann_stft_istft_recovers_float_pcm(signal, nfft, hop):
     np.testing.assert_allclose(restored.samples, signal.samples, atol=1e-5)
 
 
+def test_spectral_array_backing_cannot_reenable_numpy_write_flag(signal):
+    spec = stft(signal, StftConfig(256, 64))
+    assert spec.spectrum.flags.writeable is False
+    with pytest.raises(ValueError):
+        spec.spectrum.setflags(write=True)
+    cloned = spec.spectrum.copy()
+    cloned.fill(0)
+    assert np.max(np.abs(spec.spectrum)) > 0
+
+
 def test_spectrogram_frequency_grid_and_magnitude_power_shape(signal):
     spec = stft(signal, StftConfig(n_fft=512, hop_length=128))
     assert spec.frequencies[0] == 0
