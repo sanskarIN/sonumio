@@ -89,3 +89,36 @@ The source generators and training data are
 unchanged. Draft PR #1 remains unmerged; no
 release, pre-release, tags, sound files or
 model weights have been published.
+
+
+## First measured CPU example (completed CI)
+
+[Research workflow #44097168528](https://github.com/sanskarIN/sonumio/actions/runs/44097168528)
+completed successfully with **411 passed tests**,
+including this new isolated-process
+benchmark. For a 1.5-second
+`thunder-forest` prompt, first-party
+seed 41 and two timed repetitions
+per variant, one hosted CPU reported:
+
+| Separate process | Median render seconds | Whole-process peak RSS (KiB) |
+| --- | ---: | ---: |
+| Original procedural | 0.001667 | 45,400 |
+| Fast float64 source | 0.001649 | 299,796 |
+| Portable ambient float64 | 0.001562 | 299,948 |
+| Forest-aware float64 sine | 0.001708 | 299,952 |
+| Forest-aware Python scalar sine | 0.002480 | 299,856 |
+
+The very small number of timed
+repetitions cannot justify sustained
+throughput or benchmark ranking.
+The substantially larger process
+high-water mark for research variants
+reflects extra imported dependencies
+(such as PyTorch), not 255 MB of
+additional audio samples or the
+isolated algorithm's live memory.
+A production source-only build
+must be profiled separately without
+research imports before making
+deployment recommendations.
