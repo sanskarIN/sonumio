@@ -110,11 +110,15 @@ python -m research.complete_dsp_candidate --scope full \
   --output checkpoints/private-research/complete-dsp-full.json
 ```
 
-The CPU matrix now also executes the full 84-recording scope to
-check all pairings on independently selected runners. The specific
-full-scope reproducibility result must be established from completed
-CI logs; **do not report it as passing solely because this step
-has been added**.
+The [full 84-recording CPU experiment](COMPLETE_DSP_RESULTS.md)
+has since passed **4/4 independently provisioned CPU jobs**, including
+two AMD EPYC 7763 runners: all candidate 24-kHz and final 8-kHz crop
+aggregates for 42 training and 42 validation recordings matched exactly.
+The independent [reference verifier](../research/candidate_reference.py)
+now detects unexpected changes to those measured candidate aggregates
+in later complete-corpus CI. This is numerical identity for the tested
+first-party synthetic inputs, **not** a universal cross-CPU or
+creator-quality neural audio guarantee.
 
 ## Gates before any future recipe promotion
 
