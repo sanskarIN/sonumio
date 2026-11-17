@@ -128,6 +128,7 @@ def _crop(resampled: np.ndarray, seed: int) -> tuple[int, np.ndarray]:
 
 def trace_one(members: tuple[int, ...], seed: int, split: str) -> dict:
     if (split not in ("train", "validation")
+            or type(seed) is not int
             or seed not in dict(SPLITS)[split]
             or members not in SYNTHETIC_COMBINATIONS):
         raise ValueError("Invalid source/seed/split combination")
