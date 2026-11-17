@@ -75,6 +75,7 @@ def build_probe() -> dict:
         "sample_rate": dsp.SAMPLE_RATE,
         "frames": FRAMES,
         "stages": stages,
+        "stage_order": list(stages),
         "environment": _environment(),
         "matches_original_drone_exactly": True,
         "source_generator_modified": False,
@@ -96,7 +97,7 @@ def validate_probe(value: dict) -> None:
             or value.get("model_weights_saved") is not False):
         raise ValueError("Invalid ambient expression experiment metadata")
     stages = value.get("stages")
-    if not isinstance(stages, dict) or list(stages) != [
+    if not isinstance(stages, dict) or value.get("stage_order") != [
         "time_grid", "phase_110", "phase_164_81",
         "phase_220", "phase_lfo", "sin_110", "sin_164_81",
         "sin_220", "sin_lfo", "scaled_sin_164_81",
@@ -104,6 +105,8 @@ def validate_probe(value: dict) -> None:
         "original_drone_output",
     ]:
         raise ValueError("Missing ambient expression stages or wrong order")
+    if set(value["stage_order"]) != set(stages):
+        raise ValueError("Ambient stage membership changed")
     for name, record in stages.items():
         if (not isinstance(record, dict)
                 or record.get("dtype") not in ("float32", "float64")
@@ -114,8 +117,10 @@ def validate_probe(value: dict) -> None:
 def compare_probes(first: dict, second: dict) -> dict:
     validate_probe(first)
     validate_probe(second)
+    if first["stage_order"] != second["stage_order"]:
+        raise ValueError("Ambient execution stage order differs")
     mismatches = [
-        name for name in first["stages"]
+        name for name in first["stage_order"]
         if first["stages"][name] != second["stages"][name]
     ]
     return {
