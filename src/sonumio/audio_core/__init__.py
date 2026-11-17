@@ -1,0 +1,44 @@
+"""Bounded, local-first signal processing primitives.
+
+This package is deliberately independent of the original procedural
+generator and all neural model training. Audio buffers are channel-first;
+no model weights, network calls, user audio uploads or implicit file writes.
+The existing API continues to use its historical renderer.
+"""
+
+from .errors import AudioContractError, AudioFormatError, AudioLimitError
+from .contracts import (
+    AudioBuffer, AudioLayout, AudioSpec, as_channel_first, check_audio,
+    check_rate, finite_float, make_buffer, validate_allocation,
+)
+from .timebase import (
+    FrameInterval, FramePosition, TimeGrid, frames_from_seconds,
+    seconds_from_frames, split_intervals,
+)
+from .numerics import (
+    Decibel, db_to_gain, gain_to_db, dbfs, linear_ramp, equal_power_ramps,
+    stable_rms, stable_peak, finite_clamp, saturate, mix_accumulate,
+)
+from .hashing import (
+    digest_audio, digest_file, canonical_json_bytes, checksum_record,
+    verify_record, strict_sha256,
+)
+from .windows import (
+    hann, hamming, blackman, tukey, sqrt_hann, envelope, window_bank,
+    overlap_envelope, validate_cola, weighted_overlap_add,
+)
+
+__all__ = [
+    "AudioContractError", "AudioFormatError", "AudioLimitError",
+    "AudioBuffer", "AudioLayout", "AudioSpec", "as_channel_first",
+    "check_audio", "check_rate", "finite_float", "make_buffer",
+    "validate_allocation", "FrameInterval", "FramePosition", "TimeGrid",
+    "frames_from_seconds", "seconds_from_frames", "split_intervals",
+    "Decibel", "db_to_gain", "gain_to_db", "dbfs", "linear_ramp",
+    "equal_power_ramps", "stable_rms", "stable_peak", "finite_clamp",
+    "saturate", "mix_accumulate", "digest_audio", "digest_file",
+    "canonical_json_bytes", "checksum_record", "verify_record",
+    "strict_sha256", "hann", "hamming", "blackman", "tukey",
+    "sqrt_hann", "envelope", "window_bank", "overlap_envelope",
+    "validate_cola", "weighted_overlap_add",
+]
