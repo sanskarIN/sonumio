@@ -5,10 +5,12 @@ on:
     paths:
       - 'research/portable_dsp_candidate.py'
       - 'research/portable_seed_stage_probe.py'
+      - 'research/portable_dsp_reference.py'
       - 'research/ambient_sine_candidate.py'
       - 'research/fast_dsp_candidate.py'
       - 'tests/test_portable_dsp_candidate.py'
       - 'tests/test_portable_seed_stage_probe.py'
+      - 'tests/test_portable_dsp_reference.py'
       - '.github/workflows/dsp-portable-matrix.yml'
   workflow_dispatch:
 
@@ -51,12 +53,18 @@ jobs:
           from research.portable_dsp_candidate import validate_report, METHODS
           data = json.loads(Path('/tmp/sonumio-portable-research.json').read_text())
           validate_report(data)
+          from research.portable_dsp_reference import verify_reference
+          checked = verify_reference(data)
+          assert checked['total_candidate_recordings'] == 378
+          assert checked['all_candidate_hashes_match_four_cpu_reference']
           assert len(data['recordings']) == 378
           assert data['case_count_per_method'] == 189
           assert not data['original_renderer_modified']
           assert not data['original_neural_data_modified']
           assert not data['portable_candidate_used_for_training']
           assert not data['audio_files_saved'] and not data['model_weights_saved']
+          print('PORTABLE_DSP_REFERENCE_MATCH:', checked['all_candidate_hashes_match_four_cpu_reference'])
+          print('PORTABLE_DSP_REFERENCE_RUN:', checked['reference_workflow'])
           print('PORTABLE_DSP_CPU:', data['environment']['cpu_model'])
           print('PORTABLE_DSP_NUMPY:', data['environment']['numpy'])
           for method in METHODS:
