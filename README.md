@@ -370,3 +370,12 @@ All 40 pilot source/seed recordings produced identical candidate
 where original NumPy hashes differed. The full 84-recording corpus is
 an additional gate, not automatically proven by the pilot. No existing
 generator, neural training recipe, checkpoint or release changed.
+
+
+**Numerical DSP performance gate:** the
+[paired scalar-vs-original benchmark](docs/DSP_CANDIDATE_BENCHMARK.md)
+reports wall-clock 24-kHz render latency and candidate/baseline
+slowdown for fixed prompts and seeds, without saving WAVs or weights.
+The candidate is a research reference; no performance or perceived
+quality advantage has been established and existing training data
+remain unchanged.
