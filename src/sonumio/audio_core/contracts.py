@@ -212,8 +212,11 @@ class AudioBuffer:
             raise AudioContractError("Audio shape disagrees with explicit AudioSpec")
         if not isinstance(self.source_note, str) or len(self.source_note) > 500:
             raise AudioContractError("Invalid source note")
-        data.setflags(write=False)
-        object.__setattr__(self, "samples", data)
+        # A writable owner array with write=False can have that flag reset
+        # by its consumer. Immutable bytes backing prevents that bypass.
+        frozen = np.frombuffer(data.tobytes(order="C"), dtype=np.float32)
+        frozen = frozen.reshape(data.shape)
+        object.__setattr__(self, "samples", frozen)
 
     @property
     def sample_rate(self) -> int:
