@@ -33,7 +33,7 @@ jobs:
           python -m pip install -e '.[test]' 'scipy>=1.12,<2'
           python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
       - name: Execute PyTorch research tests
-        run: python -m pytest -q tests/test_research.py tests/test_wave_diffusion.py tests/test_audio_dataset.py tests/test_multi_condition.py tests/test_text_audio.py tests/test_latent_audio.py tests/test_latent_alignment.py tests/test_latent_quality.py tests/test_architecture_compare.py tests/test_multi_seed_study.py tests/test_generation_audit.py tests/test_schedule_ablation.py tests/test_velocity_prediction.py tests/test_data_reproducibility.py tests/test_dsp_pipeline_trace.py tests/test_dsp_convolution_probe.py tests/test_stable_convolution_candidate.py tests/test_full_convolution_candidate.py tests/test_complete_dsp_candidate.py tests/test_dsp_benchmark.py tests/test_candidate_reference.py tests/test_vectorized_convolution_candidate.py tests/test_fast_dsp_candidate.py tests/test_dsp_three_way.py tests/test_heldout_dsp_probe.py tests/test_numpy_stage_probe.py tests/test_numpy_ambient_probe.py tests/test_ambient_sine_candidate.py tests/test_portable_dsp_candidate.py tests/test_portable_seed_stage_probe.py tests/test_forest_sine_probe.py tests/test_portable_forest_candidate.py tests/test_portable_dsp_reference.py
+        run: python -m pytest -q tests/test_research.py tests/test_wave_diffusion.py tests/test_audio_dataset.py tests/test_multi_condition.py tests/test_text_audio.py tests/test_latent_audio.py tests/test_latent_alignment.py tests/test_latent_quality.py tests/test_architecture_compare.py tests/test_multi_seed_study.py tests/test_generation_audit.py tests/test_schedule_ablation.py tests/test_velocity_prediction.py tests/test_data_reproducibility.py tests/test_dsp_pipeline_trace.py tests/test_dsp_convolution_probe.py tests/test_stable_convolution_candidate.py tests/test_full_convolution_candidate.py tests/test_complete_dsp_candidate.py tests/test_dsp_benchmark.py tests/test_candidate_reference.py tests/test_vectorized_convolution_candidate.py tests/test_fast_dsp_candidate.py tests/test_dsp_three_way.py tests/test_heldout_dsp_probe.py tests/test_numpy_stage_probe.py tests/test_numpy_ambient_probe.py tests/test_ambient_sine_candidate.py tests/test_portable_dsp_candidate.py tests/test_portable_seed_stage_probe.py tests/test_forest_sine_probe.py tests/test_portable_forest_candidate.py tests/test_dsp_resource_profile.py tests/test_portable_dsp_reference.py
       - name: Compare independently regenerated DSP recordings across Python processes
         run: |
           mkdir -p /tmp/sonumio-repro
@@ -147,4 +147,32 @@ jobs:
           print('THREE_WAY_FAST_OVER_ORIGINAL:', data['fast_vs_legacy_median_latency_ratio'])
           print('THREE_WAY_SAMPLE_ERROR:', data['maximum_sample_error'])
           print('Local 24k DSP in-memory microbenchmark, NOT neural production performance.')
+          PY
+
+      - name: Independently profile five original/fast/forest DSP variants (one process each)
+        run: |
+          python -m benchmarks.dsp_resource_profile \
+            --case thunder-forest --seed 41 --repeats 2 --warmups 1 \
+            --output checkpoints/private-research/dsp-rss-profile-ci.json > /dev/null
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from benchmarks.dsp_resource_profile import PROTOCOL, VARIANTS
+          data = json.loads(Path('checkpoints/private-research/dsp-rss-profile-ci.json').read_text())
+          assert data['protocol'] == PROTOCOL
+          assert data['case'] == 'thunder-forest' and data['seed'] == 41
+          assert data['source_frames'] == 36000 and data['repeats'] == 2
+          assert set(data['variants']) == set(VARIANTS)
+          assert not data['original_generator_modified']
+          assert not data['original_data_modified']
+          assert not data['candidate_used_for_neural_training']
+          assert not data['audio_files_saved'] and not data['model_weights_saved']
+          for name, row in data['variants'].items():
+              assert len(row['wave_sha256']) == 64
+              assert 0 < row['median_render_seconds'] < 20
+              assert not row['audio_files_saved'] and not row['model_weights_saved']
+              print('DSP_RESOURCE_VARIANT:', name,
+                    'median_24k_render_seconds:', row['median_render_seconds'],
+                    'whole_process_peak_rss_kib:', row['total_process_peak_rss_kib'])
+          print('Memory includes process and imported libraries, not only DSP allocations.')
           PY
