@@ -14,6 +14,7 @@ on:
       - 'research/candidate_reference.py'
       - 'research/vectorized_convolution_candidate.py'
       - 'research/fast_dsp_candidate.py'
+      - 'research/heldout_dsp_probe.py'
       - 'benchmarks/dsp_three_way.py'
       - 'tests/test_stable_convolution_candidate.py'
       - 'tests/test_full_convolution_candidate.py'
@@ -21,6 +22,7 @@ on:
       - 'tests/test_candidate_reference.py'
       - 'tests/test_vectorized_convolution_candidate.py'
       - 'tests/test_fast_dsp_candidate.py'
+      - 'tests/test_heldout_dsp_probe.py'
       - 'tests/test_dsp_three_way.py'
       - 'research/data_reproducibility.py'
       - 'research/latent_audio.py'
@@ -320,4 +322,33 @@ jobs:
               print('FAST_DSP_MAX_8K_CROP_ERROR:', split, values['max_8k_crop_abs_error'])
               print('FAST_DSP_MEDIAN_24K_S:', split, values['median_fast_24k_seconds'])
           print('Investigation only; fast candidate is not enabled in training.')
+          PY
+
+      - name: Fingerprint 105 previously unseen fast DSP source/seed combinations
+        run: |
+          python -m research.heldout_dsp_probe --output /tmp/sonumio-heldout-first.json > /dev/null
+          python -m research.heldout_dsp_probe --output /tmp/sonumio-heldout-second.json > /dev/null
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from research.heldout_dsp_probe import compare_reports
+          a = json.loads(Path('/tmp/sonumio-heldout-first.json').read_text(encoding='utf-8'))
+          b = json.loads(Path('/tmp/sonumio-heldout-second.json').read_text(encoding='utf-8'))
+          result = compare_reports(a, b)
+          assert result['distinct_recordings'] == 105
+          assert result['identical_fast_24k_hashes']
+          assert result['identical_fast_8k_crop_hashes']
+          assert result['identical_original_8k_crop_hashes']
+          assert not a['candidate_used_for_neural_training']
+          assert not a['audio_files_saved'] and not a['model_weights_saved']
+          print('HELDOUT_DSP_CPU:', a['environment']['cpu_model'])
+          print('HELDOUT_DSP_NUMPY:', a['environment']['numpy'])
+          print('HELDOUT_DSP_SAME_HOST:', result['identical_fast_8k_crop_hashes'])
+          print('HELDOUT_DSP_COUNT:', len(a['recordings']))
+          for seed, item in a['by_seed'].items():
+              print('HELDOUT_DSP_24K_SHA:', seed, item['fast_24k_sha256'])
+              print('HELDOUT_DSP_8K_CROP_SHA:', seed, item['fast_8k_crop_sha256'])
+              print('HELDOUT_DSP_ORIGINAL_8K_SHA:', seed, item['original_8k_crop_sha256'])
+              print('HELDOUT_DSP_MAX_CROP_ERROR:', seed, item['max_crop_abs_error'])
+          print('Held-out source seeds are NOT training/evaluation model-data splits.')
           PY
