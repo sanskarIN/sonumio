@@ -197,3 +197,33 @@ jobs:
               print('COMPLETE_DSP_RECORDINGS:', split, data['recordings'])
           print('Pilot scope 40/84 recordings; synthetic first-party research ONLY.')
           PY
+
+      - name: Complete all 84 recording crop fingerprints (one research-only run)
+        run: |
+          python -m research.complete_dsp_candidate --scope full --output /tmp/sonumio-complete-84.json > /dev/null
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from research.complete_dsp_candidate import validate_report
+          data = json.loads(Path('/tmp/sonumio-complete-84.json').read_text(encoding='utf-8'))
+          validate_report(data)
+          assert data['scope'] == 'full'
+          assert len(data['recordings']) == 84
+          assert data['splits']['train']['recordings'] == 42
+          assert data['splits']['validation']['recordings'] == 42
+          assert not data['original_source_recipe_modified']
+          assert not data['candidate_used_for_neural_training']
+          assert not data['audio_files_saved'] and not data['model_weights_saved']
+          print('COMPLETE_84_CPU:', data['environment']['cpu_model'])
+          print('COMPLETE_84_NUMPY:', data['environment']['numpy'])
+          print('COMPLETE_84_PROCESSED:', len(data['recordings']))
+          print('COMPLETE_84_ELAPSED_SECONDS:', round(data['elapsed_seconds'], 3))
+          for split, info in data['splits'].items():
+              print('COMPLETE_84_CANDIDATE_CROP_SHA:', split, info['candidate_8k_dataset_sha256'])
+              print('COMPLETE_84_LEGACY_CROP_SHA:', split, info['original_8k_dataset_sha256'])
+              print('COMPLETE_84_CANDIDATE_24K_SHA:', split, info['candidate_raw_sha256'])
+              print('COMPLETE_84_LEGACY_24K_SHA:', split, info['original_raw_sha256'])
+              print('COMPLETE_84_MAX_24K_ERROR:', split, info['max_24k_absolute_error'])
+              print('COMPLETE_84_MAX_8K_CROP_ERROR:', split, info['max_crop_absolute_error'])
+          print('These are source-derived synthetic diagnostics, not model-training data.')
+          PY
