@@ -5,11 +5,13 @@ on:
     paths:
       - 'research/portable_dsp_candidate.py'
       - 'research/portable_seed_stage_probe.py'
+      - 'research/forest_sine_probe.py'
       - 'research/portable_dsp_reference.py'
       - 'research/ambient_sine_candidate.py'
       - 'research/fast_dsp_candidate.py'
       - 'tests/test_portable_dsp_candidate.py'
       - 'tests/test_portable_seed_stage_probe.py'
+      - 'tests/test_forest_sine_probe.py'
       - 'tests/test_portable_dsp_reference.py'
       - '.github/workflows/dsp-portable-matrix.yml'
   workflow_dispatch:
@@ -100,6 +102,7 @@ jobs:
         run: |
           python -m research.portable_dsp_candidate --output /tmp/sonumio-portable-126.json > /dev/null
           python -m research.portable_seed_stage_probe --output /tmp/sonumio-portable-stages-126.json > /dev/null
+          python -m research.forest_sine_probe --output /tmp/sonumio-forest-126.json > /dev/null
       - name: Swap only NumPy on the same runner
         run: |
           python -m pip install --force-reinstall --no-deps numpy==2.4.6
@@ -108,6 +111,7 @@ jobs:
         run: |
           python -m research.portable_dsp_candidate --output /tmp/sonumio-portable-246.json > /dev/null
           python -m research.portable_seed_stage_probe --output /tmp/sonumio-portable-stages-246.json > /dev/null
+          python -m research.forest_sine_probe --output /tmp/sonumio-forest-246.json > /dev/null
           python - <<'PY'
           import json
           from pathlib import Path
@@ -126,6 +130,17 @@ jobs:
           assert stage_result['total_method_records'] == 210
           print('PORTABLE_SEED_STAGE_CPU:', old_stages['environment']['cpu_model'])
           print('PORTABLE_SEED_STAGE_FULLY_IDENTICAL:', stage_result['fully_matching_method_records'])
+          from research.forest_sine_probe import compare_reports as compare_forest
+          forest_before = json.loads(Path('/tmp/sonumio-forest-126.json').read_text())
+          forest_after = json.loads(Path('/tmp/sonumio-forest-246.json').read_text())
+          forest_result = compare_forest(forest_before, forest_after)
+          assert forest_result['same_cpu_model'] and forest_result['records'] == 36
+          print('FOREST_NUMPY_VERSION_CPU:', forest_before['environment']['cpu_model'])
+          for seed, counts in forest_result['by_seed'].items():
+              print('FOREST_NUMPY_VERSION_SEED:', seed, counts)
+          for row in forest_result['first_differences']:
+              print('FOREST_NUMPY_VERSION_FIRST_DIFFERENCE:', row)
+          print('FOREST_NUMPY_VERSION_TOTAL_CONTEXT_DIFFS:', len(forest_result['first_differences']))
           for method, seed_counts in stage_result['by_method_seed'].items():
               for seed, counts in seed_counts.items():
                   print('PORTABLE_SEED_STAGE_SEED:', method, seed, counts)
