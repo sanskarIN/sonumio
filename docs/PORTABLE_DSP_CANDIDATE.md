@@ -179,3 +179,8 @@ training experiment. The 189-case group is therefore **not** an untouched
 neural-model evaluation set and no generalization or model-validity claims
 can be inferred from its SHA256 matching. These cases are numerical DSP
 portability tests only.
+
+
+## Measured results superseding the original experiment plan
+
+The initial five-job matrix has now completed: **4/4 NumPy-2.4.6 CPU jobs generated exactly matching candidate hashes** for both methods, and the separate NumPy 1.26.4→2.4.6 same-host job found **exact equality for the original 84 cases** but *not* for the additional 105 cases. This is a partial portability result rather than an approved complete cross-version solution. See [measured digests and source evidence](PORTABLE_DSP_RESULTS.md). The follow-up golden-reference and additional-seed stage-localization CI runs are pending; don't treat those assertions as verified until they finish.
