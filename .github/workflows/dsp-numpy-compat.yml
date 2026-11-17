@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - 'research/fast_dsp_candidate.py'
+      - 'research/heldout_dsp_probe.py'
       - 'research/vectorized_convolution_candidate.py'
       - 'research/candidate_reference.py'
       - 'research/complete_dsp_candidate.py'
