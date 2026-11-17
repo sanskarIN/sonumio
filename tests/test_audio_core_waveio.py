@@ -186,9 +186,10 @@ def test_full_resample_buffer_and_report_preserve_source(sample):
 def test_resample_ratio_rejects_fractional_output_sample_clocks():
     buffer = make_buffer(np.arange(128, dtype=np.float32), 44100)
     with pytest.raises(AudioContractError, match="noninteger"):
-        resample_ratio(buffer, 1, 7)
-    other = resample_ratio(buffer, 160, 147) if False else None
-    assert other is None
+        resample_ratio(buffer, 1, 8)
+    other = resample_ratio(buffer, 1, 2)
+    assert other.sample_rate == 22050
+    assert other.frames == 64
 
 
 def test_resample_controls_and_invalid_ratios_rejected(sample):
