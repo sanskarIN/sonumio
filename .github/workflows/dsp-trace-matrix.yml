@@ -14,12 +14,14 @@ on:
       - 'research/candidate_reference.py'
       - 'research/vectorized_convolution_candidate.py'
       - 'research/fast_dsp_candidate.py'
+      - 'benchmarks/dsp_three_way.py'
       - 'tests/test_stable_convolution_candidate.py'
       - 'tests/test_full_convolution_candidate.py'
       - 'tests/test_complete_dsp_candidate.py'
       - 'tests/test_candidate_reference.py'
       - 'tests/test_vectorized_convolution_candidate.py'
       - 'tests/test_fast_dsp_candidate.py'
+      - 'tests/test_dsp_three_way.py'
       - 'research/data_reproducibility.py'
       - 'research/latent_audio.py'
       - 'research/wave_diffusion.py'
@@ -274,6 +276,7 @@ jobs:
           print('VECTOR_FLOAT64_SAME_HOST:', result['identical_vectorized_full_bytes'])
           print('VECTOR_FLOAT64_EQUALS_SCALAR_ALL_SOURCES:',
                 result['matches_scalar_reference_all_sources'])
+          assert result['matches_scalar_reference_all_sources'], 'Vectorized source SHA differs from verified scalar reference'
           for name, row in a['sources'].items():
               print('VECTOR_FLOAT64_SOURCE_SHA:', name, row['vectorized_full_sha256'])
               print('VECTOR_FLOAT64_EQUALS_VERIFIED_SCALAR:', name,
@@ -308,6 +311,7 @@ jobs:
           print('FAST_DSP_SAME_HOST_24K:', compared['identical_candidate_raw_sha'])
           print('FAST_DSP_SAME_HOST_8K:', compared['identical_candidate_cropped_sha'])
           print('FAST_DSP_EQUALS_SCALAR_84:', matches_scalar_reference(a))
+          assert matches_scalar_reference(a) and matches_scalar_reference(b), 'Fast 84-case waveform SHA drifted from verified scalar corpus'
           for split, values in a['splits'].items():
               print('FAST_DSP_24K_SHA:', split, values['fast_raw_sha256'])
               print('FAST_DSP_8K_CROP_SHA:', split, values['fast_8k_crop_sha256'])
