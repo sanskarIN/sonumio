@@ -347,3 +347,14 @@ hashes against the unchanged original DSP and adds independent CPU-matrix
 fingerprints; selected-sample agreement cannot establish full-audio identity
 or creator-quality generation. No existing data recipe or training code
 switches to this candidate.
+
+
+**17 November cross-CPU complete-source result:** the
+[full-frame scalar candidate study](docs/FULL_CONVOLUTION_RESULTS.md)
+reproduced all 16 complete first-party source-convolution cases on
+four independent CPU runners (including AMD EPYC 7763), obtaining
+identical proposed scalar convolution SHA256s despite differing
+original NumPy output SHA256s. It is a **separate research-only
+arithmetic primitive**, not a switched training recipe, not a
+full 8-kHz waveform/crop reproducibility proof, and not an
+AI audio-quality improvement.
