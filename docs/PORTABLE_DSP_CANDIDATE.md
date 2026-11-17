@@ -168,3 +168,14 @@ future Sonumio research programs.
 No tags, releases, prereleases,
 model weights or downloadable audio
 artifacts have been authorized.**
+
+
+### Explicit evaluation-set provenance
+
+The `heldout` label in this *numerical* experiment is relative only to the
+original 84-case latent-data source grid (0, 1, 101, 102). One of its five
+additional seeds, **3**, appears in the separate byte-text-conditioned neural
+training experiment. The 189-case group is therefore **not** an untouched
+neural-model evaluation set and no generalization or model-validity claims
+can be inferred from its SHA256 matching. These cases are numerical DSP
+portability tests only.
