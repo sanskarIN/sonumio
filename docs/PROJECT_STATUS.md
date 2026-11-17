@@ -406,3 +406,22 @@ being evaluated **without changing any official
 DSP source**. Whether either candidate achieves
 reproducible cross-NumPy/cross-CPU bytes requires
 separate completed CI evidence.
+
+
+### 17 November 2026 — separate complete cross-NumPy oscillator research
+
+[Same-host experiment #44077947598](https://github.com/sanskarIN/sonumio/actions/runs/44077947598)
+found exact 36,000-sample SHA256 equality between NumPy 1.26.4 and
+2.4.6 for **both** isolated `numpy_float64` and `python_math_sin`
+oscillator alternatives. The original ambient float32 sine did not
+match. Both separate candidates deviated from original by at most
+`1.1920928955078125e-7` in this specific ambient input.
+
+[Portable DSP candidate](PORTABLE_DSP_CANDIDATE.md) introduces a
+non-training versioned 24k→8k experiment combining verified source
+float64 convolution with either alternate ambient sine. All 21
+source combinations and nine train/validation/held-out seeds are
+exercised per method (**189 × 2 = 378 recordings**). New
+research-only CI compares complete SHA256 waveforms and final crops
+on four CPUs and on one CPU with NumPy 1.26.4 then 2.4.6. These
+new results are still unverified at this documentation checkpoint.
