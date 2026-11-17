@@ -135,6 +135,12 @@ def envelope(frames: int, *, fade_in: int = 0, fade_out: int = 0,
             curve_in[-fade_out:] *= u * u * (3 - 2 * u)
         else:
             curve_in[-fade_out:] *= np.cos(math.pi / 2 * u)
+    # Exact zero endpoints are important for rendering/hash stability: cosine
+    # half-pi otherwise leaves a tiny floating-point residual at the edge.
+    if fade_in:
+        curve_in[0] = 0.0
+    if fade_out:
+        curve_in[-1] = 0.0
     return curve_in
 
 
