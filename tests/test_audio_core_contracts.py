@@ -67,6 +67,16 @@ def test_memory_ownership_and_readonly_sample_contract():
     assert not np.shares_memory(duplicate, owned.samples)
 
 
+def test_immutable_pcm_backing_cannot_reenable_numpy_write_flag(mono):
+    assert mono.samples.flags.writeable is False
+    with pytest.raises(ValueError):
+        mono.samples.setflags(write=True)
+    original = mono.samples.copy()
+    mutable = mono.mutable_copy()
+    mutable[:] = -100
+    np.testing.assert_array_equal(mono.samples, original)
+
+
 def test_channel_last_requires_explicit_switch():
     data = np.arange(30, dtype=np.float32).reshape(10, 3)
     with pytest.raises(AudioLimitError):
