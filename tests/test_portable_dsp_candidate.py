@@ -106,6 +106,16 @@ def test_same_corpus_roundtrips_json_and_comparison(corpus):
     assert all(report["portable_24k_exact"].values())
     assert all(report["portable_final_crops_exact"].values())
     assert report["legacy_crops_exact"] is True
+    assert report["original_84_portable_exact"] is True
+    for method in study.METHODS:
+        for split, cases in (("train", 42), ("validation", 42),
+                             ("heldout", 105)):
+            metrics = report["discrepancies_by_method_split"][method][split]
+            assert metrics["cases"] == cases
+            assert metrics["different_24k"] == 0
+            assert metrics["different_8k_crop"] == 0
+            assert metrics["different_legacy_crop"] == 0
+            assert metrics["first_different_cases"] == []
 
 
 def test_modified_sha_rejected_even_if_summary_recomputed(corpus):
@@ -119,6 +129,14 @@ def test_modified_sha_rejected_even_if_summary_recomputed(corpus):
     assert compared["portable_24k_exact"]["numpy_float64"] is True
     assert compared["portable_final_crops_exact"]["numpy_float64"] is False
     assert compared["portable_final_crops_exact"]["python_math_sin"] is True
+    assert compared["original_84_portable_exact"] is False
+    changed = compared["discrepancies_by_method_split"]["numpy_float64"]["train"]
+    assert changed["different_24k"] == 0
+    assert changed["different_8k_crop"] == 1
+    assert changed["different_legacy_crop"] == 0
+    assert changed["by_seed_8k_crop"]["0"] == 1
+    assert changed["by_seed_8k_crop"]["1"] == 0
+    assert changed["first_different_cases"][0]["seed"] == 0
 
 
 def test_exact_crop_duplicates_are_rejected_across_splits_and_seeds(corpus):
