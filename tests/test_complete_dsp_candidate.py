@@ -133,6 +133,21 @@ def test_hash_report_drift_is_detected_and_aggregate_forgery_rejected(full_smoke
     compared = compare_reports(full_smoke, corrupted)
     assert compared["candidate_crops_exact"] is False
     assert compared["candidate_24k_exact"] is True
+    # Even a consistent re-hashed summary must not admit duplicate audio
+    # within a split or leaked waveform identity across train and validation.
+    corrupted = copy.deepcopy(full_smoke)
+    corrupted["recordings"][1]["candidate_cropped"] = (
+        corrupted["recordings"][0]["candidate_cropped"]
+    )
+    corrupted["splits"] = _summarize(corrupted["recordings"])
+    with pytest.raises(ValueError, match="Duplicate waveform"):
+        validate_report(corrupted)
+    corrupted = copy.deepcopy(full_smoke)
+    val = next(x for x in corrupted["recordings"] if x["split"] == "validation")
+    val["candidate_cropped"] = corrupted["recordings"][0]["candidate_cropped"]
+    corrupted["splits"] = _summarize(corrupted["recordings"])
+    with pytest.raises(ValueError, match="Train/validation"):
+        validate_report(corrupted)
     corrupted = copy.deepcopy(full_smoke)
     corrupted["recordings"][0]["crop_offset"] = -2
     with pytest.raises(ValueError, match="crop"):
