@@ -199,7 +199,8 @@ def spectral_eq(audio: AudioBuffer, bands: Sequence[SpectralBand], *,
         raise AudioContractError("Expected AudioBuffer")
     spectrum = stft(audio, config if config is not None else StftConfig())
     gains = spectral_eq_mask(spectrum, bands)
-    out = complex_mask(spectrum, gains[None, :, None], maximum_gain=16)
+    mask = np.broadcast_to(gains[None, :, None], spectrum.spectrum.shape)
+    out = complex_mask(spectrum, mask, maximum_gain=16)
     return istft(out)
 
 
@@ -217,7 +218,8 @@ def spectral_tilt(audio: AudioBuffer, *,
     ratio = np.maximum(spec.frequencies, 10.0) / pivot
     gain_db = np.clip(slope * np.log2(ratio), -24, 24)
     values = 10 ** (gain_db / 20)
-    return istft(complex_mask(spec, values[None, :, None], maximum_gain=16))
+    mask = np.broadcast_to(values[None, :, None], spec.spectrum.shape)
+    return istft(complex_mask(spec, mask, maximum_gain=16))
 
 
 def median_harmonic_percussive_masks(spec: Spectrogram, *,
