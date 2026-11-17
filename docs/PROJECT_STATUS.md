@@ -243,3 +243,15 @@ differences or an exact low-level CPU instruction. Do not rewrite
 the original corpus; if bitwise cross-host data is required,
 first design and independently evaluate an explicitly versioned
 reproducible recipe.
+
+
+### 17 November 2026 — separate scalar-convolution candidate
+
+Added a [non-invasive scalar convolution candidate](SCALAR_CONVOLUTION_CANDIDATE.md)
+with strict input validation, original DSP input/kernel SHA256 gates,
+selected-output sample error metrics, report consistency tests, and an
+independent four-runner SHA comparison in research CI. The source
+renderer and all previously measured training data remain exactly
+unchanged. Until independent host results and complete waveform
+evaluations are verified, cross-CPU reproducibility and audio quality
+are **not** claimed. PR #1 remains draft, unmerged and unreleased.
