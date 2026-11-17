@@ -430,3 +430,16 @@ identified a *different* full-DSP output under NumPy
 1.26.4 versus 2.2.6/2.4.6; library-version portability
 remains an open research gate. None of this implies
 production audio quality or permission to publish weights.
+
+
+**NumPy ambient root-cause audit (17 November):** an
+[explicit execution-order stage comparison](docs/AMBIENT_SINE_RESEARCH.md)
+on the *same CPU* identified the original
+`dsp._drone` float32 `sin_110` operation as
+the first differing expression between NumPy 1.26.4
+and 2.4.6; its 220-Hz sine also differed. Twelve
+of forty source/seed diagnostics containing ambient
+sound were affected. Two isolated sine alternatives
+(float64 NumPy and Python `math.sin`) are under
+cross-version and cross-CPU study; the original
+generator and previous datasets remain unchanged.
