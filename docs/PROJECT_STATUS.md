@@ -255,3 +255,19 @@ renderer and all previously measured training data remain exactly
 unchanged. Until independent host results and complete waveform
 evaluations are verified, cross-CPU reproducibility and audio quality
 are **not** claimed. PR #1 remains draft, unmerged and unreleased.
+
+
+### 17 November 2026 — verified full source-convolution CPU experiment
+
+The [measured full-frame matrix](FULL_CONVOLUTION_RESULTS.md)
+now reports identical scalar-candidate source-convolution bytes
+across four hosted CPU jobs (2 × EPYC 7763, Xeon 6975P-C and
+EPYC 9V45), across **16 source/seed recordings** and all
+36,000+ output positions per case. Original NumPy rain/thunder/wind
+hashes differed on EPYC 7763. All eight fixed golden-byte tests
+passed on each runner and the max candidate/NumPy absolute
+difference over the complete output was <= 1.20e-7.
+**This does not establish full DSP pipeline/crop equality or
+model-training reproducibility on all CPU environments.**
+The historical source generator and synthetic training data
+remain unchanged, and this PR remains development-only.
