@@ -50,6 +50,21 @@ def test_numeric_report_is_canonical_and_has_two_bound_sha_bindings(sample_repor
     assert sample_report.as_dict()["release_authorized"] is False
 
 
+def test_report_snapshot_is_recursively_immutable_and_export_is_independent(sample_report):
+    original = sample_report.sha256
+    with pytest.raises(TypeError):
+        sample_report.payload["metric"] = "other"
+    with pytest.raises(TypeError):
+        sample_report.payload["scores"][0] = 99
+    exported = sample_report.as_dict()
+    exported["payload"]["scores"][0] = 77
+    exported["payload"]["metric"] = "tampered"
+    assert sample_report.sha256 == original
+    assert sample_report.as_dict()["payload"]["scores"][0] == .01
+    assert sample_report.as_dict()["payload"]["metric"] == "sample_rmse"
+    assert deserialize_numeric_report(serialize_numeric_report(sample_report)).sha256 == original
+
+
 def test_json_field_order_does_not_change_report_hash(sample_report):
     other = NumericReport(
         sample_report.report_id, sample_report.domain,
