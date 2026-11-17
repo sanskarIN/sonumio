@@ -14,6 +14,7 @@ on:
       - 'research/candidate_reference.py'
       - 'research/vectorized_convolution_candidate.py'
       - 'research/fast_dsp_candidate.py'
+      - 'research/ambient_sine_candidate.py'
       - 'research/heldout_dsp_probe.py'
       - 'benchmarks/dsp_three_way.py'
       - 'tests/test_stable_convolution_candidate.py'
@@ -22,6 +23,7 @@ on:
       - 'tests/test_candidate_reference.py'
       - 'tests/test_vectorized_convolution_candidate.py'
       - 'tests/test_fast_dsp_candidate.py'
+      - 'tests/test_ambient_sine_candidate.py'
       - 'tests/test_heldout_dsp_probe.py'
       - 'tests/test_dsp_three_way.py'
       - 'research/data_reproducibility.py'
@@ -355,4 +357,25 @@ jobs:
               print('HELDOUT_DSP_ORIGINAL_8K_SHA:', seed, item['original_8k_crop_sha256'])
               print('HELDOUT_DSP_MAX_CROP_ERROR:', seed, item['max_crop_abs_error'])
           print('Held-out source seeds are NOT training/evaluation model-data splits.')
+          PY
+
+      - name: Probe ambient float64 and Python scalar sine candidates (hashes only)
+        run: |
+          python -m research.ambient_sine_candidate --output /tmp/sonumio-ambient-sine.json > /dev/null
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from research.ambient_sine_candidate import validate_probe
+          data = json.loads(Path('/tmp/sonumio-ambient-sine.json').read_text())
+          validate_probe(data)
+          assert data['original_source_unchanged'] and not data['audio_files_saved']
+          assert not data['model_weights_saved'] and not data['candidate_used_for_training']
+          print('AMBIENT_SINE_CPU:', data['environment']['cpu_model'])
+          print('AMBIENT_SINE_NUMPY:', data['environment']['numpy'])
+          print('AMBIENT_SINE_ORIGINAL_SHA:', data['methods']['numpy_float64']['original_sha256'])
+          for name, result in data['methods'].items():
+              print('AMBIENT_SINE_METHOD_SHA:', name, result['sha256'])
+              print('AMBIENT_SINE_METHOD_MAX_ERROR:', name, result['max_absolute_difference'])
+              print('AMBIENT_SINE_METHOD_SECONDS:', name, result['elapsed_seconds'])
+          print('New ambient sine research only, no switch to inference/training.')
           PY
