@@ -60,6 +60,8 @@ jobs:
           print('NUMPY_STAGE_IDENTICAL_RECORDINGS:', comparison['fully_identical_cases'])
           print('NUMPY_STAGE_MATCHING_AGGREGATES:', comparison['matching_stages'])
           print('NUMPY_STAGE_DIFFERING_AGGREGATES:', comparison['differing_stages'])
+          print('NUMPY_STAGE_PAIRED_DIFFERENCE_COUNTS:', comparison['paired_differing_recordings_by_stage'])
+          print('NUMPY_STAGE_ORDER_ONLY_DIFFERENCES:', comparison['aggregate_order_only_differences'])
           for record, first_drift in comparison['first_divergent_stage_per_case'].items():
               print('NUMPY_STAGE_FIRST_DIFFERENCE:', record, first_drift)
           for name in sorted(set(a['stage_aggregate']) & set(b['stage_aggregate'])):
