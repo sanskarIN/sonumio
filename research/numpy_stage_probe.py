@@ -80,6 +80,7 @@ def trace_one(members: tuple[int, ...], seed: int) -> dict:
         "sources": [CATEGORIES[i] for i in members],
         "seed": seed,
         "crop_offset": offset,
+        "stage_order": list(stages),
         "stages": stages,
     }
 
@@ -139,6 +140,10 @@ def validate_trace(value: dict) -> None:
         if type(record.get("crop_offset")) is not int or not 400 <= record["crop_offset"] <= 1600:
             raise ValueError("Invalid crop offset")
         stages = record.get("stages")
+        order = record.get("stage_order")
+        if (not isinstance(stages, dict) or not isinstance(order, list)
+                or len(order) != len(set(order)) or set(order) != set(stages)):
+            raise ValueError("Invalid temporal stage ordering")
         if (not isinstance(stages, dict) or
                 any(not _hash_ok(digest) for digest in stages.values()) or
                 not {"time_grid", "mix_pre_fade", "mix_post_fade",
@@ -158,9 +163,10 @@ def compare_traces(first: dict, second: dict) -> dict:
     exact = 0
     for key, row in a.items():
         before, after = row["stages"], b[key]["stages"]
-        if tuple(before) != tuple(after):
+        order = row["stage_order"]
+        if order != b[key]["stage_order"]:
             raise ValueError("Stage execution order changed")
-        mismatches = [name for name in before if before[name] != after[name]]
+        mismatches = [name for name in order if before[name] != after[name]]
         if mismatches:
             first_different[f"{'/'.join(key[0])}@{key[1]}"] = mismatches[0]
         else:
