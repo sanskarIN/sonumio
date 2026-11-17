@@ -8,6 +8,8 @@ on:
     paths:
       - 'research/dsp_pipeline_trace.py'
       - 'research/dsp_convolution_probe.py'
+      - 'research/stable_convolution_candidate.py'
+      - 'tests/test_stable_convolution_candidate.py'
       - 'research/data_reproducibility.py'
       - 'research/latent_audio.py'
       - 'research/wave_diffusion.py'
@@ -101,4 +103,30 @@ jobs:
               rows = [row for row in a['recordings'] if row['source'] == source]
               print('CPU_CONV_SCALAR_DIFF_MAX:', source,
                     max(row['max_selected_fsum_difference'] for row in rows))
+          PY
+
+      - name: Cross-check scalar convolution candidate in two isolated processes
+        run: |
+          python -m research.stable_convolution_candidate --output /tmp/sonumio-candidate-first.json > /dev/null
+          python -m research.stable_convolution_candidate --output /tmp/sonumio-candidate-second.json > /dev/null
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from research.stable_convolution_candidate import compare_probes
+          first = json.loads(Path('/tmp/sonumio-candidate-first.json').read_text(encoding='utf-8'))
+          second = json.loads(Path('/tmp/sonumio-candidate-second.json').read_text(encoding='utf-8'))
+          result = compare_probes(first, second)
+          assert result['cases_compared'] == 16
+          assert result['same_input_and_kernel_hashes']
+          assert result['candidate_sampled_hashes_equal']
+          assert result['original_sampled_hashes_equal']
+          assert first['audio_files_saved'] is False and first['weights_saved'] is False
+          print('CANDIDATE_CPU_MODEL:', first['environment']['cpu_model'])
+          print('CANDIDATE_SAME_HOST_SAMPLED_EXACT:', result['candidate_sampled_hashes_equal'])
+          for source, row in first['source_aggregate'].items():
+              print('CANDIDATE_RESEARCH_SCALAR_HASH:', source, row['candidate_sha256'])
+              print('CANDIDATE_ORIGINAL_NUMPY_SELECTED_HASH:', source, row['original_selected_sha256'])
+              print('CANDIDATE_ORIGINAL_NUMPY_FULL_HASH:', source, row['original_full_sha256'])
+              print('CANDIDATE_MAX_SELECTED_ABS_DIFF:', source, row['max_selected_absolute_error'])
+          print('Samples-only diagnostics; do not claim global waveform or model quality.')
           PY
