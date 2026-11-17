@@ -57,6 +57,17 @@ def test_packet_readonly_ownership_and_absolute_slicing(stereo):
     assert packet.as_buffer().channels == 2
 
 
+def test_stream_packet_backing_cannot_reenable_numpy_write_flag(stereo):
+    packet = FramePacket(24000, 0, stereo.samples)
+    assert packet.samples.flags.writeable is False
+    with pytest.raises(ValueError):
+        packet.samples.setflags(write=True)
+    packet_slice = packet.sliced(100, 150)
+    assert packet_slice.samples.flags.writeable is False
+    with pytest.raises(ValueError):
+        packet_slice.samples.setflags(write=True)
+
+
 def test_packet_sequence_rejects_gaps_overlaps_and_wrong_clocks(stereo):
     collector = PacketCollector(
         sample_rate=24000, layout=AudioLayout.for_channels(2),
