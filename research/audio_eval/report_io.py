@@ -9,7 +9,8 @@ identity authentication or evidence of copyrighted recording rights.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from types import MappingProxyType
 import hashlib
 import os
 from pathlib import Path
@@ -41,6 +42,15 @@ _FORBIDDEN_KEYS = frozenset({
     "authorization", "api_key", "secret", "password",
 })
 _ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,95}$")
+
+
+def _freeze_json(value: Any):
+    """Recursively seal a validated JSON snapshot against nested mutation."""
+    if type(value) is dict:
+        return MappingProxyType({k: _freeze_json(v) for k, v in value.items()})
+    if type(value) is list:
+        return tuple(_freeze_json(v) for v in value)
+    return value
 
 
 def _numeric_metadata_only(value: Any, depth: int = 0) -> None:
@@ -76,6 +86,7 @@ class NumericReport:
     domain: str
     payload: dict
     source_note: str = ""
+    _snapshot: bytes = field(init=False, repr=False, compare=False)
 
     def __post_init__(self):
         if not isinstance(self.report_id, str) or _ID.fullmatch(self.report_id) is None:
@@ -87,13 +98,18 @@ class NumericReport:
         if not isinstance(self.source_note, str) or len(self.source_note) > 1000:
             raise AudioContractError("Invalid report source note")
         _numeric_metadata_only(self.payload)
-        canonical_json_bytes(self.payload, max_bytes=MAX_REPORT_BYTES)
+        snapshot = canonical_json_bytes(self.payload, max_bytes=MAX_REPORT_BYTES)
+        # Retain canonical bytes as the sole content authority. The public
+        # payload attribute is a recursively read-only view; as_dict returns
+        # a distinct JSON tree on every call.
+        object.__setattr__(self, "_snapshot", snapshot)
+        object.__setattr__(self, "payload", _freeze_json(
+            parse_canonical_json(snapshot, max_bytes=MAX_REPORT_BYTES)
+        ))
 
     @property
     def content_sha256(self) -> str:
-        return hashlib.sha256(canonical_json_bytes(
-            self.payload, max_bytes=MAX_REPORT_BYTES
-        )).hexdigest()
+        return hashlib.sha256(self._snapshot).hexdigest()
 
     def header(self) -> dict:
         return {
@@ -107,7 +123,9 @@ class NumericReport:
         data = {
             "protocol": REPORT_PROTOCOL,
             "header": self.header(),
-            "payload": self.payload,
+            "payload": parse_canonical_json(
+                self._snapshot, max_bytes=MAX_REPORT_BYTES
+            ),
             "audio_files_embedded": False,
             "checkpoint_or_model_weights_embedded": False,
             "human_rights_authenticated": False,
@@ -269,7 +287,8 @@ def compare_numeric_report_versions(previous: NumericReport,
     if (previous.report_id != current.report_id
             or previous.domain != current.domain):
         raise AudioContractError("Cannot compare unrelated numerical report identities")
-    before, after = previous.payload, current.payload
+    before = previous.as_dict()["payload"]
+    after = current.as_dict()["payload"]
     shared = set(before) & set(after)
     return {
         "report_id": previous.report_id,
