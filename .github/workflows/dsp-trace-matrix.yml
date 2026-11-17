@@ -11,9 +11,11 @@ on:
       - 'research/stable_convolution_candidate.py'
       - 'research/full_convolution_candidate.py'
       - 'research/complete_dsp_candidate.py'
+      - 'research/candidate_reference.py'
       - 'tests/test_stable_convolution_candidate.py'
       - 'tests/test_full_convolution_candidate.py'
       - 'tests/test_complete_dsp_candidate.py'
+      - 'tests/test_candidate_reference.py'
       - 'research/data_reproducibility.py'
       - 'research/latent_audio.py'
       - 'research/wave_diffusion.py'
@@ -226,4 +228,23 @@ jobs:
               print('COMPLETE_84_MAX_24K_ERROR:', split, info['max_24k_absolute_error'])
               print('COMPLETE_84_MAX_8K_CROP_ERROR:', split, info['max_crop_absolute_error'])
           print('These are source-derived synthetic diagnostics, not model-training data.')
+          PY
+
+      - name: Enforce independently verified 84-recording candidate SHA reference
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from research.candidate_reference import verify_reference
+          path = Path('/tmp/sonumio-complete-84.json')
+          report = json.loads(path.read_text(encoding='utf-8'))
+          result = verify_reference(report)
+          assert result['recordings_checked'] == 84
+          assert result['candidate_full_corpus_matches_reference']
+          assert not result['original_numpy_hash_pinned']
+          assert result['no_audio_or_weights_published']
+          print('CANDIDATE_84_REFERENCE_MATCH:', True)
+          print('CANDIDATE_84_REFERENCE_CPU:', report['environment']['cpu_model'])
+          print('CANDIDATE_84_REFERENCE_WORKFLOW:', result['source_workflow'])
+          print('Candidate only: original NumPy SHA is host-sensitive by design.')
           PY
