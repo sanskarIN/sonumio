@@ -76,11 +76,18 @@ JSON stage SHA digests, then replaces NumPy with 2.4.6
 on that same runner, and records the earliest differing
 stage per source/seed.
 
-**The stage-localization workflow's result is not yet
-established by this document.** The matrix's three
-independent CPU hosts are not sufficient to pinpoint the
-specific responsible operation without controlled
-same-host stage evidence.
+**The same-runner stage audit has now succeeded.** It found
+28/40 exact recordings and 12/40 differing recordings,
+all involving the ambient/drone sound. After fixing
+JSON's alphabetic stage-key ordering, the first
+*executed* divergent stage is `layer_drone` for all
+12 cases. The separate [original ambient-expression
+probe](AMBIENT_SINE_RESEARCH.md) pins the first arithmetic
+difference to the float32 `sin_110` result (and
+also observes a different `sin_220`). The time
+grid, source float64 convolution kernels, fade
+ramp and original FIR kernel fingerprints matched
+on the same tested CPU.
 
 ## New unseen-seed portability checks
 
@@ -91,26 +98,32 @@ from the historical train/validation seeds 0, 1,
 It records **105 additional synthetic first-party
 recording fingerprints** without publishing any
 audio, training new weights or introducing a new
-train/validation split. The independent CPU
-matrix checks exact per-recording SHA equality within
-each host; recorded per-seed hashes support a
-subsequent cross-host comparison.
+train/validation split. The [independent four-runner
+held-out result](HELDOUT_DSP_RESULTS.md) subsequently
+passed all **105** cases with identical full 24-kHz
+and final cropped 8-kHz SHA256 aggregates across
+all tested CPU hosts at NumPy 2.4.6. These hashes
+are now frozen in the matrix as candidate-only
+regression gates.
 
 Different SHA values are treated as an experiment
 to investigate, not suppressed or silently rewritten.
 
 ## Next engineering gates
 
-1. Pinpoint the **earliest stage** that differs under
-   NumPy 1.26.4 versus 2.4.6 on the same CPU.
-2. Establish whether time grid, RNG, sound-layer
-   trigonometry, normalization, FIR kernel or resampler
-   contributes to that difference. Then implement
-   a separately versioned reproducible candidate
-   without touching the original model-training
-   dataset or public DSP generator.
-3. Compare fresh holdout seed aggregate SHA
-   across CPU models and across NumPy versions.
+1. Confirm whether isolated **float64 NumPy sine**
+   or **Python scalar math.sin** candidates produce
+   identical ambient bytes across NumPy versions
+   and independently provisioned CPU hosts.
+2. Only after a candidate is proven, consider a
+   separately versioned *complete* DSP variant
+   through mixing, normalization, unchanged FIR
+   and final 8-kHz crop, without modifying any
+   historical neural training data or public
+   procedural generator.
+3. Extend the verified five-seed holdout probe
+   to NumPy 1.26.4 and 2.x under the same host,
+   and document any remaining source-family drift.
 4. Re-run full numerical bit tests after any fix,
    and measure latency and native peak memory
    in independently provisioned environments.
