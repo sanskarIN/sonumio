@@ -403,3 +403,14 @@ experiment; this is *not* a general speed claim. A separately
 now compares full source-convolution fingerprints with the verified
 scalar reference on multiple CPUs. It is a numerical experiment
 only and is not enabled in inference or training.
+
+
+**Experimental faster 8-kHz research pipeline:** a
+[separately versioned vectorized float64 candidate](docs/FAST_DSP_CANDIDATE.md)
+is now independently reconstructing the same 84 original
+synthetic source recordings, with the historical FIR resampler
+and crop intact. Its CPU matrix compares all 24-kHz and final
+8-kHz digests with the verified slow scalar reference and
+looks for cross-host drift. This is an unproven hypothesis,
+not a training-data substitution, release or a claim that
+Sonumio-1 is ready.
