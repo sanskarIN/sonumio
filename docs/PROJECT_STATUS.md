@@ -436,3 +436,12 @@ fingerprints remain valid cross-host numerical regression cases, but are **not**
 a globally held-out neural evaluation set. The probe now publishes exact
 training-seed overlap metadata and fails validation on incorrect global
 holdout assertions. This correction does not alter source audio or SHA256s.
+
+
+### 17 November 2026 — 378-case portable DSP verification and remaining drift
+
+[The five-job experimental matrix](https://github.com/sanskarIN/sonumio/actions/runs/44080000639) completed **5/5 successful jobs**. On four CPUs with NumPy 2.4.6, both `numpy_float64` and `python_math_sin` oscillator methods produced byte-identical output hashes for all **189 distinct recording cases per method**. The same-host NumPy 1.26.4→2.4.6 comparison matched **all 84 original train/validation recordings**, but reported mismatching aggregate full 24-kHz and final cropped 8-kHz bytes in the **105 additional numerical stress recordings** (source of exact per-recording mismatch remains under investigation). See [exact measured SHA256s and caveats](PORTABLE_DSP_RESULTS.md).
+
+A new `research/portable_dsp_reference.py` freezes the **four-host NumPy 2.4.6 SHA** for each of three numerical groups and both methods, but deliberately does not pin original host-sensitive NumPy float32 hashes or assert universal NumPy-version reproducibility. CI requires those frozen values on its four hosted CPU jobs. `research/portable_seed_stage_probe.py` separately fingerprints RNG states, individual layers, mix/fade, normalization, resampling and final crop for **5 seeds × 21 combinations × 2 oscillator methods = 210 staged traces**, enabling exact first-stage comparison under NumPy 1.26.4 and 2.4.6 on the same CPU. Its result remains **pending CI**.
+
+A completed intermediate research run [#44083400722](https://github.com/sanskarIN/sonumio/actions/runs/44083400722) passed **376 tests**. This is not the final CI result for the subsequent golden-reference and stage-trace additions. All experiments remain separate from inference, original training datasets and model weights.
