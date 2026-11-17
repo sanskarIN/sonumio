@@ -13,11 +13,13 @@ on:
       - 'research/complete_dsp_candidate.py'
       - 'research/candidate_reference.py'
       - 'research/vectorized_convolution_candidate.py'
+      - 'research/fast_dsp_candidate.py'
       - 'tests/test_stable_convolution_candidate.py'
       - 'tests/test_full_convolution_candidate.py'
       - 'tests/test_complete_dsp_candidate.py'
       - 'tests/test_candidate_reference.py'
       - 'tests/test_vectorized_convolution_candidate.py'
+      - 'tests/test_fast_dsp_candidate.py'
       - 'research/data_reproducibility.py'
       - 'research/latent_audio.py'
       - 'research/wave_diffusion.py'
@@ -281,4 +283,37 @@ jobs:
               print('VECTOR_FLOAT64_MEDIAN_CONV_SECONDS:', name,
                     row['median_vectorized_seconds'])
           print('No promotion to DSP or neural training; these are numerical research results.')
+          PY
+
+      - name: Evaluate complete fast candidate on all 84 recordings (without adoption)
+        run: |
+          python -m research.fast_dsp_candidate --scope full --output /tmp/sonumio-fast-first.json > /dev/null
+          python -m research.fast_dsp_candidate --scope full --output /tmp/sonumio-fast-second.json > /dev/null
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from research.fast_dsp_candidate import compare_reports, matches_scalar_reference
+          a = json.loads(Path('/tmp/sonumio-fast-first.json').read_text(encoding='utf-8'))
+          b = json.loads(Path('/tmp/sonumio-fast-second.json').read_text(encoding='utf-8'))
+          compared = compare_reports(a, b)
+          assert compared['recordings'] == 84
+          assert compared['identical_candidate_raw_sha']
+          assert compared['identical_candidate_cropped_sha']
+          assert compared['identical_original_raw_sha']
+          assert not a['candidate_used_for_training']
+          assert not a['audio_files_saved'] and not a['model_weights_saved']
+          print('FAST_DSP_CPU:', a['environment']['cpu_model'])
+          print('FAST_DSP_NUMPY:', a['environment']['numpy'])
+          print('FAST_DSP_SCOPE:', a['scope'])
+          print('FAST_DSP_SAME_HOST_24K:', compared['identical_candidate_raw_sha'])
+          print('FAST_DSP_SAME_HOST_8K:', compared['identical_candidate_cropped_sha'])
+          print('FAST_DSP_EQUALS_SCALAR_84:', matches_scalar_reference(a))
+          for split, values in a['splits'].items():
+              print('FAST_DSP_24K_SHA:', split, values['fast_raw_sha256'])
+              print('FAST_DSP_8K_CROP_SHA:', split, values['fast_8k_crop_sha256'])
+              print('FAST_DSP_ORIGINAL_SHA:', split, values['original_8k_crop_sha256'])
+              print('FAST_DSP_MAX_24K_ERROR:', split, values['max_24k_abs_error'])
+              print('FAST_DSP_MAX_8K_CROP_ERROR:', split, values['max_8k_crop_abs_error'])
+              print('FAST_DSP_MEDIAN_24K_S:', split, values['median_fast_24k_seconds'])
+          print('Investigation only; fast candidate is not enabled in training.')
           PY
