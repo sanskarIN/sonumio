@@ -289,3 +289,17 @@ Source-level anti-leakage checks now reject both duplicate candidate
 and original waveform hashes within a split and exact split overlap.
 The full **84-recording** corpus remains a separate CI gate, and
 this is not proof of model quality or release readiness.
+
+
+### 17 November 2026 — isolated DSP throughput measurement added
+
+The [in-memory paired benchmark](DSP_CANDIDATE_BENCHMARK.md)
+now compares original 24-kHz DSP rendering with the separately
+specified scalar source-convolution candidate. Same source/seed,
+bounded 1–8 repetitions, warm-ups and alternating test order
+produce local median/p95 timing, real-time factor, exact within-host
+SHA fingerprints and maximum audio-sample difference. It records
+no WAV or model artifacts and does **not** assert a speed target.
+Prior-head Python 3.12 standard CI had an **installation BrokenPipeError**,
+not a test assertion failure; a 3.13 job passed and the matrix job
+was marked failed. Final-head CI must be checked separately.
