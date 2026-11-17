@@ -102,7 +102,8 @@ def test_first_party_rights_do_not_permit_globally_unseen_claim(source_wave, leg
 def test_dataset_rejects_same_group_across_train_and_test(source_wave, legal_synthetic):
     p = pair("train1", "train1", source_wave, legal_synthetic,
              group="shared", split="train")
-    q = pair("test1", "test1", source_wave, legal_synthetic,
+    altered = source_wave.copy_with(source_wave.samples * .75)
+    q = pair("test1", "test1", altered, legal_synthetic,
              group="shared", split="test")
     with pytest.raises(AudioContractError, match="group"):
         EvaluationSet((p, q))
