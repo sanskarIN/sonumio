@@ -303,3 +303,18 @@ no WAV or model artifacts and does **not** assert a speed target.
 Prior-head Python 3.12 standard CI had an **installation BrokenPipeError**,
 not a test assertion failure; a 3.13 job passed and the matrix job
 was marked failed. Final-head CI must be checked separately.
+
+
+### 17 November 2026 — all 84 first-party candidate recordings verified
+
+The [full-corpus multi-CPU results](COMPLETE_DSP_RESULTS.md) now show
+**4/4 successful independent CPU jobs**, with two EPYC 7763,
+one EPYC 9V45 and one Intel Xeon 6975P-C runner. All **84** synthetic
+source/seed recordings (42 train, 42 validation) yielded exactly
+matching candidate *complete 24-kHz* and final 8-kHz crop SHA256
+aggregates across the tested hosts, where original NumPy results
+differed. No external audio rights, perceptual quality, neural
+generalization or production throughput claim follows from this.
+The new `research/candidate_reference.py` gates future full-corpus
+test reports against the observed candidate SHA256s; tests and
+benchmark measurements on later commits need separate CI validation.
