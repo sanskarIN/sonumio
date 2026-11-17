@@ -99,3 +99,22 @@ def test_model_training_and_nonfinite_metrics_cannot_be_mislabeled(report):
     damaged["recordings"][0]["crop_offset"] = 1601
     with pytest.raises(ValueError, match="offset"):
         study.validate_report(damaged)
+
+
+def test_independent_four_host_105_recording_reference_matches_actual_probe(report):
+    checked = study.verify_heldout_reference(report)
+    assert checked["recordings"] == 105
+    assert checked["matched_verified_sha256"] is True
+    assert checked["numpy_reference_version"] == "2.4.6"
+    assert checked["old_model_data_unchanged"] is True
+    assert checked["model_weights_saved"] is False
+    assert len(study.HELDOUT_REFERENCE) == 5
+
+
+def test_golden_detects_drift_even_when_study_aggregate_is_recomputed(report):
+    damaged = copy.deepcopy(report)
+    damaged["recordings"][0]["fast_raw_sha256"] = "f" * 64
+    damaged["by_seed"] = study._summary(damaged["recordings"])
+    study.validate_report(damaged)
+    with pytest.raises(ValueError, match="reference drift"):
+        study.verify_heldout_reference(damaged)
