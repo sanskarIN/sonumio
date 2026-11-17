@@ -10,8 +10,10 @@ on:
       - 'research/dsp_convolution_probe.py'
       - 'research/stable_convolution_candidate.py'
       - 'research/full_convolution_candidate.py'
+      - 'research/complete_dsp_candidate.py'
       - 'tests/test_stable_convolution_candidate.py'
       - 'tests/test_full_convolution_candidate.py'
+      - 'tests/test_complete_dsp_candidate.py'
       - 'research/data_reproducibility.py'
       - 'research/latent_audio.py'
       - 'research/wave_diffusion.py'
@@ -25,7 +27,7 @@ jobs:
   cpu-stage-trace:
     name: CPU stage trace ${{ matrix.instance }} / ${{ matrix.runner }}
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 15
+    timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
@@ -160,4 +162,38 @@ jobs:
               print('FULL_SCALAR_MAX_ABS_ERROR:', source, summary['max_full_output_absolute_error'])
               print('FULL_SCALAR_CHANGED_FRAMES:', source, summary['different_full_output_float32_values'])
           print('Full source convolutions only, not complete post-mix training audio.')
+          PY
+
+      - name: Compare isolated 24k-to-8k complete DSP candidate across independent processes
+        run: |
+          python -m research.complete_dsp_candidate --scope smoke --output /tmp/sonumio-complete-a.json > /dev/null
+          python -m research.complete_dsp_candidate --scope smoke --output /tmp/sonumio-complete-b.json > /dev/null
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from research.complete_dsp_candidate import compare_reports
+          a = json.loads(Path('/tmp/sonumio-complete-a.json').read_text(encoding='utf-8'))
+          b = json.loads(Path('/tmp/sonumio-complete-b.json').read_text(encoding='utf-8'))
+          result = compare_reports(a, b)
+          assert result['recordings'] == 40
+          assert result['candidate_24k_exact'] and result['candidate_8k_exact']
+          assert result['candidate_crops_exact'] and result['original_crops_exact']
+          assert not a['audio_files_saved'] and not a['model_weights_saved']
+          assert not a['candidate_used_for_neural_training']
+          assert not a['original_source_recipe_modified']
+          print('COMPLETE_DSP_CPU:', a['environment']['cpu_model'])
+          print('COMPLETE_DSP_NUMPY:', a['environment']['numpy'])
+          print('COMPLETE_DSP_SCOPE:', a['scope'])
+          print('COMPLETE_DSP_SAME_HOST_24K:', result['candidate_24k_exact'])
+          print('COMPLETE_DSP_SAME_HOST_8K:', result['candidate_8k_exact'])
+          print('COMPLETE_DSP_SAME_HOST_CROPS:', result['candidate_crops_exact'])
+          for split, data in a['splits'].items():
+              print('COMPLETE_DSP_CANDIDATE_CROP_SHA:', split, data['candidate_8k_dataset_sha256'])
+              print('COMPLETE_DSP_LEGACY_CROP_SHA:', split, data['original_8k_dataset_sha256'])
+              print('COMPLETE_DSP_CANDIDATE_RAW_SHA:', split, data['candidate_raw_sha256'])
+              print('COMPLETE_DSP_LEGACY_RAW_SHA:', split, data['original_raw_sha256'])
+              print('COMPLETE_DSP_MAX_24K_ERROR:', split, data['max_24k_absolute_error'])
+              print('COMPLETE_DSP_MAX_CROP_ERROR:', split, data['max_crop_absolute_error'])
+              print('COMPLETE_DSP_RECORDINGS:', split, data['recordings'])
+          print('Pilot scope 40/84 recordings; synthetic first-party research ONLY.')
           PY
