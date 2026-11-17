@@ -386,3 +386,23 @@ fixed to retain *true execution order*. A dedicated
 ambient-expression probe is being evaluated. Do not
 claim NumPy 1.26 bitwise compatibility until this
 research resolves and passes its tests.
+
+
+### 17 November 2026 — ambient NumPy-version drift isolated
+
+The [same-runner NumPy 1.26.4 vs 2.4.6 audit](AMBIENT_SINE_RESEARCH.md)
+found **28/40 stage-identical recordings**, with
+**12/40 differing recordings all involving ambient**.
+After correcting alphabetic JSON stage-key
+ordering in diagnostics, the first actual divergent
+DSP stage was `layer_drone` for all 12.
+A focused reconstruction of the unchanged
+ambient expression identified `sin_110` as
+the first differing expression, followed by
+`sin_220` and downstream synthesis.
+New alternative `numpy_float64` and
+`python_math_sin` oscillator candidates are
+being evaluated **without changing any official
+DSP source**. Whether either candidate achieves
+reproducible cross-NumPy/cross-CPU bytes requires
+separate completed CI evidence.
