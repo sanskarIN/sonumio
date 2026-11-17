@@ -414,3 +414,19 @@ and crop intact. Its CPU matrix compares all 24-kHz and final
 looks for cross-host drift. This is an unproven hypothesis,
 not a training-data substitution, release or a claim that
 Sonumio-1 is ready.
+
+
+**Verified fast DSP reference (17 November):** the
+[fast 84-recording study](docs/FAST_DSP_RESULTS.md) produced
+exactly the same candidate full 24-kHz and final 8-kHz
+cropped SHA256s as the prior scalar fsum experiment on
+four independent CPUs (NumPy 2.4.6). The separate
+[105 held-out recording check](docs/HELDOUT_DSP_RESULTS.md)
+also matched across four CPUs, testing 189 first-party
+synthetic recording cases in total. Frozen candidate
+fingerprints are now asserted in the CI matrix. A
+[NumPy portability investigation](docs/DSP_NUMPY_PORTABILITY.md)
+identified a *different* full-DSP output under NumPy
+1.26.4 versus 2.2.6/2.4.6; library-version portability
+remains an open research gate. None of this implies
+production audio quality or permission to publish weights.
