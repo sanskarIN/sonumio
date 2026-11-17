@@ -122,9 +122,11 @@ def test_layout_requires_explicit_geometry_and_unique_labels():
 
 def test_shape_allocation_and_duration_limits_are_enforced():
     assert validate_allocation(2, 100) == 800
-    for args in ((9, 1), (1, 0), (1, 1, 0)):
+    for args in ((9, 1), (1, 0)):
         with pytest.raises(AudioContractError):
             validate_allocation(*args)
+    with pytest.raises(AudioContractError):
+        validate_allocation(1, 1, itemsize=0)
     with pytest.raises(AudioLimitError):
         validate_allocation(2, 100_000_000)
     with pytest.raises(AudioLimitError):
