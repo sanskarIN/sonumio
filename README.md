@@ -459,3 +459,20 @@ results must be confirmed from the new CI before claiming success.
 
 
 **Complete portable DSP study (17 November):** [first verified results](docs/PORTABLE_DSP_RESULTS.md) cover **378 research candidate waveforms**, 189 first-party source/seed combinations for each of two ambient sine strategies. Four independently provisioned NumPy-2.4.6 CPU jobs produced identical full-24-kHz and final-8-kHz candidate SHA256s. The same-CPU NumPy-1.26.4→2.4.6 run matched all 84 original train/validation cases but revealed additional-seed drift in the 105-case numerical stress set. The 378 NumPy-2.4.6 fingerprints are frozen as regression references; a new per-sound-layer/RNG stage trace is being checked. The extra seed group is **not** a globally unseen neural-model quality test, since seed 3 also appears in Sonumio text-conditioned training.
+
+
+**Verified full-corpus DSP numerical portability (17 November):**
+the [forest-aware research candidate](docs/FOREST_SINE_RESULTS.md) reproduced
+**all 189 first-party synthetic recording cases per sine method (378
+candidates total)** with exact raw 24-kHz and final cropped 8-kHz
+SHA256s under NumPy **1.26.4 and 2.4.6 on the same CPU**, and across
+**four independent NumPy-2.4.6 CPU jobs** ([five-job source evidence](https://github.com/sanskarIN/sonumio/actions/runs/44095705429)).
+This was achieved by isolating float64 sine evaluation
+for the ambient and forest sound layers without modifying
+the original generator or training datasets.
+New research-only golden SHA gates have been added;
+the new assertion runs require separate verification.
+The [isolated DSP resource study](docs/DSP_RESOURCE_PROFILE.md)
+also passed 411 CPU research tests at [run #44097168528](https://github.com/sanskarIN/sonumio/actions/runs/44097168528);
+whole-process memory includes research imports, not just DSP allocations.
+No model weight, WAV, tag or release has been published.
