@@ -456,3 +456,6 @@ historical source splits and five additional holdout seeds, across CPUs
 and NumPy versions. This experimental pipeline is not used in any
 original training or deployed generator. Full-corpus cross-version
 results must be confirmed from the new CI before claiming success.
+
+
+**Complete portable DSP study (17 November):** [first verified results](docs/PORTABLE_DSP_RESULTS.md) cover **378 research candidate waveforms**, 189 first-party source/seed combinations for each of two ambient sine strategies. Four independently provisioned NumPy-2.4.6 CPU jobs produced identical full-24-kHz and final-8-kHz candidate SHA256s. The same-CPU NumPy-1.26.4→2.4.6 run matched all 84 original train/validation cases but revealed additional-seed drift in the 105-case numerical stress set. The 378 NumPy-2.4.6 fingerprints are frozen as regression references; a new per-sound-layer/RNG stage trace is being checked. The extra seed group is **not** a globally unseen neural-model quality test, since seed 3 also appears in Sonumio text-conditioned training.
