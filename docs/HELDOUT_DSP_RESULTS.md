@@ -83,3 +83,17 @@ natural audio and captions.
 **Keep draft PR #1 unmerged and unreleased. No tags,
 pre-releases, stable releases, WAV files, public model weights
 or training-dataset substitutions.**
+
+
+## Important provenance clarification: numerical holdout is not global model holdout
+
+These five seeds were selected **outside the 84-recording latent-audio
+source/seed grid**, not as globally untouched sources across every Sonumio
+neural experiment. In particular, seed **3** is already part of
+`research.text_audio.SYNTHETIC_TRAIN_SEEDS = (0, 1, 2, 3)`.
+Consequently the 105 audio fingerprints are valid additional *numerical
+reproducibility stress cases*, but **must not be used to claim neural-model
+generalization, absence of training leakage or an independently held-out
+model-quality evaluation set**. The research report now declares this overlap,
+refuses a false global-holdout flag, and preserves the previously measured
+byte fingerprints unchanged.
