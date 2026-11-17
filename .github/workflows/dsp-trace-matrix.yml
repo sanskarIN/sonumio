@@ -9,7 +9,9 @@ on:
       - 'research/dsp_pipeline_trace.py'
       - 'research/dsp_convolution_probe.py'
       - 'research/stable_convolution_candidate.py'
+      - 'research/full_convolution_candidate.py'
       - 'tests/test_stable_convolution_candidate.py'
+      - 'tests/test_full_convolution_candidate.py'
       - 'research/data_reproducibility.py'
       - 'research/latent_audio.py'
       - 'research/wave_diffusion.py'
@@ -131,4 +133,31 @@ jobs:
               print('CANDIDATE_ORIGINAL_NUMPY_FULL_HASH:', source, row['original_full_sha256'])
               print('CANDIDATE_MAX_SELECTED_ABS_DIFF:', source, row['max_selected_absolute_error'])
           print('Samples-only diagnostics; do not claim global waveform or model quality.')
+          PY
+
+      - name: Reconstruct complete scalar source convolutions twice (no WAVs)
+        run: |
+          python -m research.full_convolution_candidate --output /tmp/sonumio-full-first.json > /dev/null
+          python -m research.full_convolution_candidate --output /tmp/sonumio-full-second.json > /dev/null
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from research.full_convolution_candidate import compare_full_probes
+          a = json.loads(Path('/tmp/sonumio-full-first.json').read_text(encoding='utf-8'))
+          b = json.loads(Path('/tmp/sonumio-full-second.json').read_text(encoding='utf-8'))
+          compared = compare_full_probes(a, b)
+          assert compared['cases'] == 16
+          assert compared['same_inputs_and_kernels']
+          assert compared['candidate_full_hashes_equal']
+          assert compared['original_full_hashes_equal']
+          assert a['full_convolution_evaluated'] is True
+          assert not a['audio_files_saved'] and not a['model_weights_saved']
+          print('FULL_SCALAR_CPU:', a['environment']['cpu_model'])
+          print('FULL_SCALAR_SAME_HOST_ALL_CASES:', compared['candidate_full_hashes_equal'])
+          for source, summary in a['source_aggregate'].items():
+              print('FULL_SCALAR_CANDIDATE_HASH:', source, summary['candidate_full_sha256'])
+              print('FULL_SCALAR_ORIGINAL_NUMPY_HASH:', source, summary['original_full_sha256'])
+              print('FULL_SCALAR_MAX_ABS_ERROR:', source, summary['max_full_output_absolute_error'])
+              print('FULL_SCALAR_CHANGED_FRAMES:', source, summary['different_full_output_float32_values'])
+          print('Full source convolutions only, not complete post-mix training audio.')
           PY
