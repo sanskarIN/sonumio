@@ -331,7 +331,7 @@ jobs:
           python - <<'PY'
           import json
           from pathlib import Path
-          from research.heldout_dsp_probe import compare_reports
+          from research.heldout_dsp_probe import compare_reports, verify_heldout_reference
           a = json.loads(Path('/tmp/sonumio-heldout-first.json').read_text(encoding='utf-8'))
           b = json.loads(Path('/tmp/sonumio-heldout-second.json').read_text(encoding='utf-8'))
           result = compare_reports(a, b)
@@ -339,6 +339,10 @@ jobs:
           assert result['identical_fast_24k_hashes']
           assert result['identical_fast_8k_crop_hashes']
           assert result['identical_original_8k_crop_hashes']
+          checked = verify_heldout_reference(a)
+          assert checked['recordings'] == 105 and checked['matched_verified_sha256']
+          assert verify_heldout_reference(b)['matched_verified_sha256']
+          print('HELDOUT_DSP_GOLDEN_REFERENCE:', True)
           assert not a['candidate_used_for_neural_training']
           assert not a['audio_files_saved'] and not a['model_weights_saved']
           print('HELDOUT_DSP_CPU:', a['environment']['cpu_model'])
