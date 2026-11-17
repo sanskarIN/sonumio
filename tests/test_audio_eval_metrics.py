@@ -76,7 +76,7 @@ def test_stereo_correlation_and_mono_shape_are_explicit(reference):
 
 def test_silent_metrics_are_finite_not_nan():
     silence = np.zeros(2048, dtype=np.float32)
-    noise = np.ones(2048, dtype=np.float32) * .001
+    noise = np.linspace(-.001, .001, 2048, dtype=np.float32)
     assert si_sdr_db(silence, silence) == 0
     assert si_sdr_db(silence, noise) == -160
     assert signal_to_error_ratio_db(silence, silence) == -160
