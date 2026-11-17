@@ -5,10 +5,12 @@ on:
     paths:
       - 'research/numpy_stage_probe.py'
       - 'research/numpy_ambient_probe.py'
+      - 'research/ambient_sine_candidate.py'
       - 'research/fast_dsp_candidate.py'
       - 'research/vectorized_convolution_candidate.py'
       - 'tests/test_numpy_stage_probe.py'
       - 'tests/test_numpy_ambient_probe.py'
+      - 'tests/test_ambient_sine_candidate.py'
       - 'src/sonumio/engines/procedural.py'
       - '.github/workflows/dsp-numpy-stage-diff.yml'
   workflow_dispatch:
@@ -40,6 +42,7 @@ jobs:
         run: |
           python -m research.numpy_stage_probe --output /tmp/sonumio-stages-numpy126.json > /dev/null
           python -m research.numpy_ambient_probe --output /tmp/sonumio-ambient-numpy126.json > /dev/null
+          python -m research.ambient_sine_candidate --output /tmp/sonumio-sine-numpy126.json > /dev/null
       - name: Change only NumPy version in this runner environment
         run: |
           python -m pip install --force-reinstall --no-deps 'numpy==2.4.6'
@@ -48,6 +51,7 @@ jobs:
         run: |
           python -m research.numpy_stage_probe --output /tmp/sonumio-stages-numpy246.json > /dev/null
           python -m research.numpy_ambient_probe --output /tmp/sonumio-ambient-numpy246.json > /dev/null
+          python -m research.ambient_sine_candidate --output /tmp/sonumio-sine-numpy246.json > /dev/null
           python - <<'PY'
           import json
           from pathlib import Path
@@ -69,6 +73,19 @@ jobs:
           print('NUMPY_AMBIENT_FIRST_DIFFERENCE:', expressions['first_divergent_stage'])
           print('NUMPY_AMBIENT_DIFFERENT_STAGES:', expressions['different_stages'])
           print('NUMPY_AMBIENT_SAME_FINAL_BYTES:', expressions['same_final_drone_bytes'])
+          from research.ambient_sine_candidate import compare_probes as compare_sine
+          sine_first = json.loads(Path('/tmp/sonumio-sine-numpy126.json').read_text())
+          sine_second = json.loads(Path('/tmp/sonumio-sine-numpy246.json').read_text())
+          sine_result = compare_sine(sine_first, sine_second)
+          assert sine_result['same_cpu_model']
+          print('NUMPY_SINE_ORIGINAL_EQUAL:', sine_result['same_original_bytes'])
+          for method, equality in sine_result['candidate_hashes_match'].items():
+              print('NUMPY_SINE_CANDIDATE_EQUAL:', method, equality)
+              print('NUMPY_SINE_126_SHA:', method, sine_first['methods'][method]['sha256'])
+              print('NUMPY_SINE_246_SHA:', method, sine_second['methods'][method]['sha256'])
+              print('NUMPY_SINE_126_ERROR:', method, sine_first['methods'][method]['max_absolute_difference'])
+              print('NUMPY_SINE_246_ERROR:', method, sine_second['methods'][method]['max_absolute_difference'])
+
           print('NUMPY_STAGE_MACHINE:', a['environment']['cpu_model'])
           print('NUMPY_STAGE_IDENTICAL_RECORDINGS:', comparison['fully_identical_cases'])
           print('NUMPY_STAGE_MATCHING_AGGREGATES:', comparison['matching_stages'])
