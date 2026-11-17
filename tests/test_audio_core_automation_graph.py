@@ -131,6 +131,29 @@ def test_data_graph_has_canonical_hash_and_stable_report(source):
     assert result["nodes"][-1]["operation"] == "peak_limit"
 
 
+def test_graph_parameters_are_deep_frozen_and_exports_are_copies(source):
+    arguments = {"keys": [[0, 0.0], [255, 1.0]], "unit": "linear"}
+    node = GraphNode("volume", "automate", ("source",), arguments)
+    arguments["keys"][1][1] = 15.0
+    assert node.parameters["keys"][1][1] == 1.0
+    with pytest.raises(TypeError):
+        node.parameters["keys"] = ()
+    with pytest.raises(TypeError):
+        node.parameters["keys"][1][1] = 15.0
+    graph = SignalGraph((
+        GraphNode("source", "source", parameters={"source_id": "test"}),
+        node,
+    ), "volume")
+    original_sha = graph.sha256
+    exported = graph.as_dict()
+    exported["nodes"][1]["parameters"]["keys"][1][1] = 12
+    assert graph.sha256 == original_sha
+    assert graph.as_dict()["nodes"][1]["parameters"]["keys"][1][1] == 1
+    output = execute_graph(graph, {"test": source})
+    assert output.audio.samples[0, 0] == 0
+    assert output.audio.samples[0, -1] == pytest.approx(.5)
+
+
 def test_graph_explicit_mixing_of_sibling_nodes(source):
     graph = SignalGraph((
         GraphNode("root", "source", (), {"source_id": "test"}),
