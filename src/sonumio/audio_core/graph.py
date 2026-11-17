@@ -9,6 +9,7 @@ This graph engine is opt-in; the existing Sonumio API never invokes it.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from types import MappingProxyType
 import hashlib
 import json
 import math
@@ -101,6 +102,18 @@ def _simple_parameter(value: Any, *, depth: int = 0) -> bool:
     return False
 
 
+def _freeze_parameter(value):
+    if isinstance(value, (list, tuple)):
+        return tuple(_freeze_parameter(x) for x in value)
+    return value
+
+
+def _export_parameter(value):
+    if isinstance(value, tuple):
+        return [_export_parameter(x) for x in value]
+    return value
+
+
 @dataclass(frozen=True, slots=True)
 class GraphNode:
     node_id: str
@@ -127,7 +140,11 @@ class GraphNode:
                 or not set(params).issubset(_PARAMETERS[self.operation])
                 or not all(_simple_parameter(v) for v in params.values())):
             raise AudioContractError("Unsupported or nonfinite graph parameters")
-        object.__setattr__(self, "parameters", dict(params))
+        # Retain no references to input dictionaries or nested keyframe lists.
+        # A frozen dataclass containing a mutable dict is NOT really frozen.
+        object.__setattr__(self, "parameters", MappingProxyType({
+            key: _freeze_parameter(value) for key, value in params.items()
+        }))
 
 
 @dataclass(frozen=True, slots=True)
@@ -163,7 +180,10 @@ class SignalGraph:
             "version": 1,
             "nodes": [
                 {"id": n.node_id, "operation": n.operation,
-                 "inputs": list(n.inputs), "parameters": dict(n.parameters)}
+                 "inputs": list(n.inputs), "parameters": {
+                    key: _export_parameter(value)
+                    for key, value in n.parameters.items()
+                 }}
                 for n in self.nodes
             ],
             "output": self.output,
