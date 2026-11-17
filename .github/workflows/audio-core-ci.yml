@@ -1,0 +1,64 @@
+name: Independent audio-core safety and DSP tests
+
+on:
+  pull_request:
+    paths:
+      - 'src/sonumio/audio_core/**'
+      - 'tests/test_audio_core_*.py'
+      - 'research/audio_eval/**'
+      - 'tests/test_audio_eval_*.py'
+      - '.github/workflows/audio-core-ci.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test-audio-core:
+    name: Py${{ matrix.python }} / NumPy ${{ matrix.numpy }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { python: '3.11', numpy: '1.26.4' }
+          - { python: '3.11', numpy: '2.4.6' }
+          - { python: '3.12', numpy: '2.4.6' }
+    env:
+      OPENBLAS_NUM_THREADS: '1'
+      OMP_NUM_THREADS: '1'
+      PYTHONHASHSEED: '0'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Install package and strict NumPy version
+        run: |
+          python -m pip install -e '.[test]' "numpy==${{ matrix.numpy }}"
+          python -c "import numpy as np; assert np.__version__ == '${{ matrix.numpy }}'"
+      - name: Run bounded standalone PCM and graph regression suite
+        run: python -m pytest -q tests/test_audio_core_*.py
+      - name: Run independent model-free acoustic evaluation checks
+        run: |
+          if compgen -G "tests/test_audio_eval_*.py" > /dev/null; then
+            python -m pytest -q tests/test_audio_eval_*.py
+          fi
+      - name: Report source implementation line counts
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          for root in (Path('src/sonumio/audio_core'),
+                       Path('research/audio_eval')):
+              if root.exists():
+                  files = sorted(root.rglob('*.py'))
+                  total = sum(len(p.read_text(encoding='utf8').splitlines()) for p in files)
+                  print('AUDIO_CODE_MODULES:', root, len(files))
+                  print('AUDIO_SOURCE_LINES:', root, total)
+          files = sorted(Path('tests').glob('test_audio_core_*.py'))
+          print('AUDIO_TEST_LINES:', sum(
+              len(p.read_text(encoding='utf8').splitlines()) for p in files
+          ))
+          print('Independent source-level DSP only; original model training unchanged.')
+          PY
