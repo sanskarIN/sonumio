@@ -358,3 +358,31 @@ the independently verified scalar reference. No existing
 generator, model trainer, weights or dataset fingerprints
 were modified. Fast candidate exact reproducibility is
 **not yet confirmed** until the new CI finishes.
+
+
+### 17 November 2026 — fast reference and 105 held-out cases confirmed
+
+The [fast complete 84-case verification](FAST_DSP_RESULTS.md)
+passed 4/4 independently provisioned CPU runners and
+matched all candidate 24-kHz/full and final 8-kHz
+scalar-reference SHA256s. The
+[additional 105-case holdout study](HELDOUT_DSP_RESULTS.md)
+also passed 4/4 CPU jobs with identical hash aggregates
+for all five new seeds. The reproducible tested footprint
+now covers **189 first-party synthetic source/seed
+recording cases under NumPy 2.4.6**. CI now pins both
+the 84-recording scalar reference and all 105 held-out
+fast reference fingerprints without changing original
+NumPy DSP or neural model datasets.
+
+[NumPy-version evidence](DSP_NUMPY_PORTABILITY.md)
+revealed a complete-DSP SHA mismatch under NumPy
+1.26.4 while source convolution hashes matched.
+A same-runner 1.26.4→2.4.6 stage probe observed
+different DSP aggregates for ambient/drone-related
+and later stages; the original diagnostic's
+alphabetically serialized stage order has since been
+fixed to retain *true execution order*. A dedicated
+ambient-expression probe is being evaluated. Do not
+claim NumPy 1.26 bitwise compatibility until this
+research resolves and passes its tests.
