@@ -12,10 +12,12 @@ on:
       - 'research/full_convolution_candidate.py'
       - 'research/complete_dsp_candidate.py'
       - 'research/candidate_reference.py'
+      - 'research/vectorized_convolution_candidate.py'
       - 'tests/test_stable_convolution_candidate.py'
       - 'tests/test_full_convolution_candidate.py'
       - 'tests/test_complete_dsp_candidate.py'
       - 'tests/test_candidate_reference.py'
+      - 'tests/test_vectorized_convolution_candidate.py'
       - 'research/data_reproducibility.py'
       - 'research/latent_audio.py'
       - 'research/wave_diffusion.py'
@@ -247,4 +249,36 @@ jobs:
           print('CANDIDATE_84_REFERENCE_CPU:', report['environment']['cpu_model'])
           print('CANDIDATE_84_REFERENCE_WORKFLOW:', result['source_workflow'])
           print('Candidate only: original NumPy SHA is host-sensitive by design.')
+          PY
+
+      - name: Probe faster float64 vectorized convolution without adopting it
+        run: |
+          python -m research.vectorized_convolution_candidate --output /tmp/sonumio-vectorized-a.json > /dev/null
+          python -m research.vectorized_convolution_candidate --output /tmp/sonumio-vectorized-b.json > /dev/null
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from research.vectorized_convolution_candidate import compare_probes
+          a = json.loads(Path('/tmp/sonumio-vectorized-a.json').read_text(encoding='utf-8'))
+          b = json.loads(Path('/tmp/sonumio-vectorized-b.json').read_text(encoding='utf-8'))
+          result = compare_probes(a, b)
+          assert result['cases'] == 16
+          assert result['identical_source_inputs_and_kernels']
+          assert result['identical_vectorized_full_bytes']
+          assert not a['vectorized_candidate_for_training']
+          assert not a['audio_files_saved'] and not a['model_weights_saved']
+          print('VECTOR_FLOAT64_CPU:', a['environment']['cpu_model'])
+          print('VECTOR_FLOAT64_NUMPY:', a['environment']['numpy'])
+          print('VECTOR_FLOAT64_SAME_HOST:', result['identical_vectorized_full_bytes'])
+          print('VECTOR_FLOAT64_EQUALS_SCALAR_ALL_SOURCES:',
+                result['matches_scalar_reference_all_sources'])
+          for name, row in a['sources'].items():
+              print('VECTOR_FLOAT64_SOURCE_SHA:', name, row['vectorized_full_sha256'])
+              print('VECTOR_FLOAT64_EQUALS_VERIFIED_SCALAR:', name,
+                    row['matches_verified_scalar_full_reference'])
+              print('VECTOR_FLOAT64_SELECTED_ERROR_MAX:', name,
+                    row['max_selected_absolute_error'])
+              print('VECTOR_FLOAT64_MEDIAN_CONV_SECONDS:', name,
+                    row['median_vectorized_seconds'])
+          print('No promotion to DSP or neural training; these are numerical research results.')
           PY
