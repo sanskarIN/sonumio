@@ -392,3 +392,14 @@ checks those measured full-corpus hashes on future CPU matrix
 runs. This is synthetic numerical research **only**, not
 training-data replacement, model quality or a production
 Sonumio-1 model.
+
+
+**Research throughput finding and faster arithmetic hypothesis:** a
+[paired first-party DSP benchmark](docs/DSP_CANDIDATE_BENCHMARK.md)
+measured the slow scalar reference at about **679×** the original
+NumPy rain-rendering latency in one two-repeat AMD EPYC 7763
+experiment; this is *not* a general speed claim. A separately
+[documented float64 vectorized convolution study](docs/VECTORIZED_CONVOLUTION_CANDIDATE.md)
+now compares full source-convolution fingerprints with the verified
+scalar reference on multiple CPUs. It is a numerical experiment
+only and is not enabled in inference or training.
