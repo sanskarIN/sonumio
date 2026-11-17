@@ -28,7 +28,40 @@ from .windows import (
     overlap_envelope, validate_cola, weighted_overlap_add,
 )
 
+
+from .streaming import (
+    FramePacket, FramerConfig, PacketCollector, StreamingFramer,
+    WindowPacket, split_packets, offline_window_reference,
+)
+from .quality import (
+    QualityFinding, QualityLimits, QualityReport, measure_quality,
+    waveform_integrity_report, compare_quality_reports,
+)
+from .spectral_effects import (
+    SpectralGateOptions, SpectralBand, spectral_gate,
+    spectral_eq, spectral_tilt, heuristic_harmonic_percussive,
+)
+
 __all__ = [
+    "FramePacket",
+    "FramerConfig",
+    "PacketCollector",
+    "StreamingFramer",
+    "WindowPacket",
+    "split_packets",
+    "offline_window_reference",
+    "QualityFinding",
+    "QualityLimits",
+    "QualityReport",
+    "measure_quality",
+    "waveform_integrity_report",
+    "compare_quality_reports",
+    "SpectralGateOptions",
+    "SpectralBand",
+    "spectral_gate",
+    "spectral_eq",
+    "spectral_tilt",
+    "heuristic_harmonic_percussive",
     "AudioContractError", "AudioFormatError", "AudioLimitError",
     "AudioBuffer", "AudioLayout", "AudioSpec", "as_channel_first",
     "check_audio", "check_rate", "finite_float", "make_buffer",
