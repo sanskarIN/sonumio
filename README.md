@@ -358,3 +358,15 @@ original NumPy output SHA256s. It is a **separate research-only
 arithmetic primitive**, not a switched training recipe, not a
 full 8-kHz waveform/crop reproducibility proof, and not an
 AI audio-quality improvement.
+
+
+**Experimental complete DSP reproducibility pilot (17 November):**
+the [isolated 24-kHz-to-8-kHz study](docs/COMPLETE_DSP_CANDIDATE.md)
+now compares the original DSP recipe with a separate, *non-training*
+scalar source-convolution candidate, including mixing, fades,
+normalization, original FIR resampling and 8192-frame research crops.
+All 40 pilot source/seed recordings produced identical candidate
+24-kHz and 8-kHz crop hashes across four CPU runners, including a host
+where original NumPy hashes differed. The full 84-recording corpus is
+an additional gate, not automatically proven by the pilot. No existing
+generator, neural training recipe, checkpoint or release changed.
