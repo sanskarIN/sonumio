@@ -443,3 +443,16 @@ sound were affected. Two isolated sine alternatives
 (float64 NumPy and Python `math.sin`) are under
 cross-version and cross-CPU study; the original
 generator and previous datasets remain unchanged.
+
+
+**Portable ambient DSP research (17 November):** the [same-runner
+NumPy sine investigation](docs/AMBIENT_SINE_RESEARCH.md) found both isolated
+float64 NumPy sine and Python `math.sin` ambient oscillator candidates
+produced identical SHA256 bytes under NumPy 1.26.4 and 2.4.6, while the
+original float32 `np.sin` ambient oscillator did not. A [new 189-case
+per-method complete-DSP experiment](docs/PORTABLE_DSP_CANDIDATE.md)
+now tests **378 first-party synthetic recording cases**, including
+historical source splits and five additional holdout seeds, across CPUs
+and NumPy versions. This experimental pipeline is not used in any
+original training or deployed generator. Full-corpus cross-version
+results must be confirmed from the new CI before claiming success.
