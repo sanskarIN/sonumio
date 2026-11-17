@@ -339,3 +339,22 @@ regressions and a CPU matrix. It is **NOT** promoted into
 the original DSP, neural training or dataset pipeline.
 Cross-host results and quality/performance implications are
 unverified until the new workflow completes.
+
+
+### 17 November 2026 — fast complete-DSP hypothesis now on separate CI path
+
+Created [`research/fast_dsp_candidate.py`](../research/fast_dsp_candidate.py)
+and its [experiment protocol](FAST_DSP_CANDIDATE.md). This new
+research-only source recipe uses NumPy vectorized float64
+source convolution and otherwise preserves original sound
+randomness, mix/fades, peak normalization, FIR resampling
+and seed-disjoint 8192-frame training crop. It validates the
+original waveform against the unchanged neural research
+oracle, checks 24-kHz and 8-kHz numerical error, and rejects
+duplicated exact waveforms and train/validation SHA overlap.
+The CPU matrix compares full-corpus fingerprints from two
+separate processes per host and reports whether they equal
+the independently verified scalar reference. No existing
+generator, model trainer, weights or dataset fingerprints
+were modified. Fast candidate exact reproducibility is
+**not yet confirmed** until the new CI finishes.
