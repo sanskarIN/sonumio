@@ -192,6 +192,60 @@ def compare_reports(first: dict, second: dict) -> dict:
     }
 
 
+
+# Independently measured NumPy 2.4.6 four-host SHA aggregates, workflow
+# https://github.com/sanskarIN/sonumio/actions/runs/44075765225
+# Each seed aggregate hashes concatenated per-recording SHA256 digests.
+HELDOUT_REFERENCE = {
+    "3": {
+        "fast_24k_sha256": "e1076d40c4d72e2b75bd3588f408c077d961d407d98c95c6c7c30d6f1893ef95",
+        "fast_8k_crop_sha256": "aab15df63345413c2c5075803d81194413a1bee5a5994799ea277af101a8765b",
+    },
+    "7": {
+        "fast_24k_sha256": "2840877f38f17e3ea0b39263cfa4533781473b2ef85688b1ee448962cdf8dda1",
+        "fast_8k_crop_sha256": "68991ec70a90f369947d11b318fbcf43a71be78dd38a515d73d907b31ef3d806",
+    },
+    "17": {
+        "fast_24k_sha256": "30df175004b4909e2cbb76971d6e0b0d3bb39179a45b3b2709355c680d4261b8",
+        "fast_8k_crop_sha256": "5eed92f868e9a03fa64c461ffd51ea690caaaca36848c77a699000dcb144d897",
+    },
+    "29": {
+        "fast_24k_sha256": "00776f177d1dfa0de268e89ca424f3f826f16128ccf57a1834f9b7f6b35393a9",
+        "fast_8k_crop_sha256": "db8a189f7fb0ea536670d9eeb54cd75abefe27917b94a72cadcf98c30a89718f",
+    },
+    "41": {
+        "fast_24k_sha256": "9f59d6cb67af7c2671e321fb75baa60ab968f114475977af89627af07d28858e",
+        "fast_8k_crop_sha256": "a76d3a12854b6d59b90d084cb40e79223876deebfc099526b8ad0b37bf673726",
+    },
+}
+
+
+def verify_heldout_reference(report: dict) -> dict:
+    """Gate the full held-out corpus against independently verified bytes.
+
+    Intentionally do NOT pin legacy NumPy float32 convolution digests,
+    which differed across original CPU environments.
+    """
+    validate_report(report)
+    for seed, hashes in HELDOUT_REFERENCE.items():
+        observed = report["by_seed"].get(seed)
+        if not isinstance(observed, dict) or observed.get("recordings") != 21:
+            raise ValueError("Missing verified held-out seed " + seed)
+        for name, reference in hashes.items():
+            if observed.get(name) != reference:
+                raise ValueError("Held-out 24k/8k reference drift: " + seed + "." + name)
+    return {
+        "protocol": "sonumio-fast-dsp-heldout-golden-v1",
+        "recordings": 105,
+        "matched_verified_sha256": True,
+        "numpy_reference_version": "2.4.6",
+        "reference_workflow": "https://github.com/sanskarIN/sonumio/actions/runs/44075765225",
+        "old_model_data_unchanged": True,
+        "model_weights_saved": False,
+    }
+
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path)
