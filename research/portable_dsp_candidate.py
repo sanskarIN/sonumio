@@ -230,9 +230,51 @@ def compare_reports(first: dict, second: dict) -> dict:
          for r in first["recordings"]}
     b = {(r["method"], r["split"], tuple(r["sources"]), r["seed"]): r
          for r in second["recordings"]}
+    # Split-aware exact-byte diagnostics distinguish a verified historical
+    # corpus from later-seed stress cases. A whole-grid False alone is too
+    # coarse to locate a NumPy version regression.
+    mismatches = {}
+    for method in METHODS:
+        mismatches[method] = {}
+        for split, _ in SPLITS:
+            keys = [k for k in a if k[0] == method and k[1] == split]
+            differing_raw = [k for k in keys
+                if a[k]["portable_24k_sha256"] != b[k]["portable_24k_sha256"]]
+            differing_crop = [k for k in keys
+                if a[k]["portable_8k_crop_sha256"] != b[k]["portable_8k_crop_sha256"]]
+            differing_legacy = [k for k in keys
+                if a[k]["legacy_8k_crop_sha256"] != b[k]["legacy_8k_crop_sha256"]]
+            mismatches[method][split] = {
+                "cases": len(keys),
+                "different_24k": len(differing_raw),
+                "different_8k_crop": len(differing_crop),
+                "different_legacy_crop": len(differing_legacy),
+                "by_seed_24k": {
+                    str(seed): sum(k[3] == seed for k in differing_raw)
+                    for seed in dict(SPLITS)[split]
+                },
+                "by_seed_8k_crop": {
+                    str(seed): sum(k[3] == seed for k in differing_crop)
+                    for seed in dict(SPLITS)[split]
+                },
+                "first_different_cases": [{
+                    "sources": list(k[2]), "seed": k[3],
+                    "raw_differs": k in differing_raw,
+                    "crop_differs": k in differing_crop,
+                    "legacy_crop_differs": k in differing_legacy,
+                } for k in keys if
+                    k in differing_raw or k in differing_crop or k in differing_legacy
+                ][:12],
+            }
     return {
         "protocol": "sonumio-portable-dsp-numerical-comparison-v1",
         "cases_per_method": len(CASES),
+        "discrepancies_by_method_split": mismatches,
+        "original_84_portable_exact": all(
+            mismatches[method][split]["different_24k"] == 0
+            and mismatches[method][split]["different_8k_crop"] == 0
+            for method in METHODS for split in ("train", "validation")
+        ),
         "same_cpu_model": first["environment"]["cpu_model"]
                           == second["environment"]["cpu_model"],
         "numpy_versions": [
