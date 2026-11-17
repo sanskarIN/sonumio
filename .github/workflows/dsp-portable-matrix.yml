@@ -109,6 +109,24 @@ jobs:
           print('PORTABLE_VERSION_EQUAL_24K:', result['portable_24k_exact'])
           print('PORTABLE_VERSION_EQUAL_CROPS:', result['portable_final_crops_exact'])
           print('PORTABLE_VERSION_LEGACY_CROPS_EQUAL:', result['legacy_crops_exact'])
+          assert result['original_84_portable_exact'], (
+              'The verified original 84-case train/validation fingerprints drifted'
+          )
+          print('PORTABLE_VERSION_ORIGINAL_84_EXACT:', result['original_84_portable_exact'])
+          for method, splits in result['discrepancies_by_method_split'].items():
+              for split, values in splits.items():
+                  print('PORTABLE_VERSION_DIFFERENCES:', method, split,
+                        'source_cases', values['cases'],
+                        '24k', values['different_24k'],
+                        '8k_crop', values['different_8k_crop'],
+                        'legacy_crop', values['different_legacy_crop'])
+                  print('PORTABLE_VERSION_24K_BY_SEED:', method, split,
+                        values['by_seed_24k'])
+                  print('PORTABLE_VERSION_8K_BY_SEED:', method, split,
+                        values['by_seed_8k_crop'])
+                  for case in values['first_different_cases']:
+                      print('PORTABLE_VERSION_DIFFERENT_CASE:', method, split, case)
+
           for method in METHODS:
               for split, values in new['splits'][method].items():
                   print('PORTABLE_VERSION_246_24K_SHA:', method, split, values['portable_24k_sha256'])
