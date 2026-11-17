@@ -425,3 +425,14 @@ exercised per method (**189 × 2 = 378 recordings**). New
 research-only CI compares complete SHA256 waveforms and final crops
 on four CPUs and on one CPU with NumPy 1.26.4 then 2.4.6. These
 new results are still unverified at this documentation checkpoint.
+
+
+### Numerical stress-seed provenance — training overlap identified
+
+An audit found that additional DSP probe seed **3** overlaps with
+`research.text_audio.SYNTHETIC_TRAIN_SEEDS`, even though it is disjoint
+from the original latent-audio 84-recording seed grid. The 105 extra
+fingerprints remain valid cross-host numerical regression cases, but are **not**
+a globally held-out neural evaluation set. The probe now publishes exact
+training-seed overlap metadata and fails validation on incorrect global
+holdout assertions. This correction does not alter source audio or SHA256s.
