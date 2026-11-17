@@ -33,7 +33,7 @@ jobs:
           python -m pip install -e '.[test]' 'scipy>=1.12,<2'
           python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
       - name: Execute PyTorch research tests
-        run: python -m pytest -q tests/test_research.py tests/test_wave_diffusion.py tests/test_audio_dataset.py tests/test_multi_condition.py tests/test_text_audio.py tests/test_latent_audio.py tests/test_latent_alignment.py tests/test_latent_quality.py tests/test_architecture_compare.py tests/test_multi_seed_study.py tests/test_generation_audit.py tests/test_schedule_ablation.py tests/test_velocity_prediction.py tests/test_data_reproducibility.py tests/test_dsp_pipeline_trace.py tests/test_dsp_convolution_probe.py tests/test_stable_convolution_candidate.py tests/test_full_convolution_candidate.py tests/test_complete_dsp_candidate.py tests/test_dsp_benchmark.py tests/test_candidate_reference.py tests/test_vectorized_convolution_candidate.py tests/test_fast_dsp_candidate.py
+        run: python -m pytest -q tests/test_research.py tests/test_wave_diffusion.py tests/test_audio_dataset.py tests/test_multi_condition.py tests/test_text_audio.py tests/test_latent_audio.py tests/test_latent_alignment.py tests/test_latent_quality.py tests/test_architecture_compare.py tests/test_multi_seed_study.py tests/test_generation_audit.py tests/test_schedule_ablation.py tests/test_velocity_prediction.py tests/test_data_reproducibility.py tests/test_dsp_pipeline_trace.py tests/test_dsp_convolution_probe.py tests/test_stable_convolution_candidate.py tests/test_full_convolution_candidate.py tests/test_complete_dsp_candidate.py tests/test_dsp_benchmark.py tests/test_candidate_reference.py tests/test_vectorized_convolution_candidate.py tests/test_fast_dsp_candidate.py tests/test_dsp_three_way.py
       - name: Compare independently regenerated DSP recordings across Python processes
         run: |
           mkdir -p /tmp/sonumio-repro
@@ -123,4 +123,28 @@ jobs:
           print('DSP_RUNTIME_CANDIDATE_OVER_LEGACY:', data['candidate_to_legacy_median_latency_ratio'])
           print('DSP_RUNTIME_MAX_ABS_SAMPLE_ERROR:', data['max_absolute_sample_difference'])
           print('Timing is not a release criterion; sample waveform bytes are not published.')
+          PY
+
+      - name: Paired original scalar and vectorized 24k DSP latency research
+        run: |
+          python -m benchmarks.dsp_three_way --case rain --seed 0             --repeats 3 --warmups 1             --output checkpoints/private-research/three-way-ci.json > /dev/null
+          python - <<'PY'
+          import json, math
+          from pathlib import Path
+          data = json.loads(Path('checkpoints/private-research/three-way-ci.json').read_text())
+          assert data['protocol'] == 'sonumio-paired-three-way-dsp-benchmark-v1'
+          assert data['repeats'] == 3 and data['frames_24k'] == 36000
+          assert data['fast_equals_scalar_sha256']
+          assert not data['candidate_used_for_neural_training']
+          assert not data['audio_files_saved'] and not data['model_weights_saved']
+          for name, row in data['latency'].items():
+              assert len(row['sha256']) == 64
+              assert 0 < row['median_seconds'] < 100
+              print('THREE_WAY_MEDIAN_S:', name, row['median_seconds'])
+          assert math.isfinite(data['scalar_over_fast_median_speedup'])
+          print('THREE_WAY_CPU:', data['environment']['cpu_model'])
+          print('THREE_WAY_SCALAR_OVER_FAST:', data['scalar_over_fast_median_speedup'])
+          print('THREE_WAY_FAST_OVER_ORIGINAL:', data['fast_vs_legacy_median_latency_ratio'])
+          print('THREE_WAY_SAMPLE_ERROR:', data['maximum_sample_error'])
+          print('Local 24k DSP in-memory microbenchmark, NOT neural production performance.')
           PY
