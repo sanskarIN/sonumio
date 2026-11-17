@@ -21,12 +21,16 @@ from research.complete_dsp_candidate import (
 from research.data_reproducibility import _digest, _environment, _hash_ok
 from research.dsp_pipeline_trace import digest_array
 from research.fast_dsp_candidate import render_fast_raw
-from research.text_audio import SYNTHETIC_COMBINATIONS
+from research.text_audio import SYNTHETIC_COMBINATIONS, SYNTHETIC_TRAIN_SEEDS
 from research.wave_diffusion import CATEGORIES, _downsample_24k_to_8k
 from sonumio.engines import procedural as dsp
 
 PROTOCOL = "sonumio-fast-dsp-held-out-seed-fingerprint-v1"
 HELDOUT_SEEDS = (3, 7, 17, 29, 41)
+# These are additional NUMERICAL TEST seeds outside the latent 84-case grid.
+# Seed 3 ALSO appears in a separate text-conditioned neural training recipe:
+# never mislabel this entire set as a global model-evaluation holdout.
+TEXT_AUDIO_TRAIN_OVERLAP = tuple(sorted(set(HELDOUT_SEEDS) & set(SYNTHETIC_TRAIN_SEEDS)))
 if set(HELDOUT_SEEDS) & (set(TRAIN_SEEDS) | set(VALIDATION_SEEDS)):
     raise RuntimeError("Held-out DSP seeds overlap train/validation source identities")
 
@@ -101,7 +105,9 @@ def build_report() -> dict:
         "by_seed": _summary(recordings),
         "environment": _environment(),
         "same_source_family_as_neural_experiments": True,
-        "heldout_seeds_not_used_for_model_training": True,
+        "additional_seeds_disjoint_from_latent_84_case_grid": True,
+        "globally_heldout_for_neural_model_evaluation": False,
+        "text_audio_training_seed_overlap": list(TEXT_AUDIO_TRAIN_OVERLAP),
         "candidate_used_for_neural_training": False,
         "original_generator_unchanged": True,
         "audio_files_saved": False,
@@ -120,7 +126,9 @@ def validate_report(value: dict) -> None:
             or value.get("crop_hz") != 8000
             or value.get("crop_frames") != FRAMES
             or value.get("same_source_family_as_neural_experiments") is not True
-            or value.get("heldout_seeds_not_used_for_model_training") is not True
+            or value.get("additional_seeds_disjoint_from_latent_84_case_grid") is not True
+            or value.get("globally_heldout_for_neural_model_evaluation") is not False
+            or value.get("text_audio_training_seed_overlap") != list(TEXT_AUDIO_TRAIN_OVERLAP)
             or value.get("candidate_used_for_neural_training") is not False
             or value.get("original_generator_unchanged") is not True
             or value.get("audio_files_saved") is not False
