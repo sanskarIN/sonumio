@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import copy
+import hashlib
 import json
 import math
 from pathlib import Path
@@ -59,7 +60,7 @@ def _forest_variants(rng: np.random.Generator, t: np.ndarray) -> tuple[dict, dic
         }
         hashes = {
             "local_time": _digest(local_t),
-            "frequency": _digest(np.asarray([freq], dtype=np.float64)),
+            "frequency": hashlib.sha256(np.asarray([freq], dtype="<f8").tobytes()).hexdigest(),
             "phase": _digest(phase),
             "window": _digest(window),
             "sine_original": _digest(old_sin),
