@@ -139,3 +139,32 @@ agreement in all 189 cases per method.**
 **Draft PR #1 stays unmerged. No prerelease,
 release, tag, published audio or
 model weights are authorized.**
+
+
+## Outcome update — verified against a full independent five-job matrix
+
+The experimental plan above has now been executed.
+[Workflow #44095705429](https://github.com/sanskarIN/sonumio/actions/runs/44095705429)
+finished **5/5 successful jobs**. Both
+float64 NumPy sine and Python scalar
+`math.sin` forest-aware candidates
+produced *exactly identical* 24-kHz
+float32 source waveform SHA256s and final
+8-kHz crop SHA256s across **all 189
+source/seed numerical cases per method**,
+including the two former seed-41
+thunder/forest and wind/forest
+differences. One CPU independently
+evaluated NumPy 1.26.4 and 2.4.6,
+while four separate NumPy-2.4.6
+hosted CPU jobs produced the same
+result. See [exact results and
+frozen reference](FOREST_SINE_RESULTS.md)
+for boundaries and limitations.
+
+This is a research **numerical
+reproducibility** milestone, not
+adoption in the original procedural
+synthesizer or proof of neural-model
+quality, audio rights or public
+release readiness.
