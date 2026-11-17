@@ -16,6 +16,9 @@ def test_heldout_seed_grid_is_disjoint_and_complete():
     assert set(study.HELDOUT_SEEDS).isdisjoint(study.TRAIN_SEEDS)
     assert set(study.HELDOUT_SEEDS).isdisjoint(study.VALIDATION_SEEDS)
     assert len(study.HELDOUT_SEEDS) == 5
+    assert study.TEXT_AUDIO_TRAIN_OVERLAP == (3,)
+    assert set(study.HELDOUT_SEEDS) & set(study.SYNTHETIC_TRAIN_SEEDS) == {3}
+    # A numerical stress set outside the latent grid is not a global holdout.
     assert len(SYNTHETIC_COMBINATIONS) == 21
 
 
@@ -53,6 +56,9 @@ def test_complete_heldout_fingerprint_report_is_hashes_not_wav(report):
     assert report["candidate_used_for_neural_training"] is False
     assert report["audio_files_saved"] is False
     assert report["model_weights_saved"] is False
+    assert report["additional_seeds_disjoint_from_latent_84_case_grid"] is True
+    assert report["globally_heldout_for_neural_model_evaluation"] is False
+    assert report["text_audio_training_seed_overlap"] == [3]
     same = study.compare_reports(report, copy.deepcopy(report))
     assert same["distinct_recordings"] == 105
     assert same["identical_fast_24k_hashes"] is True
@@ -118,3 +124,14 @@ def test_golden_detects_drift_even_when_study_aggregate_is_recomputed(report):
     study.validate_report(damaged)
     with pytest.raises(ValueError, match="reference drift"):
         study.verify_heldout_reference(damaged)
+
+
+def test_fake_global_holdout_claim_is_rejected(report):
+    forged = copy.deepcopy(report)
+    forged["globally_heldout_for_neural_model_evaluation"] = True
+    with pytest.raises(ValueError, match="metadata"):
+        study.validate_report(forged)
+    forged = copy.deepcopy(report)
+    forged["text_audio_training_seed_overlap"] = []
+    with pytest.raises(ValueError, match="metadata"):
+        study.validate_report(forged)
