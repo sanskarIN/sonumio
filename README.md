@@ -337,3 +337,13 @@ thunder (140) and wind (60). The 12-tap water control and the
 independent selected \`math.fsum\` references matched. No original
 audio recipe or neural training outputs were modified; full-audio
 perceptual relevance of ~1e-8 sampled differences is untested.
+
+
+**Research-only scalar convolution candidate (17 November):** the
+[isolated reproducibility study](docs/SCALAR_CONVOLUTION_CANDIDATE.md)
+computes selected output positions using Python scalar binary64 products,
+compensated summation and a single float32 conversion. It checks input/kernel
+hashes against the unchanged original DSP and adds independent CPU-matrix
+fingerprints; selected-sample agreement cannot establish full-audio identity
+or creator-quality generation. No existing data recipe or training code
+switches to this candidate.
