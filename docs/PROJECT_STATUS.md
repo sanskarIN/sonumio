@@ -271,3 +271,21 @@ difference over the complete output was <= 1.20e-7.
 model-training reproducibility on all CPU environments.**
 The historical source generator and synthetic training data
 remain unchanged, and this PR remains development-only.
+
+
+### 17 November 2026 — isolated DSP-to-8-kHz-crop candidate pilot
+
+A [separate numerical candidate](COMPLETE_DSP_CANDIDATE.md) carries
+the previously tested scalar source-convolution primitive through
+24 kHz first-party sound mixing/normalization, the **unchanged**
+FIR resampler and a seed-specific 8192-frame 8-kHz crop. The
+historical renderer is checked byte-for-byte against the neural
+research audio-data oracle; the candidate is not passed to training.
+A 40-recording train/held-out pilot on **four CPU runners** produced
+identical candidate crop hashes across tested hosts even where the
+original NumPy data differed. The pilot passed 4/4 matrix jobs;
+the research-suite implementation head also had 275 passing tests.
+Source-level anti-leakage checks now reject both duplicate candidate
+and original waveform hashes within a split and exact split overlap.
+The full **84-recording** corpus remains a separate CI gate, and
+this is not proof of model quality or release readiness.
