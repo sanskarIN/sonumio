@@ -165,9 +165,25 @@ def compare_traces(first: dict, second: dict) -> dict:
             first_different[f"{'/'.join(key[0])}@{key[1]}"] = mismatches[0]
         else:
             exact += 1
+    common = sorted(set(first["stage_aggregate"]) & set(second["stage_aggregate"]))
+    paired_differences = {
+        name: sum(
+            a[key]["stages"].get(name) != b[key]["stages"].get(name)
+            for key in a
+        )
+        for name in common
+    }
+    aggregate_order_only = [
+        name for name in common
+        if paired_differences[name] == 0
+        and first["stage_aggregate"][name]["sha256"]
+        != second["stage_aggregate"][name]["sha256"]
+    ]
     return {
         "protocol": "sonumio-numpy-stage-comparison-v1",
         "cases": len(a),
+        "paired_differing_recordings_by_stage": paired_differences,
+        "aggregate_order_only_differences": aggregate_order_only,
         "fully_identical_cases": exact,
         "first_divergent_stage_per_case": first_different,
         "matching_stages": [
