@@ -318,3 +318,24 @@ generalization or production throughput claim follows from this.
 The new `research/candidate_reference.py` gates future full-corpus
 test reports against the observed candidate SHA256s; tests and
 benchmark measurements on later commits need separate CI validation.
+
+
+### 17 November 2026 — performance bottleneck and new fast hypothesis
+
+[CPU research run #44064895590](https://github.com/sanskarIN/sonumio/actions/runs/44064895590)
+passed **281 research tests** including the new paired
+`benchmarks/dsp_candidate.py` study. On one EPYC 7763 runner,
+a 1.5-second *rain* generator run had median original DSP
+0.001956907s versus median scalar reference 1.328028s
+(~678.64× slower, two repetitions, no warmup). This is
+a diagnostic, not a general speed guarantee.
+
+Added the separately [specified double-precision vectorized
+hypothesis](VECTORIZED_CONVOLUTION_CANDIDATE.md), which casts
+float32 source inputs/kernels to float64 before NumPy convolution
+and rounds final output once to float32. It tests complete hashes
+against the four-host scalar fsum reference, with numerical
+regressions and a CPU matrix. It is **NOT** promoted into
+the original DSP, neural training or dataset pipeline.
+Cross-host results and quality/performance implications are
+unverified until the new workflow completes.
