@@ -33,8 +33,8 @@ class FramePacket:
         data = as_channel_first(self.samples, copy=True)
         if data.shape[1] > 1_048_576:
             raise AudioLimitError("Streaming frame packet exceeds 1M frame cap")
-        data.setflags(write=False)
-        object.__setattr__(self, "samples", data)
+        frozen = np.frombuffer(data.tobytes(order="C"), dtype=np.float32)
+        object.__setattr__(self, "samples", frozen.reshape(data.shape))
 
     @property
     def stop_frame(self) -> int:
@@ -158,8 +158,8 @@ class WindowPacket:
                 or not 1 <= self.original_frames <= self.samples.shape[1]):
             raise AudioContractError("Invalid audio analysis window")
         safe = as_channel_first(self.samples, copy=True)
-        safe.setflags(write=False)
-        object.__setattr__(self, "samples", safe)
+        frozen = np.frombuffer(safe.tobytes(order="C"), dtype=np.float32)
+        object.__setattr__(self, "samples", frozen.reshape(safe.shape))
 
 
 class StreamingFramer:
