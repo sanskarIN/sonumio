@@ -81,3 +81,16 @@ data to make comparisons look better.
 
 **No release, pre-release, tag, published audio files or trained
 model weights. Draft PR #1 must remain open, draft and unmerged.**
+
+
+## Verified complete-source results
+
+The [multi-CPU result report](FULL_CONVOLUTION_RESULTS.md)
+documents a four-job successful matrix with two EPYC 7763
+runners, one Xeon 6975P-C, and one EPYC 9V45. All 16 cases
+produced **identical full source-convolution candidate hashes**
+across the tested CPUs even though original NumPy source
+hashes differed on EPYC 7763. This validates complete source
+convolution on the tested inputs; it does not establish equality
+for downstream DSP mixing, cropping, generated speech/music,
+or a final neural training dataset.
