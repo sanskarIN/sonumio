@@ -6,12 +6,14 @@ on:
       - 'research/portable_dsp_candidate.py'
       - 'research/portable_seed_stage_probe.py'
       - 'research/forest_sine_probe.py'
+      - 'research/portable_forest_candidate.py'
       - 'research/portable_dsp_reference.py'
       - 'research/ambient_sine_candidate.py'
       - 'research/fast_dsp_candidate.py'
       - 'tests/test_portable_dsp_candidate.py'
       - 'tests/test_portable_seed_stage_probe.py'
       - 'tests/test_forest_sine_probe.py'
+      - 'tests/test_portable_forest_candidate.py'
       - 'tests/test_portable_dsp_reference.py'
       - '.github/workflows/dsp-portable-matrix.yml'
   workflow_dispatch:
@@ -79,6 +81,32 @@ jobs:
           print('Numerical research candidate only: NO production/training substitution.')
           PY
 
+
+      - name: Test both forest-aware complete DSP variants on this independent CPU
+        run: |
+          python -m research.portable_forest_candidate --output /tmp/sonumio-forest-aware.json > /dev/null
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from research.portable_forest_candidate import validate_report, METHODS
+          data = json.loads(Path('/tmp/sonumio-forest-aware.json').read_text())
+          validate_report(data)
+          assert len(data['recordings']) == 378
+          assert not data['original_generator_modified']
+          assert not data['original_neural_data_modified']
+          assert not data['candidate_used_for_neural_training']
+          assert not data['audio_files_saved'] and not data['model_weights_saved']
+          print('FOREST_AWARE_CPU:', data['environment']['cpu_model'])
+          print('FOREST_AWARE_NUMPY:', data['environment']['numpy'])
+          for method in METHODS:
+              for split, values in data['splits'][method].items():
+                  print('FOREST_AWARE_24K_SHA:', method, split, values['candidate_24k_sha256'])
+                  print('FOREST_AWARE_8K_SHA:', method, split, values['candidate_8k_crop_sha256'])
+                  print('FOREST_AWARE_PREVIOUS_24K_SHA:', method, split, values['previous_portable_24k_sha256'])
+                  print('FOREST_AWARE_8K_MAX_ERROR:', method, split, values['max_8k_crop_abs_error'])
+          print('New forest sine candidate remains completely outside training.')
+          PY
+
   same-cpu-two-numpy-versions:
     name: One CPU NumPy 1.26.4 vs 2.4.6 / 378 waveforms
     runs-on: ubuntu-24.04
@@ -103,6 +131,7 @@ jobs:
           python -m research.portable_dsp_candidate --output /tmp/sonumio-portable-126.json > /dev/null
           python -m research.portable_seed_stage_probe --output /tmp/sonumio-portable-stages-126.json > /dev/null
           python -m research.forest_sine_probe --output /tmp/sonumio-forest-126.json > /dev/null
+          python -m research.portable_forest_candidate --output /tmp/sonumio-forest-aware-126.json > /dev/null
       - name: Swap only NumPy on the same runner
         run: |
           python -m pip install --force-reinstall --no-deps numpy==2.4.6
@@ -112,6 +141,7 @@ jobs:
           python -m research.portable_dsp_candidate --output /tmp/sonumio-portable-246.json > /dev/null
           python -m research.portable_seed_stage_probe --output /tmp/sonumio-portable-stages-246.json > /dev/null
           python -m research.forest_sine_probe --output /tmp/sonumio-forest-246.json > /dev/null
+          python -m research.portable_forest_candidate --output /tmp/sonumio-forest-aware-246.json > /dev/null
           python - <<'PY'
           import json
           from pathlib import Path
@@ -141,6 +171,23 @@ jobs:
           for row in forest_result['first_differences']:
               print('FOREST_NUMPY_VERSION_FIRST_DIFFERENCE:', row)
           print('FOREST_NUMPY_VERSION_TOTAL_CONTEXT_DIFFS:', len(forest_result['first_differences']))
+          from research.portable_forest_candidate import compare_reports as compare_forest_aware
+          before_forest_aware = json.loads(Path('/tmp/sonumio-forest-aware-126.json').read_text())
+          after_forest_aware = json.loads(Path('/tmp/sonumio-forest-aware-246.json').read_text())
+          forest_aware = compare_forest_aware(before_forest_aware, after_forest_aware)
+          assert forest_aware['same_cpu_model'] and forest_aware['cases_per_method'] == 189
+          print('FOREST_AWARE_VERSION_CPU:', before_forest_aware['environment']['cpu_model'])
+          print('FOREST_AWARE_VERSION_MATCH:', forest_aware['all_candidate_bytes_match'])
+          print('FOREST_AWARE_PREVIOUS_VERSION_MATCH:', forest_aware['previous_candidate_hashes_match'])
+          for method, splits in forest_aware['by_method_split'].items():
+              for split, stats in splits.items():
+                  print('FOREST_AWARE_VERSION_SPLIT:', method, split, stats)
+                  print('FOREST_AWARE_VERSION_126_SHA:', method, split,
+                        before_forest_aware['splits'][method][split]['candidate_8k_crop_sha256'])
+                  print('FOREST_AWARE_VERSION_246_SHA:', method, split,
+                        after_forest_aware['splits'][method][split]['candidate_8k_crop_sha256'])
+          print('This is a numerical result, not permission to replace original DSP.')
+
           for method, seed_counts in stage_result['by_method_seed'].items():
               for seed, counts in seed_counts.items():
                   print('PORTABLE_SEED_STAGE_SEED:', method, seed, counts)
