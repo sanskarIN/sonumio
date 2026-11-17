@@ -4,9 +4,11 @@ on:
   pull_request:
     paths:
       - 'research/portable_dsp_candidate.py'
+      - 'research/portable_seed_stage_probe.py'
       - 'research/ambient_sine_candidate.py'
       - 'research/fast_dsp_candidate.py'
       - 'tests/test_portable_dsp_candidate.py'
+      - 'tests/test_portable_seed_stage_probe.py'
       - '.github/workflows/dsp-portable-matrix.yml'
   workflow_dispatch:
 
@@ -87,7 +89,9 @@ jobs:
           python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
           python -c "import numpy as np; assert np.__version__ == '1.26.4'"
       - name: Render numerical SHA study under NumPy 1.26.4
-        run: python -m research.portable_dsp_candidate --output /tmp/sonumio-portable-126.json > /dev/null
+        run: |
+          python -m research.portable_dsp_candidate --output /tmp/sonumio-portable-126.json > /dev/null
+          python -m research.portable_seed_stage_probe --output /tmp/sonumio-portable-stages-126.json > /dev/null
       - name: Swap only NumPy on the same runner
         run: |
           python -m pip install --force-reinstall --no-deps numpy==2.4.6
@@ -95,6 +99,7 @@ jobs:
       - name: Compare independent full-corpus Python process under NumPy 2.4.6
         run: |
           python -m research.portable_dsp_candidate --output /tmp/sonumio-portable-246.json > /dev/null
+          python -m research.portable_seed_stage_probe --output /tmp/sonumio-portable-stages-246.json > /dev/null
           python - <<'PY'
           import json
           from pathlib import Path
@@ -105,6 +110,19 @@ jobs:
           assert result['cases_per_method'] == 189
           assert result['same_cpu_model']
           assert result['numpy_versions'] == ['1.26.4','2.4.6']
+          from research.portable_seed_stage_probe import compare_reports as compare_seed_stages
+          old_stages = json.loads(Path('/tmp/sonumio-portable-stages-126.json').read_text())
+          new_stages = json.loads(Path('/tmp/sonumio-portable-stages-246.json').read_text())
+          stage_result = compare_seed_stages(old_stages, new_stages)
+          assert stage_result['same_cpu_model']
+          assert stage_result['total_method_records'] == 210
+          print('PORTABLE_SEED_STAGE_CPU:', old_stages['environment']['cpu_model'])
+          print('PORTABLE_SEED_STAGE_FULLY_IDENTICAL:', stage_result['fully_matching_method_records'])
+          for method, seed_counts in stage_result['by_method_seed'].items():
+              for seed, counts in seed_counts.items():
+                  print('PORTABLE_SEED_STAGE_SEED:', method, seed, counts)
+          for case in stage_result['first_differing_cases_capped_at_32']:
+              print('PORTABLE_SEED_STAGE_FIRST_DIFFERENCE:', case)
           print('PORTABLE_VERSION_CPU:', old['environment']['cpu_model'])
           print('PORTABLE_VERSION_EQUAL_24K:', result['portable_24k_exact'])
           print('PORTABLE_VERSION_EQUAL_CROPS:', result['portable_final_crops_exact'])
