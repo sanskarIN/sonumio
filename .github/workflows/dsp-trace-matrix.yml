@@ -105,6 +105,8 @@ jobs:
                     max(row['max_selected_fsum_difference'] for row in rows))
           PY
 
+      - name: Gate scalar convolution known-byte reference vectors
+        run: python -m pytest -q tests/test_stable_convolution_candidate.py -k golden_float32_sample_bytes
       - name: Cross-check scalar convolution candidate in two isolated processes
         run: |
           python -m research.stable_convolution_candidate --output /tmp/sonumio-candidate-first.json > /dev/null
