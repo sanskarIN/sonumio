@@ -379,3 +379,16 @@ slowdown for fixed prompts and seeds, without saving WAVs or weights.
 The candidate is a research reference; no performance or perceived
 quality advantage has been established and existing training data
 remain unchanged.
+
+
+**Full 84-recording cross-CPU research outcome (17 November):**
+the [verified first-party candidate study](docs/COMPLETE_DSP_RESULTS.md)
+now covers all 42 train and 42 held-out source recordings. Four
+independent hosted CPU jobs (including two EPYC 7763 runners)
+returned identical candidate 24-kHz waveform and final 8-kHz
+research-crop hashes, despite different original NumPy hashes.
+A new [candidate reference gate](research/candidate_reference.py)
+checks those measured full-corpus hashes on future CPU matrix
+runs. This is synthetic numerical research **only**, not
+training-data replacement, model quality or a production
+Sonumio-1 model.
