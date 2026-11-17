@@ -283,6 +283,19 @@ def validate_report(report: dict) -> None:
         value = row.get("elapsed_seconds")
         if type(value) not in (int, float) or not math.isfinite(value) or value < 0:
             raise ValueError("Invalid timing measurement")
+    # SHA identities are a strictly stronger leakage check than unique
+    # (source, seed) descriptions. Candidate audio must not accidentally
+    # duplicate another synthetic recording in a split or across splits.
+    for digest_name in ("candidate_cropped", "legacy_cropped"):
+        by_split = {
+            split: [row[digest_name] for row in rows if row["split"] == split]
+            for split, _ in SPLITS
+        }
+        for split, hashes in by_split.items():
+            if len(hashes) != len(set(hashes)):
+                raise ValueError("Duplicate waveform fingerprint within " + split)
+        if set(by_split["train"]) & set(by_split["validation"]):
+            raise ValueError("Train/validation waveform fingerprint overlap")
     if observed != set(expected) or report.get("splits") != _summarize(rows):
         raise ValueError("Inconsistent dataset source fingerprint summary")
     total = report.get("elapsed_seconds")
