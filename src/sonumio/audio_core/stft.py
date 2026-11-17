@@ -60,9 +60,9 @@ class Spectrogram:
             raise AudioContractError("Invalid nonfinite STFT metadata")
         if data.nbytes > MAX_BYTES:
             raise AudioLimitError("STFT exceeds bounded in-memory allocation")
-        frozen = np.array(data, dtype=np.complex128, copy=True)
-        frozen.setflags(write=False)
-        object.__setattr__(self, "spectrum", frozen)
+        copy = np.array(data, dtype=np.complex128, copy=True)
+        frozen = np.frombuffer(copy.tobytes(order="C"), dtype=np.complex128)
+        object.__setattr__(self, "spectrum", frozen.reshape(copy.shape))
 
     @property
     def channels(self) -> int:
