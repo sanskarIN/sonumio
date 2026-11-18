@@ -346,3 +346,26 @@ publication, source dataset
 replacement or model-weight
 publication is approved by
 the present work.**
+
+
+## Rational frame clock and materialized partitions (18 November 2026)
+
+An audit identified a numerical edge case in `frames_from_seconds`: converting
+a high-precision `Fraction` through the default 28-digit `Decimal` context
+could silently collapse positions just *above* a half-frame boundary onto the
+tie, changing the selected sample frame. Rational timestamps now use exact
+integer quotient/remainder arithmetic and **round-half-even**; Decimal,
+float and integer input retain their existing public behavior. A 4096-bit
+per-term rational precision ceiling fails closed for pathological timestamps.
+
+The other discovered allocation hazard was `TimeGrid.partition(1)` at a valid
+120-second/192-kHz clock: its former tuple comprehension could materialize
+23,040,000 `FrameInterval` Python objects. `partition()` now preflights
+the count and caps eager materialization at 50,000 intervals. Callers that
+need finer divisions should consume the existing lazy `split_intervals()`
+iterator in bounded batches rather than accumulating its full output.
+
+This does not alter DSP samples, existing procedural source computations,
+training recipes or diffusion checkpoint formats. Both changes are tested
+by `tests/test_audio_core_timebase_precision.py` and included in the
+independent Python/NumPy audio-core matrix.

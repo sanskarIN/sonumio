@@ -14,14 +14,14 @@ from typing import Iterator
 from .contracts import check_rate, MAX_SECONDS, finite_float
 from .errors import AudioContractError, AudioLimitError
 
+# Materialized partition tuples are bounded independently of total PCM time.
+# split_intervals() remains lazy for callers that stream many intervals.
+MAX_PARTITION_INTERVALS = 50_000
 
-def _decimal_seconds(seconds: int | float | Decimal | Fraction) -> Decimal:
+
+def _decimal_seconds(seconds: int | float | Decimal) -> Decimal:
     if type(seconds) is bool:
         raise AudioContractError("Time cannot be boolean")
-    if isinstance(seconds, Fraction):
-        if seconds.denominator == 0:
-            raise AudioContractError("Invalid fractional time")
-        return Decimal(seconds.numerator) / Decimal(seconds.denominator)
     if isinstance(seconds, Decimal):
         result = seconds
     elif type(seconds) in (float, int):
@@ -40,13 +40,27 @@ def frames_from_seconds(seconds: int | float | Decimal | Fraction, rate: int,
                         max_seconds: float = MAX_SECONDS) -> int:
     check_rate(rate)
     finite_float(max_seconds, "max_seconds", minimum=0.01, maximum=86400)
-    decimal = _decimal_seconds(seconds)
-    if decimal < 0 or decimal > Decimal(str(max_seconds)):
-        raise AudioLimitError("Requested time exceeds bounded frame clock")
-    try:
-        count = int((decimal * rate).to_integral_value(rounding=ROUND_HALF_EVEN))
-    except (InvalidOperation, OverflowError) as exc:
-        raise AudioContractError("Cannot represent requested frame time") from exc
+    if isinstance(seconds, Fraction):
+        # Converting arbitrary rationals to Decimal under its default
+        # 28-digit context silently rounded values just above/below a
+        # half-frame boundary *onto* the tie. Keep exact integer ratios.
+        if (seconds.numerator.bit_length() > 4096 or
+                seconds.denominator.bit_length() > 4096):
+            raise AudioLimitError("Fractional timestamp precision exceeds budget")
+        if seconds < 0 or seconds > Fraction(Decimal(str(max_seconds))):
+            raise AudioLimitError("Requested time exceeds bounded frame clock")
+        q, rem = divmod(seconds.numerator * rate, seconds.denominator)
+        twice = rem * 2
+        count = q + int(twice > seconds.denominator or
+                        (twice == seconds.denominator and q % 2 == 1))
+    else:
+        decimal = _decimal_seconds(seconds)
+        if decimal < 0 or decimal > Decimal(str(max_seconds)):
+            raise AudioLimitError("Requested time exceeds bounded frame clock")
+        try:
+            count = int((decimal * rate).to_integral_value(rounding=ROUND_HALF_EVEN))
+        except (InvalidOperation, OverflowError) as exc:
+            raise AudioContractError("Cannot represent requested frame time") from exc
     if count == 0 and not allow_zero:
         raise AudioContractError("Time rounded to zero frames")
     return count
@@ -183,6 +197,16 @@ class TimeGrid:
             raise AudioContractError("Frame interval outside TimeGrid")
 
     def partition(self, chunk_frames: int) -> tuple[FrameInterval, ...]:
+        """Materialize only a bounded number of non-overlapping intervals.
+
+        For very fine partitions of long audio, consume the lazy
+        split_intervals() iterator instead of allocating millions of objects.
+        """
+        if type(chunk_frames) is not int or chunk_frames <= 0:
+            raise AudioContractError("Partition chunk size must be positive integer")
+        count = (self.frames + chunk_frames - 1) // chunk_frames
+        if count > MAX_PARTITION_INTERVALS:
+            raise AudioLimitError("Materialized timeline partition exceeds interval cap")
         return tuple(split_intervals(self.frames, self.sample_rate, chunk_frames))
 
 

@@ -12,7 +12,7 @@ python -m pip install -e '.[test]'
 sonumio serve --port 8000
 ```
 
-In another terminal (Node 22+):
+In another terminal (Node 24 recommended for the verified CI environment):
 
 ```sh
 cd web
@@ -49,3 +49,29 @@ synchronous `/v1/generations` and `/v1/scenes` endpoints remain supported.
 Frontend job/client validation has automated Vitest coverage; see
 [queue safeguards](../docs/LOCAL_JOBS.md). No public deployment or
 release is authorized.
+
+
+## Dependency reproducibility checkpoint
+
+The Web CI currently runs Node 24 and installs using `npm install`, which
+passes the measured smoke check but is **not a locked or fully reproducible
+dependency graph**. There is no committed `package-lock.json` in this branch.
+
+When registry access is available to a maintainer, generate and inspect a
+lockfile under the same major Node/npm runtime used by CI:
+
+```sh
+cd web
+node --version
+npm --version
+npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+npm ci --ignore-scripts --no-audit --no-fund
+npm run typecheck
+npm test
+npm run build
+```
+
+Review the registry origins and transitive dependency integrity metadata,
+then commit the generated lockfile and change CI from `npm install` to
+`npm ci` in the **same tested commit**. Do not synthesize a lockfile
+without actual registry resolution. No deployment or release is authorized.
