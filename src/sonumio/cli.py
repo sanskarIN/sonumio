@@ -7,6 +7,9 @@ from .errors import GenerationError
 from .registry import list_models
 from .service import generate_audio
 from .scenes import SceneLayer, compose_scene
+from .audio_core.wave_pipeline import (
+    WavProcessingConfig, process_wav_file,
+)
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="sonumio", description="Imagine it. Hear it.")
@@ -20,6 +23,23 @@ def main(argv: list[str] | None = None) -> int:
     scene = sub.add_parser("scene", help="Compose a timed, multi-layer procedural WAV scene from JSON")
     scene.add_argument("json_file", type=Path)
     scene.add_argument("--output", type=Path, default=Path("scene.wav"))
+    post = sub.add_parser(
+        "wav-process",
+        help="Locally postprocess a strict PCM WAV with two-pass SHA verification",
+    )
+    post.add_argument("input", type=Path, help="Existing canonical PCM WAV")
+    post.add_argument("--output", type=Path, required=True)
+    post.add_argument("--gain-db", type=float, default=0.0)
+    post.add_argument("--peak-ceiling-dbfs", type=float)
+    post.add_argument("--allow-peak-boost", action="store_true")
+    post.add_argument("--clip-policy", choices=("reject", "hard"),
+                      default="reject")
+    post.add_argument("--packet-frames", type=int, default=8192)
+    post.add_argument("--output-bits", type=int, choices=(8, 16, 24, 32))
+    post.add_argument("--expected-sha256",
+                      help="Trusted lowercase SHA256 of the full input WAV")
+    post.add_argument("--overwrite", action="store_true")
+    post.add_argument("--create-parent", action="store_true")
     sub.add_parser("models", help="Inspect provenance and weights licenses")
     serve = sub.add_parser("serve", help="Start a local REST API")
     serve.add_argument("--port", type=int, default=8000)
@@ -31,6 +51,44 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "serve":
         import uvicorn
         uvicorn.run("sonumio.api:app", host="127.0.0.1", port=args.port)
+        return 0
+    if args.command == "wav-process":
+        try:
+            config = WavProcessingConfig(
+                gain_db=args.gain_db,
+                peak_ceiling_dbfs=args.peak_ceiling_dbfs,
+                allow_peak_boost=args.allow_peak_boost,
+                clip_policy=args.clip_policy,
+                packet_frames=args.packet_frames,
+                output_bits=args.output_bits,
+            )
+            report = process_wav_file(
+                args.input, args.output, config=config,
+                expected_source_sha256=args.expected_sha256,
+                overwrite=args.overwrite, create_parent=args.create_parent,
+            )
+        except (OSError, ValueError, TypeError, RuntimeError) as exc:
+            print(f"Sonumio WAV processing: {exc}", file=sys.stderr)
+            return 2
+        print(json.dumps({
+            "source": str(report.source),
+            "destination": str(report.destination),
+            "frames": report.frames,
+            "sample_rate": report.sample_rate,
+            "channels": report.channels,
+            "source_bits": report.source_bits,
+            "output_bits": report.output_bits,
+            "source_sha256": report.source_sha256,
+            "output_sha256": report.output_sha256,
+            "effective_gain_db": report.effective_gain_db,
+            "source_peak": report.source_peak,
+            "source_rms": report.source_rms,
+            "output_peak_before_quantization": report.output_peak_before_quantization,
+            "output_rms_before_quantization": report.output_rms_before_quantization,
+            "clipped_samples": report.clipped_samples,
+            "output_bytes": report.output_bytes,
+            "original_model_inference": report.original_model_inference,
+        }, sort_keys=True))
         return 0
     try:
         if args.command == "scene":

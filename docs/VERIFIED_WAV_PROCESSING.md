@@ -84,3 +84,26 @@ trusted source hash and controlling filesystem permissions remain required.
 
 **PR #1 stays draft/unmerged. No release, pre-release, tag, model
 weights or public WAV artifacts are authorized or produced.**
+
+
+## Explicit local CLI
+
+For a developer-controlled, rights-approved canonical PCM WAV, the
+`sonumio wav-process` CLI offers two-pass source SHA256 validation, fixed
+gain, an optional peak ceiling and safe atomic output creation:
+
+```bash
+sonumio wav-process approved-input.wav \
+  --output local-processed.wav \
+  --expected-sha256 PUT_TRUSTED_64_CHAR_SHA256_HERE \
+  --gain-db 3 --peak-ceiling-dbfs -1
+```
+
+The CLI does **not** create parent directories, overwrite existing output
+or hard-clip samples by default. `--create-parent`, `--overwrite` and
+`--clip-policy hard` are independent explicit opt-ins. The command prints
+one JSON result with measured source/output checksums and PCM statistics,
+or returns status 2 with an error without publishing partial WAV files.
+
+Do not assume a source is licensed merely because its SHA256 matches. This
+is not a public API or authenticated upload workflow.
