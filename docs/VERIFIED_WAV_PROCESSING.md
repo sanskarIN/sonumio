@@ -30,9 +30,15 @@ integer PCM RIFF/WAV file from `WavPacketReader`:
    path or hard-link alias.
 
 Output is standard 8/16/24/32-bit integer PCM. Without `output_bits`,
-source bit depth is retained. Output dither is intentionally disabled:
-the existing dither implementation is not chunk-invariant. 32-bit integer
-source samples decoded into float32 may lose low-order bits; an identity
+source bit depth is retained. With the default `dither_seed=None`, output
+remains undithered and retains the prior deterministic byte semantics.
+An **explicit** integer `dither_seed` from 0 to 2^32-1 activates the
+new stream-specific PCG64 frame-major TPDF protocol, whose RNG state
+persists across packets. It is bit-for-bit invariant across packet size
+and input chunking, and deliberately *differs* from legacy one-shot
+`quantize_pcm(dither=True)` noise ordering. The result records whether
+dither was applied, seed and versioned protocol. 32-bit integer source
+samples decoded into float32 may lose low-order bits; an identity
 pass is therefore not promised to be byte-exact for 32-bit PCM.
 
 Peak normalization here is a fixed full-clip gain coefficient, **not**
@@ -96,7 +102,7 @@ gain, an optional peak ceiling and safe atomic output creation:
 sonumio wav-process approved-input.wav \
   --output local-processed.wav \
   --expected-sha256 PUT_TRUSTED_64_CHAR_SHA256_HERE \
-  --gain-db 3 --peak-ceiling-dbfs -1
+  --gain-db 3 --peak-ceiling-dbfs -1 --dither-seed 42
 ```
 
 The CLI does **not** create parent directories, overwrite existing output
@@ -107,3 +113,16 @@ or returns status 2 with an error without publishing partial WAV files.
 
 Do not assume a source is licensed merely because its SHA256 matches. This
 is not a public API or authenticated upload workflow.
+
+
+## Streamed TPDF postprocessing
+
+With `WavProcessingConfig(dither_seed=42)` (or the CLI
+`--dither-seed 42`), the second pass uses precisely the versioned
+`pcg64-frame-major-interleaved-pairs-v1` generator to dither *only* final
+integer PCM conversion, never the first-pass peak/RMS statistics.
+A different valid `packet_frames` changes performance but not output bytes
+for a fixed approved source, seed, output bit depth and gain policy.
+Source verification, refusal to clip without permission and atomic final
+publication are unchanged. This is optional quantization dither, **not**
+randomness for diffusion sampling, voice transformation or trained models.

@@ -36,6 +36,8 @@ def main(argv: list[str] | None = None) -> int:
                       default="reject")
     post.add_argument("--packet-frames", type=int, default=8192)
     post.add_argument("--output-bits", type=int, choices=(8, 16, 24, 32))
+    post.add_argument("--dither-seed", type=int,
+                      help="Opt in to seeded, chunk-invariant streaming TPDF")
     post.add_argument("--expected-sha256",
                       help="Trusted lowercase SHA256 of the full input WAV")
     post.add_argument("--overwrite", action="store_true")
@@ -61,6 +63,7 @@ def main(argv: list[str] | None = None) -> int:
                 clip_policy=args.clip_policy,
                 packet_frames=args.packet_frames,
                 output_bits=args.output_bits,
+                dither_seed=args.dither_seed,
             )
             report = process_wav_file(
                 args.input, args.output, config=config,
@@ -88,6 +91,9 @@ def main(argv: list[str] | None = None) -> int:
             "clipped_samples": report.clipped_samples,
             "output_bytes": report.output_bytes,
             "original_model_inference": report.original_model_inference,
+            "dither_applied": report.dither_applied,
+            "dither_seed": report.dither_seed,
+            "dither_protocol": report.dither_protocol,
         }, sort_keys=True))
         return 0
     try:

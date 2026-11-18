@@ -23,6 +23,7 @@ from .contracts import finite_float
 from .dither import QuantizationSettings
 from .errors import AudioContractError, AudioIntegrityError, AudioLimitError
 from .hashing import strict_sha256
+from .stream_dither import STREAM_TPDF_VERSION
 from .streaming import FramePacket
 from .wave_reader import WavPacketReader
 from .wave_stream import (
@@ -43,6 +44,7 @@ class WavProcessingConfig:
     clip_policy: ClipPolicy = "reject"
     packet_frames: int = 8192
     output_bits: int | None = None
+    dither_seed: int | None = None
 
     def __post_init__(self) -> None:
         finite_float(self.gain_db, "WAV gain dB", minimum=-60, maximum=24)
@@ -60,6 +62,10 @@ class WavProcessingConfig:
                 type(self.output_bits) is not int or
                 self.output_bits not in (8, 16, 24, 32)):
             raise AudioContractError("Output PCM bits must be 8, 16, 24 or 32")
+        if self.dither_seed is not None and (
+                type(self.dither_seed) is not int or
+                not 0 <= self.dither_seed < 2**32):
+            raise AudioContractError("Streaming WAV dither requires 32-bit seed")
 
 
 @dataclass(frozen=True, slots=True)
@@ -81,6 +87,9 @@ class WavProcessingResult:
     clipped_samples: int
     output_bytes: int
     original_model_inference: bool = False
+    dither_applied: bool = False
+    dither_seed: int | None = None
+    dither_protocol: str | None = None
 
 
 def _peak_and_square(samples: np.ndarray) -> tuple[float, float]:
@@ -154,7 +163,8 @@ def process_wav_file(
             else config.output_bits)
     spec = WavPacketSpec(
         source_info.sample_rate, source_info.channels, source_info.frames,
-        QuantizationSettings(bits=bits, dither=False),
+        QuantizationSettings(bits=bits, dither=config.dither_seed is not None,
+                             seed=config.dither_seed),
     )
     second_peak, second_squared_sum, clipped_samples = 0.0, 0.0, 0
     with WavPacketReader(
@@ -200,4 +210,8 @@ def process_wav_file(
         effective_gain_db=20 * math.log10(effective_gain),
         clipped_samples=clipped_samples,
         output_bytes=result.bytes_written,
+        dither_applied=config.dither_seed is not None,
+        dither_seed=config.dither_seed,
+        dither_protocol=(STREAM_TPDF_VERSION
+                         if config.dither_seed is not None else None),
     )
