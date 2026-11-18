@@ -144,6 +144,34 @@ def test_wav_read_rejects_symlink_swapped_during_open(tmp_path, monkeypatch):
         read_wav_file(target)
 
 
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="POSIX FIFOs required")
+def test_wav_read_refuses_fifo_without_waiting_for_writer(tmp_path):
+    path = tmp_path / "named-pipe.wav"
+    os.mkfifo(path)
+    with pytest.raises(AudioFormatError, match="ordinary"):
+        read_wav_file(path)
+
+
+@pytest.mark.skipif(
+    not (hasattr(os, "mkfifo") and hasattr(os, "O_NONBLOCK")),
+    reason="POSIX nonblocking open required",
+)
+def test_wav_read_path_swap_to_fifo_does_not_hang(tmp_path, monkeypatch):
+    target = tmp_path / "replaced-by-fifo.wav"
+    write_wav_file(_mono(), target)
+    original_open = os.open
+
+    def swap_to_fifo(path, flags, *args, **kwargs):
+        if str(path) == str(target):
+            target.unlink()
+            os.mkfifo(target)
+        return original_open(path, flags, *args, **kwargs)
+
+    monkeypatch.setattr(waveio.os, "open", swap_to_fifo)
+    with pytest.raises(AudioFormatError, match="ordinary"):
+        read_wav_file(target)
+
+
 def test_wav_write_failure_cleans_temporary_file(tmp_path, monkeypatch):
     path = tmp_path / "no-links.wav"
 

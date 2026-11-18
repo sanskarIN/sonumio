@@ -198,9 +198,12 @@ def read_wav_file(path: str | Path) -> AudioBuffer:
     hardened public upload API or a sandbox for hostile parent directories.
     """
     file = Path(path)
-    if file.is_symlink():
+    if not file.is_file() or file.is_symlink():
         raise AudioFormatError("Expected ordinary local WAV file")
-    flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    # Preserve the old regular-file preflight; O_NONBLOCK also avoids a
+    # FIFO hang if a path is swapped after that preflight on POSIX.
+    flags = (os.O_RDONLY | getattr(os, "O_BINARY", 0) |
+             getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0))
     try:
         fd = os.open(file, flags)
     except OSError as exc:
