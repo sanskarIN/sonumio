@@ -156,7 +156,11 @@ def process_wav_file(
         source_peak, squared_sum = 0.0, 0.0
         if config.remove_dc:
             # Per-channel bounded statistics: O(channels), not O(frames).
-            channel_sums = np.zeros(source_info.channels, dtype=np.float64)
+            # Every decoded PCM float32 sample is an exact multiple of
+            # 2**-31 (all supported PCM bit depths <= 32). A fixed-point
+            # int64 sum is *exact* and packet-partition invariant. Even at
+            # 192 kHz * 3600 s, per-channel |sum| < 2**61, no overflow.
+            channel_units = np.zeros(source_info.channels, dtype=np.int64)
             channel_min = np.full(source_info.channels, np.inf)
             channel_max = np.full(source_info.channels, -np.inf)
         for packet in reader:
@@ -164,7 +168,10 @@ def process_wav_file(
             source_peak = max(source_peak, peak)
             squared_sum += sq
             if config.remove_dc:
-                channel_sums += np.sum(packet.samples, axis=1, dtype=np.float64)
+                fixed = np.ldexp(packet.samples.astype(np.float64), 31)
+                channel_units += np.sum(
+                    fixed.astype(np.int64), axis=1, dtype=np.int64,
+                )
                 channel_min = np.minimum(channel_min, np.min(packet.samples, axis=1))
                 channel_max = np.maximum(channel_max, np.max(packet.samples, axis=1))
         source_sha256 = reader.verified_sha256
@@ -173,7 +180,11 @@ def process_wav_file(
     count = source_info.frames * source_info.channels
     source_rms = math.sqrt(squared_sum / count)
     if config.remove_dc:
-        dc_offsets = channel_sums / source_info.frames
+        # Convert to float64 once after exact, overflow-safe accumulation.
+        # This avoids NumPy floating reduction/order drift at chunk boundaries.
+        dc_offsets = channel_units.astype(np.float64) / (
+            source_info.frames * (1 << 31)
+        )
         # Centering can increase the peak above its raw PCM magnitude.
         # A gain/ceiling decision must use the post-centering extrema.
         centered_peak = float(np.max(np.maximum(

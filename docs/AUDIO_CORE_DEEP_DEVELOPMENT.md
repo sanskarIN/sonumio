@@ -385,19 +385,21 @@ not a claim that binary floating-point carries exact human-intended times.
 
 ## Optional two-pass per-channel DC removal (18 November 2026)
 
-The local \`sonumio wav-process INPUT.wav --output OUTPUT.wav --remove-dc\`
+The local `sonumio wav-process INPUT.wav --output OUTPUT.wav --remove-dc`
 switch explicitly enables full-file arithmetic mean subtraction **per channel**.
 It defaults to off. The first hash-verified pass calculates channel means
-and extrema with bounded memory; the second separately verified pass subtracts
+using exact, bounded int64 fixed-point accumulation across the decoded
+8/16/24/32-bit PCM (including 32-bit float32-decoding roundoff) and extrema
+with bounded memory; the second separately verified pass subtracts
 each mean in float64 before any chosen gain, ceiling, hard clipping, or
 seeded PCM TPDF quantization. A centered waveform may have a larger sample
 peak than its original; gain/ceiling decisions therefore use the corrected
 extrema, not the uncorrected file peak. Aborted operations leave no
 published partial WAV.
 
-Reports retain uncorrected \`source_peak\` / \`source_rms\`, and contain
-post-processing \`output_*_before_quantization\`. New fields
-\`dc_removed\` (boolean) and \`removed_dc_offsets\` (ordered channel means in
+Reports retain uncorrected `source_peak` / `source_rms`, and contain
+post-processing `output_*_before_quantization`. New fields
+`dc_removed` (boolean) and `removed_dc_offsets` (ordered channel means in
 normalized PCM full-scale units) make the transformation auditable. Without
 the option the offset array is empty and historical PCM results are unchanged.
 

@@ -16,13 +16,13 @@ from sonumio.audio_core.wave_stream import WavPacketSpec, WavPacketWriter
 from sonumio.cli import main
 
 
-def _source(tmp_path, values):
+def _source(tmp_path, values, *, bits=16):
     path = tmp_path / "input.wav"
     data = np.asarray(values, dtype=np.float32)
     assert data.ndim == 2
     with WavPacketWriter(
         path, WavPacketSpec(
-            24000, data.shape[0], data.shape[1], QuantizationSettings(bits=16),
+            24000, data.shape[0], data.shape[1], QuantizationSettings(bits=bits),
         ),
     ) as writer:
         for start in range(0, data.shape[1], 37):
@@ -38,13 +38,14 @@ def _read(path):
     return np.concatenate(chunks, axis=1)
 
 
+@pytest.mark.parametrize("bits", [8, 16, 24, 32])
 @pytest.mark.parametrize("packet_frames", [1, 7, 53, 257])
-def test_constant_stereo_dc_removed_exactly(tmp_path, packet_frames):
+def test_constant_stereo_dc_removed_exactly(tmp_path, packet_frames, bits):
     values = np.stack([
         np.full(257, 0.5, dtype=np.float32),
         np.full(257, -0.25, dtype=np.float32),
     ])
-    source, sha = _source(tmp_path, values)
+    source, sha = _source(tmp_path, values, bits=bits)
     result = process_wav_file(
         source, tmp_path / f"center-{packet_frames}.wav",
         expected_source_sha256=sha,
@@ -72,12 +73,13 @@ def test_default_identity_still_bit_exact(tmp_path):
     assert result.removed_dc_offsets == ()
 
 
-def test_dc_with_tpdf_is_packet_partition_invariant(tmp_path):
+@pytest.mark.parametrize("source_bits", [8, 16, 24, 32])
+def test_dc_with_tpdf_is_packet_partition_invariant(tmp_path, source_bits):
     t = np.arange(293, dtype=np.float32)
     source, sha = _source(tmp_path, np.stack([
         0.27 + 0.21 * np.sin(t / 9),
         -0.18 + 0.23 * np.cos(t / 13),
-    ]))
+    ]), bits=source_bits)
     payloads = []
     for size in (1, 5, 29, 293):
         path = tmp_path / f"partition-{size}.wav"
@@ -89,6 +91,7 @@ def test_dc_with_tpdf_is_packet_partition_invariant(tmp_path):
             ),
         )
         assert result.dc_removed and result.dither_applied
+        assert result.source_bits == source_bits
         assert len(result.removed_dc_offsets) == 2
         assert result.output_sha256 == hashlib.sha256(path.read_bytes()).hexdigest()
         payloads.append(path.read_bytes())
