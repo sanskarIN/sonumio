@@ -30,6 +30,7 @@ from .windows import (
 
 
 from .wave_stream import WavPacketSpec, WavPacketResult, WavPacketWriter
+from .stream_dither import StreamDitherQuantizer, STREAM_TPDF_VERSION
 from .wave_reader import WavPacketReader, WavPacketInfo
 from .wave_pipeline import WavProcessingConfig, WavProcessingResult, process_wav_file
 
@@ -48,6 +49,7 @@ from .spectral_effects import (
 
 __all__ = [
     "WavPacketSpec", "WavPacketResult", "WavPacketWriter",
+    "StreamDitherQuantizer", "STREAM_TPDF_VERSION",
     "WavPacketReader", "WavPacketInfo",
     "WavProcessingConfig", "WavProcessingResult", "process_wav_file",
     "FramePacket",

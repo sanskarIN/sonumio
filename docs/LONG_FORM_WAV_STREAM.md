@@ -24,10 +24,11 @@ trained generative model or an actual streaming inference scheduler.
 - `push()` validates and quantizes one packet before appending bytes
   to the temporary file. Invalid packets leave the frame position unchanged.
 - Chunk boundaries do not affect quantization bytes when dither is off.
-  Existing TPDF dithering is **not chunk invariant**, so `dither=True`
-  is explicitly rejected rather than silently replaying the same RNG
-  sequence on each packet. A future stream dither protocol must specify
-  its own reproducibility and cross-channel semantics.
+  An **explicitly seeded** stateful TPDF stream option is also available.
+  Each interleaved PCM sample consumes two adjacent uniform draws from a
+  persistent PCG64 generator, across all channels and packet boundaries.
+  This new protocol is **not byte-compatible with the legacy one-shot**
+  dither's previous array-wise random draw order.
 - `finish()` requires at least one frame, patches the exact RIFF sizes,
   writes any odd-byte padding, flushes and fsyncs the temporary file,
   verifies its complete SHA256, and **then** atomically publishes it.
@@ -144,3 +145,37 @@ peak/RMS analysis, explicit fixed gain, optional peak ceiling and
 hash-verified file-to-file processing with no full-clip PCM allocation.
 Read the full safety and correctness protocol in
 [VERIFIED_WAV_PROCESSING.md](VERIFIED_WAV_PROCESSING.md).
+
+
+## Deterministic stream dither protocol
+
+The optional `StreamDitherQuantizer` defines protocol identifier
+`pcg64-frame-major-interleaved-pairs-v1`. It consumes exactly **two**
+PCG64 uniform values per *interleaved* frame/channel sample, subtracts
+the second from the first in quantization-LSB units, then applies
+round-half-even and the PCM signed-integer saturation range.
+
+- `QuantizationSettings(dither=True, seed=...)` requires a 32-bit
+  explicitly declared seed; no implicit entropy or system RNG is used.
+- A new, separately owned generator is created per `WavPacketWriter`
+  instance. Failed packet geometry/clock validation does not advance
+  the generator; a failed write aborts the export instead of retrying.
+- No full-length audio buffer or full-length random noise array exists.
+  At most 65,536 frames / 524,288 interleaved samples are processed in
+  one packet. Larger recordings reuse the same RNG state across packets.
+- The two draws are paired *per sample* in frame-major/channel-major
+  order, not as two independent per-packet arrays, so packet boundaries
+  cannot change the output sequence. Stereo and multichannel layouts
+  remain deterministic even when packet frames change.
+- Exact reproducibility needs the same validated PCM float32 source,
+  sample format, seed and the specified PCG64/uniform behavior.
+  Cross-NumPy version portability is subject to the CI matrix rather
+  than a promise of cryptographic or mathematically immutable streams.
+- This is classic, explicit TPDF quantization dither; **not** noise
+  shaping, perceptual mastering, speaker identification, diffusion
+  sampling noise, or watermarking. The optional postprocessing pipeline
+  continues to disable dither until separately integrated and tested.
+
+Regression coverage: `tests/test_audio_core_stream_dither.py` checks
+cross-packet byte identity across 8/16/24/32-bit PCM, multiple channel
+counts and seeds; metadata validation and failed-packet invariants.

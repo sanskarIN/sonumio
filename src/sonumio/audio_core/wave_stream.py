@@ -17,6 +17,7 @@ import tempfile
 
 from .contracts import check_rate, MAX_CHANNELS
 from .dither import QuantizationSettings, encode_pcm_bytes
+from .stream_dither import StreamDitherQuantizer
 from .errors import AudioContractError, AudioFormatError, AudioLimitError
 from .streaming import FramePacket
 from .waveio import MAX_WAV_BYTES
@@ -31,9 +32,9 @@ _HASH_BLOCK_BYTES = 1 << 20
 class WavPacketSpec:
     """Fixed PCM clock and a predeclared maximum destination length.
 
-    Quantization without dither is chunk-invariant. Dither requires a separate
-    stateful-stream protocol, so this class explicitly rejects it instead of
-    silently restarting the pseudorandom sequence on each packet.
+    Undithered PCM matches the established one-shot encoder. Seeded TPDF
+    uses the explicitly versioned, stateful StreamDitherQuantizer protocol:
+    RNG draws stay continuous over validated packet boundaries.
     """
 
     sample_rate: int
@@ -47,10 +48,6 @@ class WavPacketSpec:
             raise AudioContractError("WAV stream requires 1..8 channels")
         if not isinstance(self.settings, QuantizationSettings):
             raise AudioContractError("Invalid stream PCM settings")
-        if self.settings.dither:
-            raise AudioContractError(
-                "Streaming TPDF dither is not chunk-invariant; disable dither"
-            )
         if type(self.maximum_frames) is not int or self.maximum_frames <= 0:
             raise AudioContractError("WAV stream maximum_frames must be positive")
         if self.maximum_frames > self.sample_rate * MAX_STREAM_SECONDS:
@@ -124,6 +121,8 @@ class WavPacketWriter:
         self.overwrite = overwrite
         self._state = "open"
         self._frames = 0
+        self._dither = (StreamDitherQuantizer(spec.settings)
+                        if spec.settings.dither else None)
         self._fp = None
         self._scratch = None
         try:
@@ -172,7 +171,9 @@ class WavPacketWriter:
         if packet.stop_frame > self.spec.maximum_frames:
             raise AudioLimitError("WAV stream exceeded declared maximum_frames")
         # Packet validation and PCM encoding occur before changing file state.
-        encoded = encode_pcm_bytes(packet.samples, settings=self.spec.settings)
+        encoded = (self._dither.encode(packet.samples)
+                   if self._dither is not None
+                   else encode_pcm_bytes(packet.samples, settings=self.spec.settings))
         if len(encoded) != packet.frames * self.spec.bytes_per_frame:
             raise AudioFormatError("WAV stream PCM encoder produced wrong byte count")
         try:

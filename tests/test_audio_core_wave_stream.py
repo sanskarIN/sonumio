@@ -186,9 +186,11 @@ def test_stream_settings_and_declared_geometry_fail_closed(tmp_path):
     ):
         with pytest.raises(AudioContractError):
             WavPacketSpec(**kwargs)
-    with pytest.raises(AudioContractError, match="dither"):
-        WavPacketSpec(24000, 1, 10,
-                      settings=QuantizationSettings(dither=True, seed=42))
+    assert WavPacketSpec(
+        24000, 1, 10, settings=QuantizationSettings(dither=True, seed=42)
+    ).settings.dither is True
+    with pytest.raises(AudioContractError, match="seed"):
+        QuantizationSettings(dither=True)
     with pytest.raises(AudioLimitError, match="3600-second"):
         WavPacketSpec(8000, 1, 8000 * 3601)
     with pytest.raises(AudioLimitError, match="transport"):
