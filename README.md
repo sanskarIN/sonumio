@@ -23,6 +23,30 @@ Original Sonumio-1 and later model generations are research goals, NOT software 
 
 Source license: Apache-2.0. External weights and datasets retain their own terms.
 
+## Independent offline WAV processing (experimental)
+
+The development branch also contains a separate, local-only, bounded-memory
+PCM audio-core library. Its two-pass CLI reads an existing canonical WAV,
+verifies the full source hash in **both passes** and atomically publishes the
+final output only after successful verification. It is not a trained model
+or an automatic component of the original Sonumio SFX generator.
+
+```bash
+sonumio wav-process ./input.wav --output ./centered.wav --remove-dc --peak-ceiling-dbfs -3
+```
+
+The optional `--remove-dc` switch subtracts the measured per-channel
+full-file PCM mean before gain and sample-peak processing; **off by default**.
+Opt-in `--dither-seed 42` enables deterministic streaming TPDF,
+`--expected-sha256 HEX` enforces a trusted input checksum, and
+`--overwrite` is required to replace an existing destination.
+The JSON report includes WAV checksums, source/output peak and RMS,
+DC correction, explicit clipping, and dither protocol. This is not
+LUFS/true-peak mastering, time-varying drift removal, speech synthesis,
+copyright verification, or a claim of neural-audio quality. For safety
+limits, PCM formats, reproducibility and benchmarks, read
+[the audio-core architecture record](docs/AUDIO_CORE_DEEP_DEVELOPMENT.md).
+
 ## Original-model research scaffolding (development only)
 
 From the repository root, after installing the optional PyTorch research dependencies:
