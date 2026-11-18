@@ -84,3 +84,38 @@ quality, real-time latency, audio rights or long-form neural inference.
 
 **Keep PR #1 DRAFT and unmerged. No release, pre-release, tag, model
 weights or generated recordings are published by this work.**
+
+## Matching canonical WAV packet reader
+
+`WavPacketReader(path, packet_frames=8192, expected_sha256=...)` is a
+strict companion to the writer. It streams canonical 44-byte-header
+integer PCM, not arbitrary RIFF metadata or compressed audio. It opens a
+single regular-file descriptor with available no-follow/nonblocking
+protections, checks RIFF sizes and byte rate, validates end padding and
+file metadata, and yields immutable channel-first `FramePacket` objects
+up to 65,536 frames each.
+
+The source's `verified_sha256` is available **only after the last packet
+has passed all validations**. Incomplete consumption is not represented as
+successful verification. An expected SHA256 mismatch prevents delivery
+of the final packet. Files written by the incremental writer beyond 120
+seconds can be read without allocating a 120+ second `AudioBuffer`.
+
+The reader is not an untrusted internet upload parser, source-license
+verifier or malicious in-place modification defense; source owners must
+protect input directory permissions. The strict canonical-only protocol
+is intentionally narrower than the legacy generic one-shot WAVE parser.
+
+```python
+from sonumio.audio_core.wave_reader import WavPacketReader
+
+with WavPacketReader("outputs/experimental-local.wav") as reader:
+    for packet in reader:
+        # Process a bounded packet; do not accumulate all packets in memory.
+        print(packet.start_frame, packet.frames)
+    print(reader.verified_sha256)  # only valid after complete consumption
+```
+
+Validation: `python -m pytest -q tests/test_audio_core_wave_reader.py`.
+Run and review the actual Linux and Windows CI results before claiming
+cross-platform support.

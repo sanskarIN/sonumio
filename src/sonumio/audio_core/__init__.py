@@ -30,6 +30,7 @@ from .windows import (
 
 
 from .wave_stream import WavPacketSpec, WavPacketResult, WavPacketWriter
+from .wave_reader import WavPacketReader, WavPacketInfo
 
 from .streaming import (
     FramePacket, FramerConfig, PacketCollector, StreamingFramer,
@@ -46,6 +47,7 @@ from .spectral_effects import (
 
 __all__ = [
     "WavPacketSpec", "WavPacketResult", "WavPacketWriter",
+    "WavPacketReader", "WavPacketInfo",
     "FramePacket",
     "FramerConfig",
     "PacketCollector",
