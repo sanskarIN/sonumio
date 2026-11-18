@@ -434,3 +434,42 @@ a malicious actor who can replace both expected digest and data.
 
 Changes are opt-in and do not modify legacy DSP WAV outputs, neural
 training sources, API, web client, model weights or release state.
+
+
+## Verified, frame-exact streaming quiet-edge trim (18 November 2026)
+
+The independent local `wav-process` command offers **opt-in**
+`--trim-silence-dbfs -60` (supported threshold range: -120 to -1 dBFS).
+This retains the inclusive first through exclusive last sample frame for
+which **any** channel contains a decoded PCM sample whose absolute amplitude
+is **strictly greater** than the selected linear sample threshold. It removes
+only leading and trailing quiet frames, **never** internal quiet regions.
+All channels use the same shared frame interval; no resampling or timeline
+offset guessing is performed.
+
+The first pass hashes **the entire original WAV** while locating the
+retained interval. If nothing passes the threshold, processing fails
+closed before creating any output parent/destination. The second pass
+still reads and verifies **every input frame**, including trimmed edges,
+but streams only the retained slices into an atomically published WAV.
+Optional gain, per-channel full-file DC correction, sample-peak ceiling,
+clipping and seeded TPDF run **after** the original-signal trim selection.
+An optional expected output SHA256 gate still checks complete output bytes
+before publication. Output frame offsets are rewritten to start at zero.
+
+The report's `source_frames`, `retained_start_frame` and
+`retained_end_frame` are original-source, zero-based frame coordinates,
+with the end exclusive; `frames` describes the **exported** count.
+`source_peak` and `source_rms` summarize the full source file.
+`output_peak_before_quantization` and
+`output_rms_before_quantization` use only retained processed frames.
+Without the trim option, `retained_start_frame=0`,
+`retained_end_frame=source_frames` and the output is unchanged.
+
+This is neither time-domain speech detection nor noise-reduction, musical
+silence detection, perceptual gating, a loudness analyzer, a mastering
+grade algorithm, nor proof of user rights. Long quiet passages inside
+an active recording are never collapsed. Full-file DC correction is
+computed before trimming, by design. Source and neural training corpora,
+historic procedural DSP goldens, local API and web UI remain untouched.
+All work remains on the unmerged draft development branch without releases.

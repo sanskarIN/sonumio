@@ -1,10 +1,10 @@
 """Two-pass, verified, bounded-memory local WAV postprocessing.
 
 A first pass measures PCM peak/RMS and verifies the complete source digest.
-A second pass verifies the same digest while applying a fixed deterministic
-gain, optional per-channel DC removal and optional peak ceiling. A
-WavPacketWriter scratch output is not
-published until the second source read completes successfully.
+A second pass verifies the same digest while optionally trimming quiet
+edges and applying deterministic gain, per-channel DC removal and a sample
+peak ceiling. WavPacketWriter does not publish scratch output until the
+second source read completes successfully.
 
 This module is strictly numerical postprocessing of *existing* approved
 local audio. It neither generates neural audio nor validates copyright or
@@ -43,6 +43,7 @@ class WavProcessingConfig:
     peak_ceiling_dbfs: float | None = None
     allow_peak_boost: bool = False
     remove_dc: bool = False
+    trim_silence_dbfs: float | None = None
     clip_policy: ClipPolicy = "reject"
     packet_frames: int = 8192
     output_bits: int | None = None
@@ -57,6 +58,9 @@ class WavProcessingConfig:
             raise AudioContractError("allow_peak_boost must be boolean")
         if type(self.remove_dc) is not bool:
             raise AudioContractError("remove_dc must be boolean")
+        if self.trim_silence_dbfs is not None:
+            finite_float(self.trim_silence_dbfs, "WAV trim threshold dBFS",
+                         minimum=-120, maximum=-1)
         if self.clip_policy not in ("reject", "hard"):
             raise AudioContractError("clip_policy must be reject or hard")
         if (type(self.packet_frames) is not int or
@@ -96,6 +100,10 @@ class WavProcessingResult:
     dither_protocol: str | None = None
     dc_removed: bool = False
     removed_dc_offsets: tuple[float, ...] = ()
+    source_frames: int = 0
+    retained_start_frame: int = 0
+    retained_end_frame: int = 0
+    trim_silence_dbfs: float | None = None
 
 
 def _peak_and_square(samples: np.ndarray) -> tuple[float, float]:
@@ -158,6 +166,13 @@ def process_wav_file(
     ) as reader:
         source_info = reader.info
         source_peak, squared_sum = 0.0, 0.0
+        # Trim decisions are made on original decoded samples, prior to
+        # centering, gain, dither or PCM conversion. All channels must agree
+        # on a single retained frame interval to preserve their alignment.
+        trim_threshold = (None if config.trim_silence_dbfs is None else
+                          10.0 ** (config.trim_silence_dbfs / 20.0))
+        retained_start = None
+        retained_end = None
         if config.remove_dc:
             # Per-channel bounded statistics: O(channels), not O(frames).
             # Every decoded PCM float32 sample is an exact multiple of
@@ -171,6 +186,14 @@ def process_wav_file(
             peak, sq = _peak_and_square(packet.samples)
             source_peak = max(source_peak, peak)
             squared_sum += sq
+            if trim_threshold is not None:
+                active = np.flatnonzero(np.any(
+                    np.abs(packet.samples) > trim_threshold, axis=0,
+                ))
+                if active.size:
+                    if retained_start is None:
+                        retained_start = packet.start_frame + int(active[0])
+                    retained_end = packet.start_frame + int(active[-1]) + 1
             if config.remove_dc:
                 fixed = np.ldexp(packet.samples.astype(np.float64), 31)
                 channel_units += np.sum(
@@ -181,6 +204,13 @@ def process_wav_file(
         source_sha256 = reader.verified_sha256
     if source_sha256 is None:
         raise AudioIntegrityError("First-pass WAV verification incomplete")
+    if trim_threshold is None:
+        retained_start, retained_end = 0, source_info.frames
+    elif retained_start is None or retained_end is None:
+        # Refuse an empty result; no parent or temporary output has been
+        # created at this point.
+        raise AudioLimitError("No WAV frames exceed the silence trim threshold")
+    retained_frames = retained_end - retained_start
     count = source_info.frames * source_info.channels
     source_rms = math.sqrt(squared_sum / count)
     if config.remove_dc:
@@ -202,7 +232,7 @@ def process_wav_file(
     bits = (source_info.bits_per_sample if config.output_bits is None
             else config.output_bits)
     spec = WavPacketSpec(
-        source_info.sample_rate, source_info.channels, source_info.frames,
+        source_info.sample_rate, source_info.channels, retained_frames,
         QuantizationSettings(bits=bits, dither=config.dither_seed is not None,
                              seed=config.dither_seed),
     )
@@ -215,7 +245,16 @@ def process_wav_file(
             dst, spec, overwrite=overwrite, create_parent=create_parent,
         ) as writer:
             for packet in reader:
-                working = packet.samples.astype(np.float64)
+                # Still consume *every* source packet to verify the full
+                # original SHA, including discarded head and tail frames.
+                start = max(packet.start_frame, retained_start)
+                stop = min(packet.stop_frame, retained_end)
+                if start >= stop:
+                    continue
+                selected = packet.samples[
+                    :, start - packet.start_frame:stop - packet.start_frame,
+                ]
+                working = selected.astype(np.float64)
                 if dc_offsets is not None:
                     working -= dc_offsets[:, None]
                 working *= effective_gain
@@ -234,7 +273,7 @@ def process_wav_file(
                 second_peak = max(second_peak, peak)
                 second_squared_sum += sq
                 writer.push(FramePacket(
-                    source_info.sample_rate, packet.start_frame, processed,
+                    source_info.sample_rate, start - retained_start, processed,
                 ))
             if reader.verified_sha256 != source_sha256:
                 raise AudioIntegrityError(
@@ -249,7 +288,9 @@ def process_wav_file(
         output_bits=result.bits_per_sample, source_peak=source_peak,
         source_rms=source_rms,
         output_peak_before_quantization=second_peak,
-        output_rms_before_quantization=math.sqrt(second_squared_sum / count),
+        output_rms_before_quantization=math.sqrt(
+            second_squared_sum / (retained_frames * source_info.channels)
+        ),
         effective_gain_db=20 * math.log10(effective_gain),
         clipped_samples=clipped_samples,
         output_bytes=result.bytes_written,
@@ -260,4 +301,8 @@ def process_wav_file(
         dc_removed=config.remove_dc,
         removed_dc_offsets=(tuple(float(offset) for offset in dc_offsets)
                             if dc_offsets is not None else ()),
+        source_frames=source_info.frames,
+        retained_start_frame=retained_start,
+        retained_end_frame=retained_end,
+        trim_silence_dbfs=config.trim_silence_dbfs,
     )

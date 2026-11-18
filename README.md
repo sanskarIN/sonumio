@@ -37,6 +37,10 @@ sonumio wav-process ./input.wav --output ./centered.wav --remove-dc --peak-ceili
 
 The optional `--remove-dc` switch subtracts the measured per-channel
 full-file PCM mean before gain and sample-peak processing; **off by default**.
+Use `--trim-silence-dbfs -60` to explicitly trim quiet **edges only** on
+the original decoded PCM frame clock, preserving full-file source SHA checks.
+The result reports source/retained frame boundaries (end exclusive). An
+all-quiet recording is rejected rather than exported as an empty file.
 Opt-in `--dither-seed 42` enables deterministic streaming TPDF,
 `--expected-sha256 HEX` enforces a trusted input checksum, and
 `--expected-output-sha256 HEX` requires the complete output bytes
