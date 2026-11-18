@@ -29,6 +29,8 @@ from .windows import (
 )
 
 
+from .wave_stream import WavPacketSpec, WavPacketResult, WavPacketWriter
+
 from .streaming import (
     FramePacket, FramerConfig, PacketCollector, StreamingFramer,
     WindowPacket, split_packets, offline_window_reference,
@@ -43,6 +45,7 @@ from .spectral_effects import (
 )
 
 __all__ = [
+    "WavPacketSpec", "WavPacketResult", "WavPacketWriter",
     "FramePacket",
     "FramerConfig",
     "PacketCollector",
