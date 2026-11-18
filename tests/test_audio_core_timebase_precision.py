@@ -1,7 +1,7 @@
 """Exact rational clock semantics and bounded materialized time partitions."""
 from __future__ import annotations
 
-from decimal import Decimal
+from decimal import Decimal, localcontext
 from fractions import Fraction
 
 import pytest
@@ -59,9 +59,14 @@ def test_decimal_and_float_behavior_remains_documented():
 def test_decimal_values_near_half_frame_are_also_rounded_exactly():
     half = Decimal("0.0000625")
     tiny = Decimal("1e-40")
-    assert frames_from_seconds(half - tiny, 8000) == 0
+    # Form the input value in a high-precision context: default Decimal
+    # arithmetic would already erase tiny differences before our function.
+    with localcontext() as ctx:
+        ctx.prec = 80
+        below, above = half - tiny, half + tiny
+    assert frames_from_seconds(below, 8000) == 0
     assert frames_from_seconds(half, 8000) == 0
-    assert frames_from_seconds(half + tiny, 8000) == 1
+    assert frames_from_seconds(above, 8000) == 1
     # Constructing these values via a Decimal arithmetic operation would
     # itself round under the default context; use exact decimal literals.
     assert frames_from_seconds(
