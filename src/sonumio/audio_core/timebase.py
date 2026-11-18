@@ -6,7 +6,7 @@ a documented round-half-to-even policy (Python's round behavior).
 """
 from __future__ import annotations
 from dataclasses import dataclass
-from decimal import Decimal, InvalidOperation, ROUND_HALF_EVEN
+from decimal import Decimal
 from fractions import Fraction
 import math
 from typing import Iterator
@@ -41,26 +41,27 @@ def frames_from_seconds(seconds: int | float | Decimal | Fraction, rate: int,
     check_rate(rate)
     finite_float(max_seconds, "max_seconds", minimum=0.01, maximum=86400)
     if isinstance(seconds, Fraction):
-        # Converting arbitrary rationals to Decimal under its default
-        # 28-digit context silently rounded values just above/below a
-        # half-frame boundary *onto* the tie. Keep exact integer ratios.
-        if (seconds.numerator.bit_length() > 4096 or
-                seconds.denominator.bit_length() > 4096):
-            raise AudioLimitError("Fractional timestamp precision exceeds budget")
-        if seconds < 0 or seconds > Fraction(Decimal(str(max_seconds))):
-            raise AudioLimitError("Requested time exceeds bounded frame clock")
-        q, rem = divmod(seconds.numerator * rate, seconds.denominator)
-        twice = rem * 2
-        count = q + int(twice > seconds.denominator or
-                        (twice == seconds.denominator and q % 2 == 1))
+        ratio = seconds
     else:
         decimal = _decimal_seconds(seconds)
         if decimal < 0 or decimal > Decimal(str(max_seconds)):
             raise AudioLimitError("Requested time exceeds bounded frame clock")
-        try:
-            count = int((decimal * rate).to_integral_value(rounding=ROUND_HALF_EVEN))
-        except (InvalidOperation, OverflowError) as exc:
-            raise AudioContractError("Cannot represent requested frame time") from exc
+        # Decimal multiplication also obeys the ambient 28-digit context:
+        # values extremely close to half frames can be rounded *before*
+        # integer quantization. Convert the exact finite decimal to a ratio.
+        parts = decimal.as_tuple()
+        if len(parts.digits) > 1200 or abs(parts.exponent) > 1024:
+            raise AudioLimitError("Timestamp precision exceeds budget")
+        ratio = Fraction(decimal)
+    if (ratio.numerator.bit_length() > 4096 or
+            ratio.denominator.bit_length() > 4096):
+        raise AudioLimitError("Fractional timestamp precision exceeds budget")
+    if ratio < 0 or ratio > Fraction(Decimal(str(max_seconds))):
+        raise AudioLimitError("Requested time exceeds bounded frame clock")
+    quotient, remainder = divmod(ratio.numerator * rate, ratio.denominator)
+    doubled = remainder * 2
+    count = quotient + int(doubled > ratio.denominator or
+                           (doubled == ratio.denominator and quotient % 2 == 1))
     if count == 0 and not allow_zero:
         raise AudioContractError("Time rounded to zero frames")
     return count

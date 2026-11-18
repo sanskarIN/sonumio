@@ -369,3 +369,15 @@ This does not alter DSP samples, existing procedural source computations,
 training recipes or diffusion checkpoint formats. Both changes are tested
 by `tests/test_audio_core_timebase_precision.py` and included in the
 independent Python/NumPy audio-core matrix.
+
+
+### Decimal half-frame precision follow-up
+
+The exact time quantizer now also converts finite `Decimal` and
+decimal-form float boundary inputs into exact integer ratios before applying
+round-half-even. This closes the same 28-digit precision bug for a
+high-precision `Decimal` located only `1e-40` seconds above a half-frame.
+Decimal textual precision and exponent are bounded before constructing any
+large denominator; pathological numeric encodings fail closed. Float input
+retains its established text-decimal interpretation (`Decimal(str(value))`),
+not a claim that binary floating-point carries exact human-intended times.

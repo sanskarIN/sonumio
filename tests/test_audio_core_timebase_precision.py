@@ -56,6 +56,27 @@ def test_decimal_and_float_behavior_remains_documented():
         frames_from_seconds(True, 8000)
 
 
+def test_decimal_values_near_half_frame_are_also_rounded_exactly():
+    half = Decimal("0.0000625")
+    tiny = Decimal("1e-40")
+    assert frames_from_seconds(half - tiny, 8000) == 0
+    assert frames_from_seconds(half, 8000) == 0
+    assert frames_from_seconds(half + tiny, 8000) == 1
+    # Constructing these values via a Decimal arithmetic operation would
+    # itself round under the default context; use exact decimal literals.
+    assert frames_from_seconds(
+        Decimal("0.0000625000000000000000000000000000000001"), 8000
+    ) == 1
+    assert frames_from_seconds(
+        Decimal("0.0000624999999999999999999999999999999999"), 8000
+    ) == 0
+
+
+def test_huge_decimal_precision_is_explicitly_bounded():
+    with pytest.raises(AudioLimitError, match="precision"):
+        frames_from_seconds(Decimal("1e-1200"), 8000)
+
+
 def test_materialized_grid_preflights_large_count_before_allocation(monkeypatch):
     monkeypatch.setattr(timebase, "MAX_PARTITION_INTERVALS", 3)
     grid = TimeGrid(8000, 13)
