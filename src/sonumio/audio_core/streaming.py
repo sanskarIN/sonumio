@@ -17,6 +17,12 @@ from .contracts import (
 )
 from .errors import AudioContractError, AudioLimitError
 
+# Limits apply to materialized objects, not merely the source PCM byte count.
+# The caller can feed a smaller packet when a dense overlap would exceed them.
+MAX_COLLECTOR_PACKETS = 50_000
+MAX_WINDOWS_PER_PUSH = 16_384
+MAX_WINDOW_OUTPUT_BYTES = 64 * 1024 * 1024
+
 
 @dataclass(frozen=True, slots=True, eq=False)
 class FramePacket:
@@ -69,7 +75,7 @@ def split_packets(audio: AudioBuffer, *, packet_frames: int = 4096
         raise AudioContractError("Expected canonical AudioBuffer")
     if type(packet_frames) is not int or not 1 <= packet_frames <= 1_048_576:
         raise AudioContractError("Invalid bounded stream packet size")
-    if (audio.frames + packet_frames - 1) // packet_frames > 50_000:
+    if (audio.frames + packet_frames - 1) // packet_frames > MAX_COLLECTOR_PACKETS:
         raise AudioLimitError("Too many queued PCM packets")
     return tuple(
         FramePacket(audio.sample_rate, start,
@@ -113,6 +119,8 @@ class PacketCollector:
             raise AudioContractError("Streaming packet gap, overlap or reordering")
         if packet.stop_frame > self.maximum_frames:
             raise AudioLimitError("Stream exceeds declared bounded duration")
+        if len(self._packets) >= MAX_COLLECTOR_PACKETS:
+            raise AudioLimitError("PacketCollector exceeds bounded packet count")
         self._packets.append(packet)
         self._position = packet.stop_frame
 
@@ -197,6 +205,21 @@ class StreamingFramer:
             1_048_576 + self.config.window_frames
         ):
             raise AudioLimitError("Streaming framer packet/history exceeded budget")
+        # Preflight the *expanded* overlapping output BEFORE changing state.
+        # A legal 1M-frame packet and hop=1 could otherwise manufacture nearly
+        # one million WindowPacket objects (or many GiB of overlapping copies).
+        end = packet.stop_frame
+        first_stop = self._start + self.config.window_frames
+        windows = (1 + (end - first_stop) // self.config.hop_frames
+                   if end >= first_stop else 0)
+        output_bytes = (windows * self.config.window_frames *
+                        self.channels * np.dtype("float32").itemsize)
+        if (windows > MAX_WINDOWS_PER_PUSH or
+                output_bytes > MAX_WINDOW_OUTPUT_BYTES):
+            raise AudioLimitError(
+                "Streaming window output exceeds per-push materialization budget; "
+                "supply smaller FramePacket chunks"
+            )
         self._buffer = np.concatenate((self._buffer, packet.samples), axis=1)
         self.received = packet.stop_frame
         results = []

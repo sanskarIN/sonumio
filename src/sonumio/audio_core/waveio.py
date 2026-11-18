@@ -12,6 +12,7 @@ import os
 from pathlib import Path
 import struct
 import tempfile
+import stat
 
 import numpy as np
 
@@ -190,14 +191,29 @@ def encode_wav_bytes(buffer: AudioBuffer, *,
 
 
 def read_wav_file(path: str | Path) -> AudioBuffer:
+    """Open one regular file descriptor and bound its read even under races.
+
+    POSIX O_NOFOLLOW closes the path-swap symlink gap; other systems retain
+    the documented best-effort local-file symlink check. This is not a
+    hardened public upload API or a sandbox for hostile parent directories.
+    """
     file = Path(path)
-    if not file.is_file() or file.is_symlink():
+    if file.is_symlink():
         raise AudioFormatError("Expected ordinary local WAV file")
-    if file.stat().st_size > MAX_WAV_BYTES:
-        raise AudioLimitError("WAV file exceeds configured size cap")
-    payload = file.read_bytes()
-    if len(payload) > MAX_WAV_BYTES:
-        raise AudioLimitError("WAV changed during bounded snapshot read")
+    flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        fd = os.open(file, flags)
+    except OSError as exc:
+        raise AudioFormatError("Cannot open ordinary local WAV file") from exc
+    with os.fdopen(fd, "rb") as fp:
+        meta = os.fstat(fp.fileno())
+        if not stat.S_ISREG(meta.st_mode):
+            raise AudioFormatError("Expected ordinary local WAV file")
+        if meta.st_size > MAX_WAV_BYTES:
+            raise AudioLimitError("WAV file exceeds configured size cap")
+        payload = fp.read(MAX_WAV_BYTES + 1)
+        if len(payload) > MAX_WAV_BYTES:
+            raise AudioLimitError("WAV changed during bounded snapshot read")
     return decode_wav_bytes(payload, source_note=file.name)
 
 
@@ -233,9 +249,24 @@ def write_wav_file(buffer: AudioBuffer, path: str | Path, *,
             fp.write(data)
             fp.flush()
             os.fsync(fp.fileno())
-        if dest.exists() and not overwrite:
-            raise AudioFormatError("WAV destination became occupied")
-        os.replace(scratch, dest)
+        if overwrite:
+            if dest.is_symlink():
+                raise AudioFormatError("WAV destination became a symlink")
+            os.replace(scratch, dest)
+        else:
+            # A second exists() check is racy. Hard-linking the complete,
+            # fsynced temp inode is an atomic create-if-absent operation.
+            # Fail closed on filesystems without hard-link support.
+            try:
+                os.link(scratch, dest)
+            except FileExistsError as exc:
+                raise AudioFormatError(
+                    "Existing WAV requires explicit overwrite"
+                ) from exc
+            except OSError as exc:
+                raise AudioFormatError(
+                    "Atomic no-clobber WAV output is unsupported here"
+                ) from exc
     finally:
         if scratch is not None:
             scratch.unlink(missing_ok=True)
