@@ -122,14 +122,16 @@ def process_wav_file(
     source: str | Path, destination: str | Path, *,
     config: WavProcessingConfig | None = None,
     expected_source_sha256: str | None = None,
+    expected_output_sha256: str | None = None,
     overwrite: bool = False,
     create_parent: bool = False,
 ) -> WavProcessingResult:
     """Verify source twice, then atomically publish bounded PCM output.
 
     This function never publishes a partial output. A failed hash, malformed
-    source, unsafe gain, unsupported target filesystem, destination collision
-    or user exception aborts and removes the temporary output file.
+    source, unsafe gain, mismatched output digest, unsupported target
+    filesystem, destination collision or user exception aborts and removes
+    the temporary output file.
     """
     if config is None:
         config = WavProcessingConfig()
@@ -139,6 +141,8 @@ def process_wav_file(
         raise AudioContractError("WAV processing file options must be boolean")
     if expected_source_sha256 is not None:
         strict_sha256(expected_source_sha256)
+    if expected_output_sha256 is not None:
+        strict_sha256(expected_output_sha256)
     src, dst = Path(source), Path(destination)
     if src.resolve(strict=False) == dst.resolve(strict=False):
         raise AudioContractError("Input and output WAV paths must differ")
@@ -236,7 +240,7 @@ def process_wav_file(
                 raise AudioIntegrityError(
                     "Second-pass WAV source verification incomplete"
                 )
-            result = writer.finish()
+            result = writer.finish(expected_sha256=expected_output_sha256)
     return WavProcessingResult(
         source=src, destination=result.path,
         source_sha256=source_sha256, output_sha256=result.wav_sha256,

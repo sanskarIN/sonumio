@@ -42,6 +42,8 @@ def main(argv: list[str] | None = None) -> int:
                       help="Opt in to seeded, chunk-invariant streaming TPDF")
     post.add_argument("--expected-sha256",
                       help="Trusted lowercase SHA256 of the full input WAV")
+    post.add_argument("--expected-output-sha256",
+                      help="Require full output WAV digest before publication")
     post.add_argument("--overwrite", action="store_true")
     post.add_argument("--create-parent", action="store_true")
     sub.add_parser("models", help="Inspect provenance and weights licenses")
@@ -71,6 +73,7 @@ def main(argv: list[str] | None = None) -> int:
             report = process_wav_file(
                 args.input, args.output, config=config,
                 expected_source_sha256=args.expected_sha256,
+                expected_output_sha256=args.expected_output_sha256,
                 overwrite=args.overwrite, create_parent=args.create_parent,
             )
         except (OSError, ValueError, TypeError, RuntimeError) as exc:

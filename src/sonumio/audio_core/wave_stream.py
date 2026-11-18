@@ -17,8 +17,9 @@ import tempfile
 
 from .contracts import check_rate, MAX_CHANNELS
 from .dither import QuantizationSettings, encode_pcm_bytes
+from .hashing import strict_sha256
 from .stream_dither import StreamDitherQuantizer
-from .errors import AudioContractError, AudioFormatError, AudioLimitError
+from .errors import AudioContractError, AudioFormatError, AudioIntegrityError, AudioLimitError
 from .streaming import FramePacket
 from .waveio import MAX_WAV_BYTES
 
@@ -184,15 +185,19 @@ class WavPacketWriter:
             raise
         self._frames = packet.stop_frame
 
-    def finish(self) -> WavPacketResult:
-        """Finalize, fsync, hash and atomically publish exactly one WAV.
+    def finish(self, *, expected_sha256: str | None = None) -> WavPacketResult:
+        """Finalize, fsync, verify optional digest, then atomically publish WAV.
 
         overwrite=False uses atomic hard-link create-if-absent; unsupported
         filesystems fail closed. overwrite=True explicitly allows replacement.
+        A supplied lowercase SHA256 is checked against the full scratch
+        RIFF/WAVE bytes *before* a destination is created or overwritten.
         Scratch is deleted whether publication succeeds or fails.
         """
         if self._state != "open":
             raise AudioContractError("WAV packet writer already finalized")
+        if expected_sha256 is not None:
+            strict_sha256(expected_sha256)
         if self._frames == 0:
             raise AudioContractError("Cannot finalize an empty WAV stream")
         data_bytes = self._frames * self.spec.bytes_per_frame
@@ -217,6 +222,11 @@ class WavPacketWriter:
                 remaining -= len(chunk)
             if self._fp.read(1):
                 raise AudioFormatError("Temporary WAV has unexpected trailing bytes")
+            actual_sha256 = digest.hexdigest()
+            if expected_sha256 is not None and actual_sha256 != expected_sha256:
+                raise AudioIntegrityError(
+                    "WAV output SHA256 mismatch before publication"
+                )
             self._fp.close()
             self._fp = None
             if self.overwrite:
@@ -237,7 +247,7 @@ class WavPacketWriter:
             self._state = "finished"
             return WavPacketResult(
                 self.destination, self.spec.sample_rate, self.spec.channels,
-                self._frames, self.spec.settings.bits, size, digest.hexdigest(),
+                self._frames, self.spec.settings.bits, size, actual_sha256,
             )
         except BaseException:
             self._state = "aborted"

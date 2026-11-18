@@ -409,3 +409,28 @@ copyright permission validator or perceptual quality claim. Quantization
 can leave a small residual mean. It is not applied to the legacy procedural
 generator, research data/training, API or frontend. The draft remains
 unmerged and no release/weights/audio are authorized.
+
+
+## Prepublication output integrity gate (18 November 2026)
+
+For independent offline PCM file processing, optionally pass
+`--expected-output-sha256 <64 lowercase hex characters>` to
+`sonumio wav-process`. This requires the **entire serialized
+RIFF/WAVE output** (including 44-byte header, audio bytes, and odd-sized
+payload padding) to match the supplied digest. The destination is not
+published if it differs. This is distinct from
+`--expected-sha256`, which authenticates the **input** WAV read
+in both passes. Both options are disabled unless explicitly supplied.
+
+The gate runs within `WavPacketWriter.finish(expected_sha256=...)`
+after full scratch-file hashing and fsync, but **before** atomic
+link-or-replace publication. Wrong hashes leave no newly published WAV;
+an existing destination remains byte-for-byte unchanged even when
+`--overwrite` was requested. Scratch files are cleaned up.
+Invalid hash syntax is rejected before processing. The expected hash
+is a reproducibility checksum, **not** a digital signature, a rights
+declaration, a perceptual quality certificate, or protection against
+a malicious actor who can replace both expected digest and data.
+
+Changes are opt-in and do not modify legacy DSP WAV outputs, neural
+training sources, API, web client, model weights or release state.

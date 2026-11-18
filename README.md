@@ -39,7 +39,9 @@ The optional `--remove-dc` switch subtracts the measured per-channel
 full-file PCM mean before gain and sample-peak processing; **off by default**.
 Opt-in `--dither-seed 42` enables deterministic streaming TPDF,
 `--expected-sha256 HEX` enforces a trusted input checksum, and
-`--overwrite` is required to replace an existing destination.
+`--expected-output-sha256 HEX` requires the complete output bytes
+to match before any destination publication. `--overwrite` is
+required to replace an existing destination.
 The JSON report includes WAV checksums, source/output peak and RMS,
 DC correction, explicit clipping, and dither protocol. This is not
 LUFS/true-peak mastering, time-varying drift removal, speech synthesis,
