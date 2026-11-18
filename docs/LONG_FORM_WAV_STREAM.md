@@ -135,3 +135,12 @@ source path isolation and explicit reference digests remain essential.
 
 The mutation test now supplies the original export checksum, so it is
 independent of platform-specific timestamp granularity.
+
+
+## Bounded two-pass postprocessing
+
+A new opt-in `wave_pipeline.process_wav_file` adds independent
+peak/RMS analysis, explicit fixed gain, optional peak ceiling and
+hash-verified file-to-file processing with no full-clip PCM allocation.
+Read the full safety and correctness protocol in
+[VERIFIED_WAV_PROCESSING.md](VERIFIED_WAV_PROCESSING.md).
