@@ -381,3 +381,29 @@ Decimal textual precision and exponent are bounded before constructing any
 large denominator; pathological numeric encodings fail closed. Float input
 retains its established text-decimal interpretation (`Decimal(str(value))`),
 not a claim that binary floating-point carries exact human-intended times.
+
+
+## Optional two-pass per-channel DC removal (18 November 2026)
+
+The local \`sonumio wav-process INPUT.wav --output OUTPUT.wav --remove-dc\`
+switch explicitly enables full-file arithmetic mean subtraction **per channel**.
+It defaults to off. The first hash-verified pass calculates channel means
+and extrema with bounded memory; the second separately verified pass subtracts
+each mean in float64 before any chosen gain, ceiling, hard clipping, or
+seeded PCM TPDF quantization. A centered waveform may have a larger sample
+peak than its original; gain/ceiling decisions therefore use the corrected
+extrema, not the uncorrected file peak. Aborted operations leave no
+published partial WAV.
+
+Reports retain uncorrected \`source_peak\` / \`source_rms\`, and contain
+post-processing \`output_*_before_quantization\`. New fields
+\`dc_removed\` (boolean) and \`removed_dc_offsets\` (ordered channel means in
+normalized PCM full-scale units) make the transformation auditable. Without
+the option the offset array is empty and historical PCM results are unchanged.
+
+This is **not** a time-varying baseline remover, high-pass filter, loudness
+normalizer, true-peak limiter, speech enhancement, learned audio generator,
+copyright permission validator or perceptual quality claim. Quantization
+can leave a small residual mean. It is not applied to the legacy procedural
+generator, research data/training, API or frontend. The draft remains
+unmerged and no release/weights/audio are authorized.

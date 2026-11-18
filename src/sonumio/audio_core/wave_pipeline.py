@@ -2,7 +2,8 @@
 
 A first pass measures PCM peak/RMS and verifies the complete source digest.
 A second pass verifies the same digest while applying a fixed deterministic
-gain and optional peak ceiling. A WavPacketWriter scratch output is not
+gain, optional per-channel DC removal and optional peak ceiling. A
+WavPacketWriter scratch output is not
 published until the second source read completes successfully.
 
 This module is strictly numerical postprocessing of *existing* approved
@@ -41,6 +42,7 @@ class WavProcessingConfig:
     gain_db: float = 0.0
     peak_ceiling_dbfs: float | None = None
     allow_peak_boost: bool = False
+    remove_dc: bool = False
     clip_policy: ClipPolicy = "reject"
     packet_frames: int = 8192
     output_bits: int | None = None
@@ -53,6 +55,8 @@ class WavProcessingConfig:
                          minimum=-60, maximum=0)
         if type(self.allow_peak_boost) is not bool:
             raise AudioContractError("allow_peak_boost must be boolean")
+        if type(self.remove_dc) is not bool:
+            raise AudioContractError("remove_dc must be boolean")
         if self.clip_policy not in ("reject", "hard"):
             raise AudioContractError("clip_policy must be reject or hard")
         if (type(self.packet_frames) is not int or
@@ -90,6 +94,8 @@ class WavProcessingResult:
     dither_applied: bool = False
     dither_seed: int | None = None
     dither_protocol: str | None = None
+    dc_removed: bool = False
+    removed_dc_offsets: tuple[float, ...] = ()
 
 
 def _peak_and_square(samples: np.ndarray) -> tuple[float, float]:
@@ -148,16 +154,35 @@ def process_wav_file(
     ) as reader:
         source_info = reader.info
         source_peak, squared_sum = 0.0, 0.0
+        if config.remove_dc:
+            # Per-channel bounded statistics: O(channels), not O(frames).
+            channel_sums = np.zeros(source_info.channels, dtype=np.float64)
+            channel_min = np.full(source_info.channels, np.inf)
+            channel_max = np.full(source_info.channels, -np.inf)
         for packet in reader:
             peak, sq = _peak_and_square(packet.samples)
             source_peak = max(source_peak, peak)
             squared_sum += sq
+            if config.remove_dc:
+                channel_sums += np.sum(packet.samples, axis=1, dtype=np.float64)
+                channel_min = np.minimum(channel_min, np.min(packet.samples, axis=1))
+                channel_max = np.maximum(channel_max, np.max(packet.samples, axis=1))
         source_sha256 = reader.verified_sha256
     if source_sha256 is None:
         raise AudioIntegrityError("First-pass WAV verification incomplete")
     count = source_info.frames * source_info.channels
     source_rms = math.sqrt(squared_sum / count)
-    effective_gain = _effective_gain(source_peak, config)
+    if config.remove_dc:
+        dc_offsets = channel_sums / source_info.frames
+        # Centering can increase the peak above its raw PCM magnitude.
+        # A gain/ceiling decision must use the post-centering extrema.
+        centered_peak = float(np.max(np.maximum(
+            np.abs(channel_min - dc_offsets), np.abs(channel_max - dc_offsets),
+        )))
+    else:
+        dc_offsets = None
+        centered_peak = source_peak
+    effective_gain = _effective_gain(centered_peak, config)
 
     bits = (source_info.bits_per_sample if config.output_bits is None
             else config.output_bits)
@@ -175,7 +200,10 @@ def process_wav_file(
             dst, spec, overwrite=overwrite, create_parent=create_parent,
         ) as writer:
             for packet in reader:
-                working = packet.samples.astype(np.float64) * effective_gain
+                working = packet.samples.astype(np.float64)
+                if dc_offsets is not None:
+                    working -= dc_offsets[:, None]
+                working *= effective_gain
                 exceeding = np.abs(working) > 1.0
                 over_count = int(np.count_nonzero(exceeding))
                 if over_count and config.clip_policy == "reject":
@@ -214,4 +242,7 @@ def process_wav_file(
         dither_seed=config.dither_seed,
         dither_protocol=(STREAM_TPDF_VERSION
                          if config.dither_seed is not None else None),
+        dc_removed=config.remove_dc,
+        removed_dc_offsets=(tuple(float(offset) for offset in dc_offsets)
+                            if dc_offsets is not None else ()),
     )

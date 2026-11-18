@@ -32,6 +32,8 @@ def main(argv: list[str] | None = None) -> int:
     post.add_argument("--gain-db", type=float, default=0.0)
     post.add_argument("--peak-ceiling-dbfs", type=float)
     post.add_argument("--allow-peak-boost", action="store_true")
+    post.add_argument("--remove-dc", action="store_true",
+                      help="Subtract measured per-channel PCM mean before gain")
     post.add_argument("--clip-policy", choices=("reject", "hard"),
                       default="reject")
     post.add_argument("--packet-frames", type=int, default=8192)
@@ -60,6 +62,7 @@ def main(argv: list[str] | None = None) -> int:
                 gain_db=args.gain_db,
                 peak_ceiling_dbfs=args.peak_ceiling_dbfs,
                 allow_peak_boost=args.allow_peak_boost,
+                remove_dc=args.remove_dc,
                 clip_policy=args.clip_policy,
                 packet_frames=args.packet_frames,
                 output_bits=args.output_bits,
@@ -94,6 +97,8 @@ def main(argv: list[str] | None = None) -> int:
             "dither_applied": report.dither_applied,
             "dither_seed": report.dither_seed,
             "dither_protocol": report.dither_protocol,
+            "dc_removed": report.dc_removed,
+            "removed_dc_offsets": report.removed_dc_offsets,
         }, sort_keys=True))
         return 0
     try:
