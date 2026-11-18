@@ -15,16 +15,20 @@ permissions:
 
 jobs:
   test-audio-core:
-    name: Py${{ matrix.python }} / NumPy ${{ matrix.numpy }}
-    runs-on: ubuntu-24.04
+    name: ${{ matrix.os }} / Py${{ matrix.python }} / NumPy ${{ matrix.numpy }}
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
     timeout-minutes: 10
     strategy:
       fail-fast: false
       matrix:
         include:
-          - { python: '3.11', numpy: '1.26.4' }
-          - { python: '3.11', numpy: '2.4.6' }
-          - { python: '3.12', numpy: '2.4.6' }
+          - { os: 'ubuntu-24.04', python: '3.11', numpy: '1.26.4' }
+          - { os: 'ubuntu-24.04', python: '3.11', numpy: '2.4.6' }
+          - { os: 'ubuntu-24.04', python: '3.12', numpy: '2.4.6' }
+          - { os: 'windows-2022', python: '3.12', numpy: '2.4.6' }
     env:
       OPENBLAS_NUM_THREADS: '1'
       OMP_NUM_THREADS: '1'

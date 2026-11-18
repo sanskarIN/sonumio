@@ -7,8 +7,10 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import os
 from pathlib import Path
 import re
+import stat
 from typing import Any
 
 import numpy as np
@@ -123,21 +125,49 @@ def digest_audio(buffer: AudioBuffer | np.ndarray, *,
 
 
 def digest_file(path: str | Path, *, max_bytes: int = 128 * 1024 * 1024) -> str:
+    """Hash one bounded regular file descriptor, not a potentially swapped path.
+
+    A best-effort metadata consistency check detects many concurrent writes,
+    but mtime/ctime checks do NOT establish a forensic immutable snapshot
+    against hostile in-place modifications. Provenance still needs access
+    controls, verified captured bytes and human authorization.
+    """
     if type(max_bytes) is not int or not 1 <= max_bytes <= MAX_BYTES:
         raise AudioContractError("Invalid file digest byte cap")
     file = Path(path)
     if not file.is_file() or file.is_symlink():
         raise AudioContractError("Expected existing ordinary local file")
-    if file.stat().st_size > max_bytes:
-        raise AudioLimitError("File exceeds digest budget")
+    # O_NOFOLLOW closes the symlink-swap gap where supported. O_NONBLOCK
+    # avoids hanging if an attacker swaps a regular file path for a FIFO.
+    flags = (os.O_RDONLY | getattr(os, "O_BINARY", 0) |
+             getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0))
+    try:
+        fd = os.open(file, flags)
+    except OSError as exc:
+        raise AudioContractError("Cannot open ordinary local file") from exc
     h = hashlib.sha256()
     length = 0
-    with file.open("rb") as stream:
-        while data := stream.read(min(1024 * 1024, max_bytes - length + 1)):
+    with os.fdopen(fd, "rb") as stream:
+        original = os.fstat(stream.fileno())
+        if not stat.S_ISREG(original.st_mode):
+            raise AudioContractError("Expected ordinary local file descriptor")
+        if original.st_size > max_bytes:
+            raise AudioLimitError("File exceeds digest budget")
+        while True:
+            data = stream.read(min(1024 * 1024, max_bytes - length + 1))
+            if not data:
+                break
             length += len(data)
             if length > max_bytes:
                 raise AudioLimitError("File grew beyond digest budget")
             h.update(data)
+        final = os.fstat(stream.fileno())
+        if (length != original.st_size or
+                (original.st_size, original.st_mtime_ns, original.st_ctime_ns)
+                != (final.st_size, final.st_mtime_ns, final.st_ctime_ns)):
+            raise AudioIntegrityError(
+                "File changed during SHA256 digest; retry with a stable snapshot"
+            )
     return h.hexdigest()
 
 

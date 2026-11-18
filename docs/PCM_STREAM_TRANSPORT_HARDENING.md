@@ -64,10 +64,22 @@ python -m pytest -q tests/test_audio_core_boundary_safety.py
 python -m pytest -q tests/test_audio_core_*.py
 ```
 
-The independent audio-core CI tests Python 3.11 with NumPy 1.26.4/2.4.6 and
-Python 3.12 with NumPy 2.4.6. Numeric coverage is not a substitute for
-stress testing under memory limits, Windows filesystem tests, independent
-security review, or publication approval.
+The independent audio-core CI tests Linux Python 3.11 with NumPy
+1.26.4/2.4.6, Linux Python 3.12 with NumPy 2.4.6 and newly adds Windows
+Python 3.12 with NumPy 2.4.6. These jobs must succeed before claiming any
+Windows compatibility. Numeric coverage is not a substitute for memory-limit
+stress testing or independent security review.
+
+Provenance `hashing.digest_file` also uses one bounded, ordinary-file
+file descriptor. Where supported, no-follow and nonblocking open flags
+reject symlink/FIFO swaps. It checks starting vs ending file metadata and
+exact read length. File metadata can be manipulated; this is NOT a signed,
+immutable content snapshot or proof of usage rights.
+
+The Web workflow now uses Node 24 to avoid the observed npm 10.9.x
+`edgesOut` peer-tree crash. Since `web/` has no committed lockfile, its
+`npm install` remains nonreproducible; producing and reviewing a lockfile
+is a separate gate. CI success on the new runtime is not presumed.
 
 **No release, pre-release, tag, public output WAV, or model-weight publication
 is authorized or performed. Draft PR #1 stays open and unmerged.**

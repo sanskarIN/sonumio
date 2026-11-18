@@ -113,11 +113,17 @@ def test_atomic_wav_output_overwrite_opt_in_and_no_symlinks(sample, tmp_path):
     write_wav_file(sample, path, overwrite=True)
     assert read_wav_file(path).frames == sample.frames
     link = tmp_path / "alias.wav"
-    link.symlink_to(path)
-    with pytest.raises(AudioFormatError):
-        write_wav_file(sample, link)
-    with pytest.raises(AudioFormatError):
-        read_wav_file(link)
+    try:
+        link.symlink_to(path)
+    except (OSError, NotImplementedError):
+        # Windows hosts without symlink privileges still test the actual
+        # read/write and replacement semantics above.
+        pass
+    else:
+        with pytest.raises(AudioFormatError):
+            write_wav_file(sample, link)
+        with pytest.raises(AudioFormatError):
+            read_wav_file(link)
 
 
 def test_wav_without_parent_creation_fails_closed(sample, tmp_path):
