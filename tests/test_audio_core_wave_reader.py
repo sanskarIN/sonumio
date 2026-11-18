@@ -144,8 +144,9 @@ def test_corrupt_padding_is_rejected_at_last_frame(tmp_path):
 
 
 def test_midread_source_mutation_is_detected(tmp_path):
-    path, _ = _write(tmp_path, frames=500)
-    with WavPacketReader(path, packet_frames=100) as reader:
+    path, exported = _write(tmp_path, frames=500)
+    with WavPacketReader(path, packet_frames=100,
+                         expected_sha256=exported.wav_sha256) as reader:
         first = next(reader)
         assert first.frames == 100
         with path.open("r+b") as writable:
@@ -153,7 +154,7 @@ def test_midread_source_mutation_is_detected(tmp_path):
             writable.write(b"\xff\x7f")
             writable.flush()
             os.fsync(writable.fileno())
-        with pytest.raises(AudioIntegrityError, match="changed"):
+        with pytest.raises(AudioIntegrityError, match="changed|SHA256"):
             list(reader)
         assert reader.verified_sha256 is None
 

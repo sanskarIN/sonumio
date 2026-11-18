@@ -194,7 +194,7 @@ def test_stream_settings_and_declared_geometry_fail_closed(tmp_path):
     with pytest.raises(AudioLimitError, match="transport"):
         WavPacketSpec(192000, 8, 192000 * 120,
                       settings=QuantizationSettings(bits=32))
-    with pytest.raises(AudioFormatError, match="\.wav"):
+    with pytest.raises(AudioFormatError, match=r"\.wav"):
         WavPacketWriter(tmp_path / "not-a-wav.bin", WavPacketSpec(24000, 1, 10))
 
 

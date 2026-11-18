@@ -119,3 +119,19 @@ with WavPacketReader("outputs/experimental-local.wav") as reader:
 Validation: `python -m pytest -q tests/test_audio_core_wave_reader.py`.
 Run and review the actual Linux and Windows CI results before claiming
 cross-platform support.
+
+
+### Verified checksum versus timestamp races
+
+A Windows CI regression demonstrated that matching file size and mtime/ctime
+is insufficient for detecting in-place, same-length source edits. The reader
+now opens the descriptor **without Python read-ahead buffering** so that
+packet reads use the current file descriptor state rather than a prefetched
+full recording. When a known trusted SHA-256 is supplied, the full canonical
+RIFF bytes (including header and padding) must match before a reader reports
+successful verification or returns the final frame packet. In-place edits on
+hostile filesystems or concurrent edits can still race a read; trusted inputs,
+source path isolation and explicit reference digests remain essential.
+
+The mutation test now supplies the original export checksum, so it is
+independent of platform-specific timestamp granularity.

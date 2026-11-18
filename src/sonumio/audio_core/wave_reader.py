@@ -96,7 +96,9 @@ class WavPacketReader:
         except OSError as exc:
             raise AudioFormatError("Cannot open ordinary local WAVE file") from exc
         try:
-            fp = os.fdopen(fd, "rb")
+            # Never prefetch into Python buffered IO: the buffered reader
+            # can cache an entire small WAV before subsequent source edits.
+            fp = os.fdopen(fd, "rb", buffering=0)
         except BaseException:
             os.close(fd)
             raise
