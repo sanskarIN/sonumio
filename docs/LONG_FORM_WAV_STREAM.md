@@ -179,3 +179,13 @@ round-half-even and the PCM signed-integer saturation range.
 Regression coverage: `tests/test_audio_core_stream_dither.py` checks
 cross-packet byte identity across 8/16/24/32-bit PCM, multiple channel
 counts and seeds; metadata validation and failed-packet invariants.
+
+
+### Golden vector and compatibility gate
+
+The stream protocol now carries a small, exact 16-bit stereo golden PCM
+vector at PCG64 seed 1483. The expected packed PCM bytes and SHA256 are
+asserted in `test_pcg64_tpdf_v1_has_portable_golden_pcm_bytes`. This makes a
+cross-platform, cross-NumPy behavior change visible in CI rather than
+silently letting every runtime establish a different reference. These
+golden bytes are a test pattern, not published music or model output.

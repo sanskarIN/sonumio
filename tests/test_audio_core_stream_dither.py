@@ -149,3 +149,20 @@ def test_dithered_wav_context_abort_leaves_no_destination(tmp_path):
         writer.push(FramePacket(24000, 0, samples))
     assert not target.exists()
     assert not list(tmp_path.glob(".sonumio-stream-*.partial"))
+
+
+def test_pcg64_tpdf_v1_has_portable_golden_pcm_bytes():
+    """Any unexpected NumPy/OS RNG or quantization drift breaks this SHA."""
+    source = np.array([
+        [-.75, -.125, 0.0, .125, .75],
+        [.8, .2, -.2, -.8, .00001],
+    ], dtype=np.float32)
+    cfg = QuantizationSettings(bits=16, dither=True, seed=1483)
+    bytes_pcm = StreamDitherQuantizer(cfg).encode(source)
+    assert bytes_pcm.hex() == (
+        "00a0676600f09919000066e60010999901600000"
+    )
+    assert hashlib.sha256(bytes_pcm).hexdigest() == (
+        "a7dff6f4de002c9958126242563f100c"
+        "2322a4d6a7352e6b60e3328423c82743"
+    )
