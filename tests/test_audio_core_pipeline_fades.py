@@ -84,6 +84,15 @@ def test_trim_dc_dither_and_overlapping_fades_have_stable_hashes(tmp_path):
     assert len(set(outputs)) == 1
 
 
+def test_historical_positional_config_order_remains_compatible():
+    config = WavProcessingConfig(0.0, None, False, False, None,
+                                 "hard", 7, 24, None)
+    assert config.clip_policy == "hard"
+    assert config.packet_frames == 7
+    assert config.output_bits == 24
+    assert config.fade_in_frames == config.fade_out_frames == 0
+
+
 @pytest.mark.parametrize("bad", [-1, True, 1.5, "12", None, 1_920_001])
 def test_invalid_fade_lengths_rejected_before_io(bad):
     with pytest.raises(AudioContractError, match="fade_in_frames"):

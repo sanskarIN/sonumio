@@ -44,12 +44,13 @@ class WavProcessingConfig:
     allow_peak_boost: bool = False
     remove_dc: bool = False
     trim_silence_dbfs: float | None = None
-    fade_in_frames: int = 0
-    fade_out_frames: int = 0
     clip_policy: ClipPolicy = "reject"
     packet_frames: int = 8192
     output_bits: int | None = None
     dither_seed: int | None = None
+    # Append new options: preserve historical positional construction order.
+    fade_in_frames: int = 0
+    fade_out_frames: int = 0
 
     def __post_init__(self) -> None:
         finite_float(self.gain_db, "WAV gain dB", minimum=-60, maximum=24)
