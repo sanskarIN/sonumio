@@ -37,6 +37,10 @@ def main(argv: list[str] | None = None) -> int:
     post.add_argument("--trim-silence-dbfs", type=float,
                       help="Trim quiet file edges above this sample threshold "
                            "(-120 through -1 dBFS; original PCM before gain)")
+    post.add_argument("--fade-in-frames", type=int, default=0,
+                      help="Fade from zero over N retained output frames (opt-in)")
+    post.add_argument("--fade-out-frames", type=int, default=0,
+                      help="Fade to zero over N retained output frames (opt-in)")
     post.add_argument("--clip-policy", choices=("reject", "hard"),
                       default="reject")
     post.add_argument("--packet-frames", type=int, default=8192)
@@ -69,6 +73,8 @@ def main(argv: list[str] | None = None) -> int:
                 allow_peak_boost=args.allow_peak_boost,
                 remove_dc=args.remove_dc,
                 trim_silence_dbfs=args.trim_silence_dbfs,
+                fade_in_frames=args.fade_in_frames,
+                fade_out_frames=args.fade_out_frames,
                 clip_policy=args.clip_policy,
                 packet_frames=args.packet_frames,
                 output_bits=args.output_bits,
@@ -110,6 +116,8 @@ def main(argv: list[str] | None = None) -> int:
             "retained_start_frame": report.retained_start_frame,
             "retained_end_frame": report.retained_end_frame,
             "trim_silence_dbfs": report.trim_silence_dbfs,
+            "fade_in_frames": report.fade_in_frames,
+            "fade_out_frames": report.fade_out_frames,
         }, sort_keys=True))
         return 0
     try:

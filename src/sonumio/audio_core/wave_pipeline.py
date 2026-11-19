@@ -44,6 +44,8 @@ class WavProcessingConfig:
     allow_peak_boost: bool = False
     remove_dc: bool = False
     trim_silence_dbfs: float | None = None
+    fade_in_frames: int = 0
+    fade_out_frames: int = 0
     clip_policy: ClipPolicy = "reject"
     packet_frames: int = 8192
     output_bits: int | None = None
@@ -61,6 +63,12 @@ class WavProcessingConfig:
         if self.trim_silence_dbfs is not None:
             finite_float(self.trim_silence_dbfs, "WAV trim threshold dBFS",
                          minimum=-120, maximum=-1)
+        # Exact integer frame counts avoid ms/seconds rounding ambiguity.
+        # Each fade spans at most ten seconds at the maximum supported rate.
+        for name, value in (("fade_in_frames", self.fade_in_frames),
+                            ("fade_out_frames", self.fade_out_frames)):
+            if type(value) is not int or not 0 <= value <= 1_920_000:
+                raise AudioContractError(name + " must be an integer in [0, 1920000]")
         if self.clip_policy not in ("reject", "hard"):
             raise AudioContractError("clip_policy must be reject or hard")
         if (type(self.packet_frames) is not int or
@@ -104,6 +112,34 @@ class WavProcessingResult:
     retained_start_frame: int = 0
     retained_end_frame: int = 0
     trim_silence_dbfs: float | None = None
+    fade_in_frames: int = 0
+    fade_out_frames: int = 0
+
+
+def _edge_fade_envelope(
+    start: int, stop: int, total: int, fade_in: int, fade_out: int,
+) -> np.ndarray:
+    """Return packet-local, position-exact linear edge fade amplitudes.
+
+    First/last fade frames have exactly zero/one endpoints when N >= 2.
+    A one-frame fade mutes only that endpoint. If fades overlap, their
+    attenuations multiply. This vector depends on absolute output frames,
+    never on how the reader partitions audio into packets.
+    """
+    positions = np.arange(start, stop, dtype=np.float64)
+    envelope = np.ones(stop - start, dtype=np.float64)
+    if fade_in:
+        if fade_in == 1:
+            envelope[positions == 0] = 0.0
+        else:
+            envelope *= np.minimum(positions / (fade_in - 1), 1.0)
+    if fade_out:
+        remaining = total - 1 - positions
+        if fade_out == 1:
+            envelope[remaining == 0] = 0.0
+        else:
+            envelope *= np.minimum(remaining / (fade_out - 1), 1.0)
+    return envelope
 
 
 def _peak_and_square(samples: np.ndarray) -> tuple[float, float]:
@@ -211,6 +247,10 @@ def process_wav_file(
         # created at this point.
         raise AudioLimitError("No WAV frames exceed the silence trim threshold")
     retained_frames = retained_end - retained_start
+    if (config.fade_in_frames > retained_frames or
+            config.fade_out_frames > retained_frames):
+        # Fail before creating even an output directory or scratch file.
+        raise AudioLimitError("WAV fade exceeds retained output frame count")
     count = source_info.frames * source_info.channels
     source_rms = math.sqrt(squared_sum / count)
     if config.remove_dc:
@@ -257,6 +297,14 @@ def process_wav_file(
                 working = selected.astype(np.float64)
                 if dc_offsets is not None:
                     working -= dc_offsets[:, None]
+                if config.fade_in_frames or config.fade_out_frames:
+                    output_start = start - retained_start
+                    envelope = _edge_fade_envelope(
+                        output_start, output_start + selected.shape[1],
+                        retained_frames, config.fade_in_frames,
+                        config.fade_out_frames,
+                    )
+                    working *= envelope[None, :]
                 working *= effective_gain
                 exceeding = np.abs(working) > 1.0
                 over_count = int(np.count_nonzero(exceeding))
@@ -305,4 +353,6 @@ def process_wav_file(
         retained_start_frame=retained_start,
         retained_end_frame=retained_end,
         trim_silence_dbfs=config.trim_silence_dbfs,
+        fade_in_frames=config.fade_in_frames,
+        fade_out_frames=config.fade_out_frames,
     )

@@ -71,7 +71,7 @@ print(result.source_peak, result.output_peak_before_quantization)
 ## Regression coverage
 
 ```bash
-python -m pytest -q tests/test_audio_core_wave_pipeline.py
+python -m pytest -q tests/test_audio_core_pipeline_fades.py
 python -m pytest -q tests/test_audio_core_*.py
 ```
 
@@ -126,3 +126,45 @@ for a fixed approved source, seed, output bit depth and gain policy.
 Source verification, refusal to clip without permission and atomic final
 publication are unchanged. This is optional quantization dither, **not**
 randomness for diffusion sampling, voice transformation or trained models.
+
+## Opt-in frame-exact edge fades (19 November 2026)
+
+`wav-process` can now apply independent, **opt-in linear amplitude fades**
+with `--fade-in-frames N` and/or `--fade-out-frames N`. Both default to
+zero, preserving all historical output bytes and SHA256 values when omitted.
+These are **sample-frame counts at the original WAV clock**, not milliseconds:
+no automatic rounding or resampling is introduced. Each value must be a
+nonnegative integer of at most 1,920,000 frames (10 seconds at 192 kHz) and
+must not exceed the actual retained output length. Excessive fades fail
+**before destination directory or scratch output creation**.
+
+Example for a local 24-kHz source, trimming below -40 dBFS and then fading
+its retained beginning/end over exactly 240 samples (10 ms):
+
+```bash
+sonumio wav-process approved-input.wav --output edited.wav \\
+  --trim-silence-dbfs -40 --fade-in-frames 240 --fade-out-frames 240 \\
+  --expected-sha256 PUT_TRUSTED_64_CHAR_SHA256_HERE
+```
+
+The envelope starts at zero on the first faded frame and reaches unity on
+its last fade-in frame; fade-out does the inverse. A one-frame fade mutes
+only its endpoint. If fades overlap, their amplitudes multiply. For an
+intermediate output frame `i` in a file of `T` retained frames, each
+`N > 1` fade contributes the linear factors
+`min(i/(N-1), 1)` and/or `min((T-1-i)/(N-1), 1)`.
+
+Fades operate **after optional full-source per-channel DC removal and before
+fixed gain, clipping checks, quantization and optional seeded TPDF dither**.
+The gain/ceiling estimate remains conservative because its global peak is
+computed before fades. Importantly, all discarded source frames are still
+read and SHA256-verified in both passes. Fade positioning is anchored to
+**retained output frame coordinates** rather than packet starts, making the
+bytes deterministic across reader packet sizes within the same numerical
+runtime. The JSON result includes `fade_in_frames` and `fade_out_frames`.
+
+A linear fade can soften some hard cuts but does **not** guarantee click-free
+or transparent editing, psychoacoustic mastering, LUFS compliance, speaker
+consent, or improved generative model quality. Source files and published
+model weights are unchanged. PR #1 stays draft and unmerged, with no
+release, tag, pretrained weights or generated audio publication.
