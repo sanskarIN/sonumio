@@ -54,7 +54,8 @@ def test_opt_in_linear_fades_are_packet_invariant_and_preserve_length(tmp_path):
         frame = np.arange(61, dtype=np.float64)
         expected = 0.5 * np.minimum(frame / 6, 1.0)
         expected *= np.minimum((60-frame) / 10, 1.0)
-        np.testing.assert_allclose(values, expected[None, :], rtol=0, atol=1/32768)
+        np.testing.assert_allclose(values, np.broadcast_to(expected, values.shape),
+                                   rtol=0, atol=1/32768)
         assert np.all(values[:, 0] == 0) and np.all(values[:, -1] == 0)
         assert np.all(values[:, 7:51] == 0.5)
         digests.add(result.output_sha256)
