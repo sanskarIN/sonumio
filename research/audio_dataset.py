@@ -97,6 +97,25 @@ def _decode_pcm16(wav_bytes: bytes, record: dict) -> tuple[np.ndarray, int]:
     return mono, rate
 
 
+def _decoded_audio_digest(signal: np.ndarray, rate: int) -> str:
+    """Fingerprint the validated decoded waveform, independent of WAV headers.
+
+    The key includes sample rate and frame count; it detects byte-identical
+    decoded PCM even if files use different RIFF metadata, chunk layout, or
+    unused trailing data. It does not claim to detect near-duplicate audio,
+    different sample rates, edits, or malicious provenance declarations.
+    """
+    if (signal.ndim != 1 or signal.dtype != np.dtype("float32")
+            or signal.size == 0 or not np.isfinite(signal).all()
+            or type(rate) is not int or rate <= 0):
+        raise ManifestError("invalid decoded waveform for content fingerprint")
+    digest = sha256(b"sonumio-reviewed-decoded-waveform-v1\0")
+    digest.update(rate.to_bytes(4, "little", signed=False))
+    digest.update(len(signal).to_bytes(8, "little", signed=False))
+    digest.update(np.asarray(signal, dtype="<f4", order="C").tobytes())
+    return digest.hexdigest()
+
+
 def _crop_clips(signal: np.ndarray, rate: int, per_asset: int) -> list[np.ndarray]:
     # Local import: scipy is required only for rights-gated research ingestion.
     from scipy.signal import resample_poly
@@ -138,6 +157,7 @@ def load_reviewed_splits(manifest: str | Path, audio_root: str | Path, *,
     captions: dict[str, list[str]] = {split: [] for split in clips}
     fingerprints = {split: sha256() for split in clips}
     counts = {split: 0 for split in clips}
+    decoded_recordings: dict[str, tuple[int, str]] = {}
 
     for line_no, row in records:
             try:
@@ -146,12 +166,29 @@ def load_reviewed_splits(manifest: str | Path, audio_root: str | Path, *,
                     raise ManifestError("only .wav files are permitted")
                 if path.stat().st_size > MAX_ASSET_BYTES:
                     raise ManifestError("WAV asset exceeds 20 MiB safety limit")
-                wav_bytes = path.read_bytes()
+                # Opening a file after stat can observe a larger replacement.
+                # Enforce the memory budget on the actual bytes read too.
+                with path.open("rb") as wav_file:
+                    wav_bytes = wav_file.read(MAX_ASSET_BYTES + 1)
+                if len(wav_bytes) > MAX_ASSET_BYTES:
+                    raise ManifestError("WAV asset exceeds 20 MiB safety limit")
                 if sha256(wav_bytes).hexdigest() != row["sha256"]:
                     raise ManifestError("WAV SHA256 does not match the manifest")
                 label = caption_category(row["caption"])
                 mono, rate = _decode_pcm16(wav_bytes, row)
+                # File SHA alone is insufficient: a RIFF metadata-only change
+                # yields different bytes for the *same* training waveform.
+                # Reject decoded PCM duplicates, including across splits.
+                decoded_hash = _decoded_audio_digest(mono, rate)
+                if decoded_hash in decoded_recordings:
+                    prior_line, prior_split = decoded_recordings[decoded_hash]
+                    raise ManifestError(
+                        "decoded PCM duplicates line "
+                        f"{prior_line} ({prior_split} split); "
+                        "recording must not be reused"
+                    )
                 pieces = _crop_clips(mono, rate, clips_per_asset)
+                decoded_recordings[decoded_hash] = (line_no, row["split"])
                 split = row["split"]
                 clips[split].extend(pieces)
                 labels[split].extend([label] * len(pieces))
@@ -183,6 +220,8 @@ def load_reviewed_splits(manifest: str | Path, audio_root: str | Path, *,
         "clip_counts": {split: len(value.labels) for split, value in loaded.items()},
         "clips_per_asset": clips_per_asset,
         "wav_bytes_verified": True,
+        "decoded_audio_duplicate_gate": "exact mono PCM at identical sample rate",
+        "decoded_audio_distinct_recordings": len(decoded_recordings),
         "human_rights_review_remains_required": True,
         "voice_detection_performed": False,
         "split_fingerprints": {split: value.fingerprint for split, value in loaded.items()},
