@@ -102,21 +102,35 @@ def _audit_archive(archive: Path) -> dict[str, object]:
             if len(data) != member.size:
                 raise RuntimeError(f"Source archive entry changed: {relative}")
             files[relative] = data
-    # Verify each emitted source file against the canonical Git object size.
-    # This detects CRLF conversion and other host-dependent export filters.
-    tracked: dict[str, int] = {}
+    # Check *content* against each canonical Git blob object, not just its
+    # length. Same-size archive tampering must never pass this release gate.
+    # Support Git repositories using either SHA-1 or SHA-256 object formats.
+    object_format = _run(
+        ["git", "rev-parse", "--show-object-format"], cwd=ROOT
+    ).stdout.strip()
+    if object_format not in ("sha1", "sha256"):
+        raise RuntimeError("Unsupported Git object format for release audit")
+    tracked: dict[str, tuple[int, str]] = {}
     tree_output = _run(["git", "ls-tree", "-r", "-l", "HEAD"], cwd=ROOT).stdout
     for line in tree_output.splitlines():
         header, separator, filename = line.partition("\t")
         pieces = header.split()
         if separator != "\t" or len(pieces) != 4 or pieces[1] != "blob":
             raise RuntimeError("Unexpected Git tree entry in source audit")
-        tracked[filename] = int(pieces[3])
+        if filename in tracked:
+            raise RuntimeError(f"Duplicate Git tree entry: {filename}")
+        tracked[filename] = (int(pieces[3]), pieces[2])
     if files.keys() != tracked.keys():
         raise RuntimeError("Source archive paths differ from the committed tree")
     for filename, data in files.items():
-        if len(data) != tracked[filename]:
+        expected_size, expected_oid = tracked[filename]
+        if len(data) != expected_size:
             raise RuntimeError(f"Noncanonical exported source bytes: {filename}")
+        blob = b"blob " + str(len(data)).encode("ascii") + b"\0" + data
+        digest = (hashlib.sha1(blob).hexdigest() if object_format == "sha1"
+                  else hashlib.sha256(blob).hexdigest())
+        if digest != expected_oid:
+            raise RuntimeError(f"Source archive Git blob checksum mismatch: {filename}")
     missing = sorted(REQUIRED.difference(files))
     if missing:
         raise RuntimeError(f"Missing buildable-source entries: {missing}")
@@ -134,6 +148,8 @@ def _audit_archive(archive: Path) -> dict[str, object]:
     web = json.loads(files["web/package.json"])
     if web.get("private") is not True:
         raise RuntimeError("Web package must remain private / unpublished")
+    if web.get("version") != VERSION:
+        raise RuntimeError("Web package version differs from source candidate")
     if not any(key.startswith("tests/test_") and key.endswith(".py")
                for key in files):
         raise RuntimeError("Source archive has no tests")
@@ -142,6 +158,7 @@ def _audit_archive(archive: Path) -> dict[str, object]:
         "source_bytes": total_size,
         "archive_sha256": hashlib.sha256(archive.read_bytes()).hexdigest(),
         "canonical_blob_bytes_verified": True,
+        "canonical_blob_hashes_verified": True,
         "published": False, "binary_or_model_artifacts": 0,
     }
 
