@@ -10,11 +10,13 @@ export type GenerationInput = {
 export type SceneLayer = {
   prompt: string; start_seconds: number; duration_seconds: number; gain_db: number;
   fade_in_seconds: number; fade_out_seconds: number; seed: number;
+  pan?: number; // -1 left, 0 centered/legacy mono, +1 right
 };
 export type SceneInput = { duration_seconds: number; layers: SceneLayer[] };
 export type GeneratedAudio = {
   id: string; audio_url: string; sample_rate: number; duration_seconds: number;
   disclaimer: string; metrics: Record<string, number>; model_id?: string; engine_id?: string;
+  channels?: 1 | 2;
 };
 
 export class ApiError extends Error {
@@ -86,6 +88,9 @@ export function validateScene(scene: SceneInput): string | null {
       return 'Layer ' + n + ' exceeds the scene timeline.';
     if (!Number.isFinite(layer.gain_db) || layer.gain_db < -60 || layer.gain_db > 12)
       return 'Invalid gain in layer ' + n + '.';
+    const pan = layer.pan ?? 0;
+    if (!Number.isFinite(pan) || pan < -1 || pan > 1)
+      return 'Pan in layer ' + n + ' must be between -1 (left) and +1 (right).';
     if (!Number.isInteger(layer.seed) || layer.seed < 0 || layer.seed >= 2 ** 32)
       return 'Invalid seed in layer ' + n + '.';
     if (!Number.isFinite(layer.fade_in_seconds) || !Number.isFinite(layer.fade_out_seconds) ||

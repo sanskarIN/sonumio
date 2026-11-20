@@ -14,7 +14,7 @@ const presets = [
 function makeLayer(index = 0): SceneLayer {
   return { prompt: index === 0 ? 'rain' : 'wind', start_seconds: index === 0 ? 0 : 1,
     duration_seconds: 3, gain_db: index === 0 ? 0 : -6,
-    fade_in_seconds: 0.02, fade_out_seconds: 0.05, seed: index };
+    fade_in_seconds: 0.02, fade_out_seconds: 0.05, seed: index, pan: 0 };
 }
 const numberValue = (value: string) => Number(value);
 export function App() {
@@ -122,7 +122,7 @@ export function App() {
                 <label>Random seed <small>Reproducible audio</small><input type="number" min="0" max="4294967295" step="1" required value={seed} onChange={e => setSeed(numberValue(e.target.value))}/></label>
               </div>
             </> : <>
-              <p className="hint">Arrange up to eight procedural layers on a shared timeline. Every layer must end before the scene finishes.</p>
+              <p className="hint">Arrange up to eight procedural layers on a shared timeline. Every layer must end before the scene finishes. Set pan from -1 (left) to +1 (right) for stereo; all-center scenes remain mono.</p>
               <div className="field-grid"><label>Scene duration <small>0.5–30 seconds</small><input type="number" min="0.5" max="30" step="0.5" required value={sceneDuration} onChange={e => setSceneDuration(numberValue(e.target.value))}/></label></div>
               <div className="layer-heading"><span className="field-heading">SOUND LAYERS ({layers.length}/8)</span><button type="button" className="secondary-button" disabled={layers.length >= 8} onClick={() => setLayers(existing => [...existing, makeLayer(existing.length)])}>+ Add layer</button></div>
               <div className="layers">{layers.map((layer, index) => <fieldset key={index} className="layer">
@@ -133,6 +133,7 @@ export function App() {
                   <label>Starts (s)<input type="number" min="0" max="30" step=".1" required value={layer.start_seconds} onChange={e => changeLayer(index, 'start_seconds', numberValue(e.target.value))}/></label>
                   <label>Length (s)<input type="number" min=".5" max="15" step=".1" required value={layer.duration_seconds} onChange={e => changeLayer(index, 'duration_seconds', numberValue(e.target.value))}/></label>
                   <label>Gain (dB)<input type="number" min="-60" max="12" required value={layer.gain_db} onChange={e => changeLayer(index, 'gain_db', numberValue(e.target.value))}/></label>
+                  <label>Pan <small>-1 left · 0 center · +1 right</small><input type="number" min="-1" max="1" step="0.1" required value={layer.pan ?? 0} onChange={e => changeLayer(index, 'pan', numberValue(e.target.value))}/></label>
                   <label>Seed<input type="number" min="0" max="4294967295" required value={layer.seed} onChange={e => changeLayer(index, 'seed', numberValue(e.target.value))}/></label>
                 </div>
               </fieldset>)}</div>
@@ -154,7 +155,7 @@ export function App() {
               <span className="overline mint">AUDIO READY</span><h3>Your sound is ready.</h3>
               <audio controls preload="none" src={result.audio_url} aria-label="Generated WAV audio preview">Your browser cannot play WAV files.</audio>
               <a className="download" download="sonumio.wav" href={result.audio_url}>↓ Download WAV</a>
-              <p className="hint">{result.duration_seconds.toFixed(2)}s · {(result.sample_rate / 1000).toFixed(0)} kHz WAV</p>
+              <p className="hint">{result.duration_seconds.toFixed(2)}s · {(result.sample_rate / 1000).toFixed(0)} kHz {result.channels === 2 ? 'stereo' : 'mono'} WAV</p>
               <p className="hint">{result.disclaimer}</p>
             </div> : <div className="empty" aria-live="polite">
               <div className="wave" aria-hidden="true">{Array.from({length: 19}, (_, i) => <i key={i} style={{height: (16 + Math.abs(Math.sin(i * 1.3)) * 74) + '%'}}/>)}</div>
