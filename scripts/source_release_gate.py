@@ -62,6 +62,9 @@ def _audit_archive(archive: Path) -> dict[str, object]:
     with tarfile.open(archive, mode="r:gz") as tar:
         for member in tar:
             name = member.name
+            # tarfile normalizes the root directory name without its final '/'.
+            if name == PREFIX.rstrip("/") and member.isdir():
+                continue
             if not name.startswith(PREFIX):
                 raise RuntimeError("Unexpected source archive prefix")
             relative = name[len(PREFIX):]
