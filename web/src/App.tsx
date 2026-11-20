@@ -75,7 +75,7 @@ export function App() {
   function switchMode(value: 'sound' | 'scene') {
     if (!busy) { setMode(value); setError(''); setResult(null); }
   }
-  function changeLayer(index: number, key: keyof SceneLayer, value: number | string) {
+  function changeLayer(index: number, key: keyof SceneLayer, value: number | string | undefined) {
     setLayers(previous => previous.map((layer, i) => i === index ? { ...layer, [key]: value } : layer));
   }
   function cancel() {
@@ -122,7 +122,7 @@ export function App() {
                 <label>Random seed <small>Reproducible audio</small><input type="number" min="0" max="4294967295" step="1" required value={seed} onChange={e => setSeed(numberValue(e.target.value))}/></label>
               </div>
             </> : <>
-              <p className="hint">Arrange up to eight procedural layers on a shared timeline. Every layer must end before the scene finishes. Set pan from -1 (left) to +1 (right) for stereo; all-center scenes remain mono.</p>
+              <p className="hint">Arrange up to eight procedural layers on a shared timeline. Every layer must end before the scene finishes. Set pan from -1 (left) to +1 (right) for stereo; add an optional end pan to move the sound across the stereo field. All-center scenes remain mono.</p>
               <div className="field-grid"><label>Scene duration <small>0.5–30 seconds</small><input type="number" min="0.5" max="30" step="0.5" required value={sceneDuration} onChange={e => setSceneDuration(numberValue(e.target.value))}/></label></div>
               <div className="layer-heading"><span className="field-heading">SOUND LAYERS ({layers.length}/8)</span><button type="button" className="secondary-button" disabled={layers.length >= 8} onClick={() => setLayers(existing => [...existing, makeLayer(existing.length)])}>+ Add layer</button></div>
               <div className="layers">{layers.map((layer, index) => <fieldset key={index} className="layer">
@@ -133,7 +133,8 @@ export function App() {
                   <label>Starts (s)<input type="number" min="0" max="30" step=".1" required value={layer.start_seconds} onChange={e => changeLayer(index, 'start_seconds', numberValue(e.target.value))}/></label>
                   <label>Length (s)<input type="number" min=".5" max="15" step=".1" required value={layer.duration_seconds} onChange={e => changeLayer(index, 'duration_seconds', numberValue(e.target.value))}/></label>
                   <label>Gain (dB)<input type="number" min="-60" max="12" required value={layer.gain_db} onChange={e => changeLayer(index, 'gain_db', numberValue(e.target.value))}/></label>
-                  <label>Pan <small>-1 left · 0 center · +1 right</small><input type="number" min="-1" max="1" step="0.1" required value={layer.pan ?? 0} onChange={e => changeLayer(index, 'pan', numberValue(e.target.value))}/></label>
+                  <label>Pan start <small>-1 left · 0 center · +1 right</small><input type="number" min="-1" max="1" step="0.1" required value={layer.pan ?? 0} onChange={e => changeLayer(index, 'pan', numberValue(e.target.value))}/></label>
+                  <label>Pan end <small>Optional · blank keeps pan fixed</small><input type="number" min="-1" max="1" step="0.1" value={layer.pan_end ?? ''} placeholder="Fixed" onChange={e => changeLayer(index, 'pan_end', e.target.value === '' ? undefined : numberValue(e.target.value))}/></label>
                   <label>Seed<input type="number" min="0" max="4294967295" required value={layer.seed} onChange={e => changeLayer(index, 'seed', numberValue(e.target.value))}/></label>
                 </div>
               </fieldset>)}</div>
