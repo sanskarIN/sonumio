@@ -50,7 +50,10 @@ def _run(args: list[str], *, cwd: Path,
 
 
 def _make_archive(archive: Path) -> None:
-    _run(["git", "archive", "--format=tar.gz", f"--prefix={PREFIX}",
+    # On Windows, core.autocrlf=true can change bytes INSIDE git archive.
+    # GitHub source snapshots must preserve committed blobs exactly.
+    _run(["git", "-c", "core.autocrlf=false", "-c", "core.eol=lf",
+          "archive", "--format=tar.gz", f"--prefix={PREFIX}",
           f"--output={archive}", "HEAD"], cwd=ROOT)
     if not archive.is_file() or archive.stat().st_size == 0:
         raise RuntimeError("Git source archive was not created")
@@ -99,6 +102,21 @@ def _audit_archive(archive: Path) -> dict[str, object]:
             if len(data) != member.size:
                 raise RuntimeError(f"Source archive entry changed: {relative}")
             files[relative] = data
+    # Verify each emitted source file against the canonical Git object size.
+    # This detects CRLF conversion and other host-dependent export filters.
+    tracked: dict[str, int] = {}
+    tree_output = _run(["git", "ls-tree", "-r", "-l", "HEAD"], cwd=ROOT).stdout
+    for line in tree_output.splitlines():
+        header, separator, filename = line.partition("\t")
+        pieces = header.split()
+        if separator != "\t" or len(pieces) != 4 or pieces[1] != "blob":
+            raise RuntimeError("Unexpected Git tree entry in source audit")
+        tracked[filename] = int(pieces[3])
+    if files.keys() != tracked.keys():
+        raise RuntimeError("Source archive paths differ from the committed tree")
+    for filename, data in files.items():
+        if len(data) != tracked[filename]:
+            raise RuntimeError(f"Noncanonical exported source bytes: {filename}")
     missing = sorted(REQUIRED.difference(files))
     if missing:
         raise RuntimeError(f"Missing buildable-source entries: {missing}")
@@ -123,6 +141,7 @@ def _audit_archive(archive: Path) -> dict[str, object]:
         "tag_candidate": TAG, "source_files": len(files),
         "source_bytes": total_size,
         "archive_sha256": hashlib.sha256(archive.read_bytes()).hexdigest(),
+        "canonical_blob_bytes_verified": True,
         "published": False, "binary_or_model_artifacts": 0,
     }
 
