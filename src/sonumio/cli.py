@@ -37,6 +37,15 @@ def main(argv: list[str] | None = None) -> int:
     post.add_argument("--trim-silence-dbfs", type=float,
                       help="Trim quiet file edges above this sample threshold "
                            "(-120 through -1 dBFS; original PCM before gain)")
+    post.add_argument("--trim-pre-roll-frames", type=int, default=0,
+                      help="Keep up to N original frames before the first active frame; "
+                           "requires --trim-silence-dbfs")
+    post.add_argument("--trim-post-roll-frames", type=int, default=0,
+                      help="Keep up to N original frames after the last active frame; "
+                           "requires --trim-silence-dbfs")
+    post.add_argument("--fade-curve", choices=("linear", "cosine"),
+                      default="linear",
+                      help="Amplitude shape for both exact-frame edge fades")
     post.add_argument("--fade-in-frames", type=int, default=0,
                       help="Fade from zero over N retained output frames (opt-in)")
     post.add_argument("--fade-out-frames", type=int, default=0,
@@ -73,6 +82,9 @@ def main(argv: list[str] | None = None) -> int:
                 allow_peak_boost=args.allow_peak_boost,
                 remove_dc=args.remove_dc,
                 trim_silence_dbfs=args.trim_silence_dbfs,
+                trim_pre_roll_frames=args.trim_pre_roll_frames,
+                trim_post_roll_frames=args.trim_post_roll_frames,
+                fade_curve=args.fade_curve,
                 fade_in_frames=args.fade_in_frames,
                 fade_out_frames=args.fade_out_frames,
                 clip_policy=args.clip_policy,
@@ -118,6 +130,9 @@ def main(argv: list[str] | None = None) -> int:
             "trim_silence_dbfs": report.trim_silence_dbfs,
             "fade_in_frames": report.fade_in_frames,
             "fade_out_frames": report.fade_out_frames,
+            "trim_pre_roll_frames": report.trim_pre_roll_frames,
+            "trim_post_roll_frames": report.trim_post_roll_frames,
+            "fade_curve": report.fade_curve,
         }, sort_keys=True))
         return 0
     try:

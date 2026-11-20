@@ -51,6 +51,10 @@ class WavProcessingConfig:
     # Append new options: preserve historical positional construction order.
     fade_in_frames: int = 0
     fade_out_frames: int = 0
+    # Additional options are appended to preserve positional compatibility.
+    trim_pre_roll_frames: int = 0
+    trim_post_roll_frames: int = 0
+    fade_curve: Literal["linear", "cosine"] = "linear"
 
     def __post_init__(self) -> None:
         finite_float(self.gain_db, "WAV gain dB", minimum=-60, maximum=24)
@@ -64,6 +68,22 @@ class WavProcessingConfig:
         if self.trim_silence_dbfs is not None:
             finite_float(self.trim_silence_dbfs, "WAV trim threshold dBFS",
                          minimum=-120, maximum=-1)
+        for name, value in (
+            ("trim_pre_roll_frames", self.trim_pre_roll_frames),
+            ("trim_post_roll_frames", self.trim_post_roll_frames),
+        ):
+            if type(value) is not int or not 0 <= value <= 1_920_000:
+                raise AudioContractError(
+                    name + " must be an integer in [0, 1920000]"
+                )
+        if self.trim_silence_dbfs is None and (
+                self.trim_pre_roll_frames or self.trim_post_roll_frames):
+            raise AudioContractError(
+                "Trim context frames require trim_silence_dbfs"
+            )
+        if type(self.fade_curve) is not str or self.fade_curve not in (
+                "linear", "cosine"):
+            raise AudioContractError("fade_curve must be linear or cosine")
         # Exact integer frame counts avoid ms/seconds rounding ambiguity.
         # Each fade spans at most ten seconds at the maximum supported rate.
         for name, value in (("fade_in_frames", self.fade_in_frames),
@@ -115,10 +135,14 @@ class WavProcessingResult:
     trim_silence_dbfs: float | None = None
     fade_in_frames: int = 0
     fade_out_frames: int = 0
+    trim_pre_roll_frames: int = 0
+    trim_post_roll_frames: int = 0
+    fade_curve: str = "linear"
 
 
 def _edge_fade_envelope(
     start: int, stop: int, total: int, fade_in: int, fade_out: int,
+    curve: Literal["linear", "cosine"] = "linear",
 ) -> np.ndarray:
     """Return packet-local, position-exact linear edge fade amplitudes.
 
@@ -133,13 +157,17 @@ def _edge_fade_envelope(
         if fade_in == 1:
             envelope[positions == 0] = 0.0
         else:
-            envelope *= np.minimum(positions / (fade_in - 1), 1.0)
+            progress = np.minimum(positions / (fade_in - 1), 1.0)
+            envelope *= (progress if curve == "linear" else
+                         0.5 - 0.5 * np.cos(np.pi * progress))
     if fade_out:
         remaining = total - 1 - positions
         if fade_out == 1:
             envelope[remaining == 0] = 0.0
         else:
-            envelope *= np.minimum(remaining / (fade_out - 1), 1.0)
+            progress = np.minimum(remaining / (fade_out - 1), 1.0)
+            envelope *= (progress if curve == "linear" else
+                         0.5 - 0.5 * np.cos(np.pi * progress))
     return envelope
 
 
@@ -247,6 +275,13 @@ def process_wav_file(
         # Refuse an empty result; no parent or temporary output has been
         # created at this point.
         raise AudioLimitError("No WAV frames exceed the silence trim threshold")
+    else:
+        # Context handles retain original source frames around the active
+        # interval. Clamp to file bounds and never synthesize padding.
+        retained_start = max(0, retained_start - config.trim_pre_roll_frames)
+        retained_end = min(
+            source_info.frames, retained_end + config.trim_post_roll_frames,
+        )
     retained_frames = retained_end - retained_start
     if (config.fade_in_frames > retained_frames or
             config.fade_out_frames > retained_frames):
@@ -303,7 +338,7 @@ def process_wav_file(
                     envelope = _edge_fade_envelope(
                         output_start, output_start + selected.shape[1],
                         retained_frames, config.fade_in_frames,
-                        config.fade_out_frames,
+                        config.fade_out_frames, config.fade_curve,
                     )
                     working *= envelope[None, :]
                 working *= effective_gain
@@ -356,4 +391,7 @@ def process_wav_file(
         trim_silence_dbfs=config.trim_silence_dbfs,
         fade_in_frames=config.fade_in_frames,
         fade_out_frames=config.fade_out_frames,
+        trim_pre_roll_frames=config.trim_pre_roll_frames,
+        trim_post_roll_frames=config.trim_post_roll_frames,
+        fade_curve=config.fade_curve,
     )

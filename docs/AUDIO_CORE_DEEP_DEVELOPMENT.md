@@ -473,3 +473,43 @@ an active recording are never collapsed. Full-file DC correction is
 computed before trimming, by design. Source and neural training corpora,
 historic procedural DSP goldens, local API and web UI remain untouched.
 All work remains on the unmerged draft development branch without releases.
+
+## Explicit trim context handles and fade curves (20 November 2026)
+
+The opt-in offline `wav-process` command can retain original audio immediately
+around the first and last above-threshold sample frame. These are exact integer
+frames, **not** approximate milliseconds:
+
+```bash
+sonumio wav-process input.wav --output output.wav \
+  --trim-silence-dbfs -42 --trim-pre-roll-frames 960 \
+  --trim-post-roll-frames 1920 --fade-in-frames 240 \
+  --fade-out-frames 480 --fade-curve cosine
+```
+
+At 24 kHz, 960 frames are 40 ms and 1,920 frames are 80 ms. In the
+**first verified read**, the trim detector takes the first and last frames
+whose absolute ORIGINAL sample value in **any channel** exceeds the chosen
+amplitude threshold. It then extends the common, sample-aligned interval
+by the requested preceding/following context, clamping to the source
+file rather than creating synthetic padding. The original complete WAV
+is verified by SHA-256 on **both** reads, including discarded samples.
+A wholly below-threshold input fails with no new output. Nonzero context
+without a threshold is rejected; defaults remain zero-context.
+
+The default `linear` edge fades retain historical numerical behavior.
+An explicit `--fade-curve cosine` uses a raised-cosine *amplitude* ramp
+`0.5 - 0.5*cos(pi*x)` from progress 0 through 1, and the reversed ramp
+at the other end. The first/last fade samples are exactly zero for every
+positive fade length, including a one-frame fade. Fades covering one
+another multiply; they are not equal-power crossfades, true-peak
+limiters or click-removal guarantees. Every interpolation coordinate is
+derived from the **absolute retained output frame**, making output
+independent of WAV packet partitions. Fades occur after optional
+per-channel DC subtraction and before gain/quantization/dither.
+All output digests still gate atomic publication.
+
+Keep context and fades explicitly chosen. They do not perform speech
+segmentation, noise gating, voice-activity detection, source separation
+or any rights/consent verification. No historical audio generator,
+experiment inputs or model checkpoints are changed by this addition.
