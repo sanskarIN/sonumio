@@ -33,6 +33,7 @@ class SceneLayer:
     fade_out_seconds: float = 0.05
     seed: int = 0
     pan: float = 0.0  # -1 fully left; 0 centered; +1 fully right (stereo opt-in)
+    pan_end: float | None = None  # Optional pan sweep over this layer's frames
 
 
 def _valid_number(value: float, minimum: float, maximum: float, field: str) -> float:
@@ -48,6 +49,8 @@ def _validate_layer(layer: SceneLayer, total: float) -> None:
     _valid_number(layer.duration_seconds, 0.5, 15, "duration_seconds")
     _valid_number(layer.gain_db, -60, 12, "gain_db")
     _valid_number(layer.pan, -1, 1, "pan")
+    if layer.pan_end is not None:
+        _valid_number(layer.pan_end, -1, 1, "pan_end")
     _valid_number(layer.fade_in_seconds, 0, 10, "fade_in_seconds")
     _valid_number(layer.fade_out_seconds, 0, 10, "fade_out_seconds")
     if layer.fade_in_seconds + layer.fade_out_seconds > layer.duration_seconds + 1e-8:
@@ -71,12 +74,34 @@ def validate_scene_plan(layers: Sequence[SceneLayer], duration_seconds: float) -
         validate_request(layer.prompt, layer.duration_seconds)
 
 
+def _pan_sweep_gains(start_pan: float, end_pan: float,
+                     frames: int) -> tuple[np.ndarray, np.ndarray]:
+    """Equal-power stereo gains at exact frame positions, including endpoints.
+
+    The first rendered sample uses start_pan and the last uses end_pan. A
+    one-frame interval uses the start position. Exact +/-1 endpoints zero the
+    opposite channel despite floating-point trigonometric roundoff.
+    """
+    if frames < 1:
+        raise ValueError("Pan sweep requires at least one sample")
+    positions = np.linspace(start_pan, end_pan, frames, dtype=np.float64)
+    angle = (positions + 1.0) * (math.pi / 4.0)
+    left = np.cos(angle)
+    right = np.sin(angle)
+    left[positions == 1.0] = 0.0
+    right[positions == -1.0] = 0.0
+    return left, right
+
+
 def compose_scene(layers: Sequence[SceneLayer], duration_seconds: float) -> Generated:
     validate_scene_plan(layers, duration_seconds)
     total = float(duration_seconds)
     start = perf_counter()
     frames = round(total * SAMPLE_RATE)
-    stereo = any(layer.pan != 0.0 for layer in layers)
+    # A move away from center requires stereo even when its start is centered.
+    stereo = any(layer.pan != 0.0 or (
+        layer.pan_end is not None and layer.pan_end != 0.0
+    ) for layer in layers)
     mix = (np.zeros((2, frames), dtype=np.float64) if stereo
            else np.zeros(frames, dtype=np.float64))
     for layer in layers:
@@ -99,15 +124,23 @@ def compose_scene(layers: Sequence[SceneLayer], duration_seconds: float) -> Gene
                 raise GenerationError("Layer exceeds output sample range")
             samples = samples[:frames - position]
         if stereo:
-            # Equal-power positioning on a deterministic two-channel bus.
-            # Exact endpoint branches avoid tiny nonzero IEEE-754 leakage.
-            if layer.pan == -1.0:
-                left_gain, right_gain = 1.0, 0.0
-            elif layer.pan == 1.0:
-                left_gain, right_gain = 0.0, 1.0
+            end_pan = layer.pan if layer.pan_end is None else layer.pan_end
+            if end_pan != layer.pan:
+                # Frame-indexed motion is independent of scene position,
+                # layer overlap, rendering seeds and output quantization.
+                left_gain, right_gain = _pan_sweep_gains(
+                    layer.pan, end_pan, len(samples),
+                )
             else:
-                angle = (layer.pan + 1.0) * math.pi / 4.0
-                left_gain, right_gain = math.cos(angle), math.sin(angle)
+                # Keep existing constant-pan arithmetic byte-identical.
+                # Exact endpoint branches avoid small opposite-channel leaks.
+                if layer.pan == -1.0:
+                    left_gain, right_gain = 1.0, 0.0
+                elif layer.pan == 1.0:
+                    left_gain, right_gain = 0.0, 1.0
+                else:
+                    angle = (layer.pan + 1.0) * math.pi / 4.0
+                    left_gain, right_gain = math.cos(angle), math.sin(angle)
             mix[0, position:position + len(samples)] += samples * left_gain
             mix[1, position:position + len(samples)] += samples * right_gain
         else:
