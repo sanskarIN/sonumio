@@ -180,3 +180,50 @@ def test_ingestion_uses_single_snapshot_even_if_manifest_changes(tmp_path, monke
     assert len(calls) == 1
     assert loaded["train"].captions == ("rain", "rain")
     assert loaded["train"].labels.tolist() == [0, 0]
+
+
+def test_reject_identical_decoded_audio_with_distinct_wav_file_hashes(tmp_path):
+    """Metadata-only RIFF changes must not leak the same audio across splits."""
+    base = wav_pcm(rate=24000)
+    modified_header = base + b"JUNK:trailing-metadata"
+    assert hashlib.sha256(base).hexdigest() != hashlib.sha256(modified_header).hexdigest()
+    manifest, root = make_dataset(
+        tmp_path, train_bytes=base, validation_bytes=modified_header,
+    )
+    # The declared file hashes differ and the recording groups are distinct.
+    rows = [json.loads(line) for line in manifest.read_text(encoding="utf-8").splitlines()]
+    assert rows[0]["sha256"] != rows[1]["sha256"]
+    assert rows[0]["group_id"] != rows[1]["group_id"]
+    with pytest.raises(ManifestError, match="line 2: decoded PCM duplicates line 1"):
+        load_reviewed_splits(manifest, root)
+
+
+def test_reject_duplicate_decoded_audio_in_same_split(tmp_path):
+    base = wav_pcm(rate=24000)
+    manifest, root = make_dataset(
+        tmp_path, train_bytes=base, validation_bytes=wav_pcm(rate=16000),
+    )
+    duplicate = base + b"RIFF-metadata-only"
+    (root / "clip-2.wav").write_bytes(duplicate)
+    rows = [json.loads(line) for line in manifest.read_text(encoding="utf-8").splitlines()]
+    extra = dict(rows[0])
+    extra.update(
+        asset_id="a2", local_path="clip-2.wav",
+        sha256=hashlib.sha256(duplicate).hexdigest(), group_id="session-2",
+    )
+    rows.append(extra)
+    manifest.write_text(
+        "\n".join(json.dumps(row, ensure_ascii=False) for row in rows) + "\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(ManifestError, match="line 3: decoded PCM duplicates line 1"):
+        load_reviewed_splits(manifest, root)
+
+
+def test_actual_decoded_audio_differences_are_allowed(tmp_path):
+    manifest, root = make_dataset(tmp_path)
+    loaded, report = load_reviewed_splits(manifest, root)
+    assert len(loaded["train"].labels) == 2
+    assert len(loaded["validation"].labels) == 2
+    assert report["decoded_audio_distinct_recordings"] == 2
+    assert report["decoded_audio_duplicate_gate"] == "exact mono PCM at identical sample rate"
