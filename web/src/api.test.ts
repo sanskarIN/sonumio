@@ -37,8 +37,12 @@ describe('same-origin API client', () => {
     expect(() => validateAudioPath(audio.audio_url)).not.toThrow();
   });
   it('POSTs procedural scene plans', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(fake(201, audio)));
-    await expect(generateScene({ duration_seconds: 3, layers: [layer] })).resolves.toEqual(audio);
+    const mock = vi.fn().mockResolvedValue(fake(201, audio));
+    vi.stubGlobal('fetch', mock);
+    const positioned = { ...layer, pan: -0.5 };
+    await expect(generateScene({ duration_seconds: 3, layers: [positioned] })).resolves.toEqual(audio);
+    const submitted = JSON.parse(mock.mock.calls[0][1].body);
+    expect(submitted.layers[0].pan).toBe(-0.5);
   });
 });
 describe('scene client-side guardrails', () => {
@@ -49,5 +53,12 @@ describe('scene client-side guardrails', () => {
     expect(validateScene({ duration_seconds: 31, layers: [layer] })).toContain('30 seconds');
     expect(validateScene({ duration_seconds: 3, layers: [{ ...layer, fade_in_seconds: 1.5, fade_out_seconds: 1 }] })).toContain('fades');
     expect(validateScene({ duration_seconds: 3, layers: [{ ...layer, prompt: '' }] })).toContain('prompt');
+    expect(validateScene({ duration_seconds: 3, layers: [{ ...layer, pan: -1 }] })).toBe(null);
+    expect(validateScene({ duration_seconds: 3, layers: [{ ...layer, pan: 1 }] })).toBe(null);
+    expect(validateScene({ duration_seconds: 3, layers: [{ ...layer, pan: 0 }] })).toBe(null);
+    expect(validateScene({ duration_seconds: 3, layers: [{ ...layer, pan: 1.01 }] })).toContain('Pan');
+    expect(validateScene({ duration_seconds: 3, layers: [{ ...layer, pan: -1.01 }] })).toContain('Pan');
+    expect(validateScene({ duration_seconds: 3, layers: [{ ...layer, pan: Number.NaN }] })).toContain('Pan');
+    expect(validateScene({ duration_seconds: 3, layers: [{ ...layer, pan: Number.POSITIVE_INFINITY }] })).toContain('Pan');
   });
 });
