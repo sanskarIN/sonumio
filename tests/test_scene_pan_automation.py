@@ -68,7 +68,7 @@ def test_center_to_right_sweep_requires_stereo_and_is_repeatable():
     pcm = _decode_wav(a.wav_bytes)
     assert pcm.shape == (24000, 2)
     assert np.any(pcm[:200, 0] != 0)
-    assert np.any(pcm[-12000:-11800, 1] != 0)
+    assert np.any(pcm[11800:12000, 1] != 0)
     assert np.all(pcm[12000:, :] == 0)
     assert np.max(np.abs(a.result.samples)) <= 0.951
     assert a.metrics["clipping_fraction"] == 0.0
@@ -123,7 +123,7 @@ def test_cli_scene_pan_sweep_exports_stereo(tmp_path):
         }],
     }), encoding="utf-8")
     assert main(["scene", str(source), "--output", str(destination)]) == 0
-    assert _decode_wav(destination.read_bytes()).shape == (12000, 2)
+    assert _decode_wav(destination.read_bytes()).shape == (24000, 2)
 
 
 def test_api_scene_pan_sweep_and_invalid_bounds(tmp_path, monkeypatch):
@@ -141,7 +141,7 @@ def test_api_scene_pan_sweep_and_invalid_bounds(tmp_path, monkeypatch):
         assert response.json()["channels"] == 2
         wav = client.get(response.json()["audio_url"])
         assert wav.status_code == 200
-        assert _decode_wav(wav.content).shape == (12000, 2)
+        assert _decode_wav(wav.content).shape == (24000, 2)
         payload["layers"][0]["pan_end"] = 1.1
         assert client.post("/v1/scenes", json=payload).status_code == 422
 
