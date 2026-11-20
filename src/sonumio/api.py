@@ -27,6 +27,7 @@ class SceneLayerRequest(BaseModel):
     start_seconds: float = Field(default=0.0, ge=0, le=30)
     duration_seconds: float = Field(default=3.0, ge=0.5, le=15)
     gain_db: float = Field(default=0.0, ge=-60, le=12)
+    pan: float = Field(default=0.0, ge=-1, le=1)
     fade_in_seconds: float = Field(default=0.02, ge=0, le=10)
     fade_out_seconds: float = Field(default=0.05, ge=0, le=10)
     seed: int = Field(default=0, ge=0, lt=2**32)
@@ -65,7 +66,9 @@ def generate_scene(request: SceneRequest) -> dict:
         "audio_url": f"/v1/generations/{identifier}/audio",
         "sample_rate": generated.result.sample_rate,
         "duration_seconds": generated.result.duration_seconds,
-        "layer_count": len(layers), "metrics": generated.metrics,
+        "layer_count": len(layers),
+        "channels": (2 if generated.result.samples.ndim == 2 else 1),
+        "metrics": generated.metrics,
         "disclaimer": "Procedural scene synthesis; not a neural generative model",
     }
 
