@@ -57,7 +57,17 @@ def test_trim_handles_preserve_original_multichannel_alignment(tmp_path, packet_
     assert report.output_sha256 == hashlib.sha256(output.read_bytes()).hexdigest()
     np.testing.assert_allclose(_decode(output), signal[:, 6:23], atol=1 / 32768, rtol=0)
     if packet_frames > 1:
-        assert output.read_bytes() == (tmp_path / "trim-1.wav").read_bytes()
+        # pytest gives every parametrized case a separate tmp_path, so
+        # build the one-frame reference in the SAME test directory.
+        reference = tmp_path / "trim-reference.wav"
+        process_wav_file(
+            source, reference, expected_source_sha256=source_sha,
+            config=WavProcessingConfig(
+                trim_silence_dbfs=-45, trim_pre_roll_frames=4,
+                trim_post_roll_frames=6, packet_frames=1,
+            ),
+        )
+        assert output.read_bytes() == reference.read_bytes()
 
 
 def test_trim_handles_clip_at_source_boundaries_without_padding(tmp_path):
@@ -96,7 +106,15 @@ def test_cosine_fade_uses_absolute_frames_and_stable_bytes(tmp_path, packet_fram
     assert report.fade_curve == "cosine"
     assert report.output_sha256 == hashlib.sha256(output.read_bytes()).hexdigest()
     if packet_frames > 1:
-        assert output.read_bytes() == (tmp_path / "cos-1.wav").read_bytes()
+        reference = tmp_path / "cos-reference.wav"
+        process_wav_file(
+            source, reference, expected_source_sha256=sha,
+            config=WavProcessingConfig(
+                fade_in_frames=5, fade_out_frames=7,
+                fade_curve="cosine", packet_frames=1,
+            ),
+        )
+        assert output.read_bytes() == reference.read_bytes()
 
 
 def test_overlapping_cosine_fades_multiply_instead_of_adding(tmp_path):
