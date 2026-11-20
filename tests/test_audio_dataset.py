@@ -227,3 +227,30 @@ def test_actual_decoded_audio_differences_are_allowed(tmp_path):
     assert len(loaded["validation"].labels) == 2
     assert report["decoded_audio_distinct_recordings"] == 2
     assert report["decoded_audio_duplicate_gate"] == "exact mono PCM at identical sample rate"
+
+
+@pytest.mark.parametrize("seconds", [0.1, 0.2, 0.255])
+def test_short_recordings_cannot_be_silently_zero_padded(tmp_path, seconds):
+    manifest, root = make_dataset(tmp_path, train_bytes=wav_pcm(seconds=seconds))
+    with pytest.raises(ManifestError, match="shorter than one complete training clip"):
+        load_reviewed_splits(manifest, root)
+
+
+def test_minimum_256ms_clip_is_supported_without_artificial_padding(tmp_path):
+    manifest, root = make_dataset(tmp_path, train_bytes=wav_pcm(seconds=0.256))
+    loaded, report = load_reviewed_splits(manifest, root, clips_per_asset=3)
+    assert loaded["train"].clips.shape == (3, 1, 2048)
+    assert report["complete_clips_without_zero_padding"] is True
+    # Every crop must retain audible content through the last 128 frames.
+    assert np.all(np.max(np.abs(loaded["train"].clips[:, :, -128:]), axis=(1, 2)) > 0.005)
+    assert loaded["validation"].clips.shape == (3, 1, 2048)
+
+
+def test_same_fingerprint_and_wav_samples_for_existing_complete_clips(tmp_path):
+    manifest, root = make_dataset(tmp_path)
+    a, ar = load_reviewed_splits(manifest, root, clips_per_asset=2)
+    b, br = load_reviewed_splits(manifest, root, clips_per_asset=2)
+    for split in ("train", "validation"):
+        np.testing.assert_array_equal(a[split].clips, b[split].clips)
+        assert a[split].fingerprint == b[split].fingerprint
+    assert ar["split_fingerprints"] == br["split_fingerprints"]

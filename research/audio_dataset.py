@@ -121,7 +121,13 @@ def _crop_clips(signal: np.ndarray, rate: int, per_asset: int) -> list[np.ndarra
     from scipy.signal import resample_poly
     import math as _math
 
-    segment_size = math.ceil(CLIP_FRAMES * rate / SAMPLE_RATE) + 128
+    required_source_frames = math.ceil(CLIP_FRAMES * rate / SAMPLE_RATE)
+    if len(signal) < required_source_frames:
+        raise ManifestError(
+            "WAV shorter than one complete training clip; "
+            "refusing zero-padded synthetic tail"
+        )
+    segment_size = required_source_frames + 128
     segments: list[np.ndarray] = []
     for index in range(per_asset):
         portion = (index + 0.5) / per_asset
@@ -129,9 +135,13 @@ def _crop_clips(signal: np.ndarray, rate: int, per_asset: int) -> list[np.ndarra
         cropped = signal[start:start + segment_size]
         factor = _math.gcd(SAMPLE_RATE, rate)
         resampled = resample_poly(cropped, SAMPLE_RATE // factor, rate // factor)
-        result = np.zeros(CLIP_FRAMES, dtype=np.float32)
-        frames = min(CLIP_FRAMES, len(resampled))
-        result[:frames] = resampled[:frames].astype(np.float32)
+        if len(resampled) < CLIP_FRAMES:
+            # Do not silently teach the neural baseline that a partial
+            # recording ends with artificial silence.
+            raise ManifestError("Resampled WAV contains fewer frames than a full training clip")
+        result = resampled[:CLIP_FRAMES].astype(np.float32, copy=True)
+        if not np.isfinite(result).all():
+            raise ManifestError("Resampled training clip contains non-finite audio")
         segments.append(result)
     return segments
 
@@ -222,6 +232,7 @@ def load_reviewed_splits(manifest: str | Path, audio_root: str | Path, *,
         "wav_bytes_verified": True,
         "decoded_audio_duplicate_gate": "exact mono PCM at identical sample rate",
         "decoded_audio_distinct_recordings": len(decoded_recordings),
+        "complete_clips_without_zero_padding": True,
         "human_rights_review_remains_required": True,
         "voice_detection_performed": False,
         "split_fingerprints": {split: value.fingerprint for split, value in loaded.items()},
