@@ -1,0 +1,85 @@
+name: Experimental DSP across NumPy versions (research only)
+
+on:
+  pull_request:
+    paths:
+      - 'research/fast_dsp_candidate.py'
+      - 'research/ambient_sine_candidate.py'
+      - 'research/heldout_dsp_probe.py'
+      - 'research/vectorized_convolution_candidate.py'
+      - 'research/candidate_reference.py'
+      - 'research/complete_dsp_candidate.py'
+      - 'research/stable_convolution_candidate.py'
+      - 'src/sonumio/engines/procedural.py'
+      - '.github/workflows/dsp-numpy-compat.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  numpy-compatibility:
+    name: NumPy ${{ matrix.numpy_version }} / ${{ matrix.runner }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 12
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { numpy_version: '1.26.4', runner: 'ubuntu-22.04' }
+          - { numpy_version: '2.2.6', runner: 'ubuntu-24.04' }
+          - { numpy_version: '2.4.6', runner: 'ubuntu-24.04' }
+    env:
+      OPENBLAS_NUM_THREADS: '2'
+      OMP_NUM_THREADS: '2'
+      MKL_NUM_THREADS: '2'
+      PYTHONHASHSEED: '0'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install supported explicit NumPy version and CPU research imports
+        run: |
+          python -m pip install -e '.[test]' "numpy==${{ matrix.numpy_version }}"
+          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+          python - <<'PY'
+          import numpy as np
+          assert np.__version__ == '${{ matrix.numpy_version }}'
+          print('NUMPY_RESEARCH_VERSION:', np.__version__)
+          PY
+      - name: Verify original DSP against its training oracle; compare fast source hashes
+        run: |
+          python -m research.vectorized_convolution_candidate --output /tmp/sonumio-versioned-source.json > /dev/null
+          python -m research.fast_dsp_candidate --scope full --output /tmp/sonumio-versioned-corpus.json > /dev/null
+          python - <<'PY'
+          import json
+          import numpy as np
+          from pathlib import Path
+          from research.fast_dsp_candidate import matches_scalar_reference, validate_report
+          from research.vectorized_convolution_candidate import validate_probe
+          source = json.loads(Path('/tmp/sonumio-versioned-source.json').read_text())
+          full = json.loads(Path('/tmp/sonumio-versioned-corpus.json').read_text())
+          validate_probe(source)
+          validate_report(full)
+          assert full['scope'] == 'full'
+          assert len(full['recordings']) == 84
+          assert full['splits']['train']['recordings'] == 42
+          assert full['splits']['validation']['recordings'] == 42
+          assert not full['original_generator_unchanged'] is False
+          assert not full['candidate_used_for_training']
+          assert not full['audio_files_saved'] and not full['model_weights_saved']
+          print('NUMPY_COMPAT_VERSION:', np.__version__)
+          print('NUMPY_COMPAT_CPU:', full['environment']['cpu_model'])
+          print('NUMPY_COMPAT_SOURCE_MATCH:', all(
+              row['matches_verified_scalar_full_reference']
+              for row in source['sources'].values()
+          ))
+          print('NUMPY_COMPAT_FAST_MATCH:', matches_scalar_reference(full))
+          for split, values in full['splits'].items():
+              print('NUMPY_COMPAT_24K_SHA:', split, values['fast_raw_sha256'])
+              print('NUMPY_COMPAT_8K_CROP_SHA:', split, values['fast_8k_crop_sha256'])
+              print('NUMPY_COMPAT_ORIGINAL_CROP_SHA:', split,
+                    values['original_8k_crop_sha256'])
+          print('Observation of NumPy version compatibility; not a published release.')
+          PY

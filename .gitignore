@@ -1,0 +1,23 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+*.egg-info/
+build/
+dist/
+.coverage
+.env
+outputs/
+models/
+checkpoints/
+*.safetensors
+*.pt
+*.pth
+
+# Local reviewed audio recordings must never be committed.
+recordings/
+private-data/
+# Web dev/build artifacts
+web/node_modules/
+web/dist/
+web/coverage/

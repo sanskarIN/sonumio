@@ -1,0 +1,101 @@
+name: Localize NumPy DSP drift on one CPU (research only)
+
+on:
+  pull_request:
+    paths:
+      - 'research/numpy_stage_probe.py'
+      - 'research/numpy_ambient_probe.py'
+      - 'research/ambient_sine_candidate.py'
+      - 'research/fast_dsp_candidate.py'
+      - 'research/vectorized_convolution_candidate.py'
+      - 'tests/test_numpy_stage_probe.py'
+      - 'tests/test_numpy_ambient_probe.py'
+      - 'tests/test_ambient_sine_candidate.py'
+      - 'src/sonumio/engines/procedural.py'
+      - '.github/workflows/dsp-numpy-stage-diff.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  compare-numpy-on-one-runner:
+    name: NumPy 1.26.4 versus 2.4.6 on the same Ubuntu runner
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    env:
+      OPENBLAS_NUM_THREADS: '2'
+      OMP_NUM_THREADS: '2'
+      MKL_NUM_THREADS: '2'
+      PYTHONHASHSEED: '0'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install isolated first-party research dependencies at NumPy 1.26
+        run: |
+          python -m pip install -e '.[test]' 'numpy==1.26.4'
+          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+          python -c "import numpy as np; assert np.__version__ == '1.26.4'"
+      - name: Run stage fingerprints with NumPy 1.26.4
+        run: |
+          python -m research.numpy_stage_probe --output /tmp/sonumio-stages-numpy126.json > /dev/null
+          python -m research.numpy_ambient_probe --output /tmp/sonumio-ambient-numpy126.json > /dev/null
+          python -m research.ambient_sine_candidate --output /tmp/sonumio-sine-numpy126.json > /dev/null
+      - name: Change only NumPy version in this runner environment
+        run: |
+          python -m pip install --force-reinstall --no-deps 'numpy==2.4.6'
+          python -c "import numpy as np; assert np.__version__ == '2.4.6'"
+      - name: Run stage fingerprints with NumPy 2.4.6 and report earliest differences
+        run: |
+          python -m research.numpy_stage_probe --output /tmp/sonumio-stages-numpy246.json > /dev/null
+          python -m research.numpy_ambient_probe --output /tmp/sonumio-ambient-numpy246.json > /dev/null
+          python -m research.ambient_sine_candidate --output /tmp/sonumio-sine-numpy246.json > /dev/null
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from research.numpy_stage_probe import compare_traces
+          a = json.loads(Path('/tmp/sonumio-stages-numpy126.json').read_text())
+          b = json.loads(Path('/tmp/sonumio-stages-numpy246.json').read_text())
+          comparison = compare_traces(a, b)
+          assert comparison['cases'] == 40
+          assert comparison['same_cpu_model'], 'Machine changed during version swap'
+          assert comparison['first_numpy_version'] == '1.26.4'
+          assert comparison['second_numpy_version'] == '2.4.6'
+          assert not a['audio_files_saved'] and not a['weights_saved']
+          assert not b['audio_files_saved'] and not b['weights_saved']
+          from research.numpy_ambient_probe import compare_probes as compare_ambient
+          x = json.loads(Path('/tmp/sonumio-ambient-numpy126.json').read_text())
+          y = json.loads(Path('/tmp/sonumio-ambient-numpy246.json').read_text())
+          expressions = compare_ambient(x, y)
+          assert expressions['same_cpu_model']
+          print('NUMPY_AMBIENT_FIRST_DIFFERENCE:', expressions['first_divergent_stage'])
+          print('NUMPY_AMBIENT_DIFFERENT_STAGES:', expressions['different_stages'])
+          print('NUMPY_AMBIENT_SAME_FINAL_BYTES:', expressions['same_final_drone_bytes'])
+          from research.ambient_sine_candidate import compare_probes as compare_sine
+          sine_first = json.loads(Path('/tmp/sonumio-sine-numpy126.json').read_text())
+          sine_second = json.loads(Path('/tmp/sonumio-sine-numpy246.json').read_text())
+          sine_result = compare_sine(sine_first, sine_second)
+          assert sine_result['same_cpu_model']
+          print('NUMPY_SINE_ORIGINAL_EQUAL:', sine_result['same_original_bytes'])
+          for method, equality in sine_result['candidate_hashes_match'].items():
+              print('NUMPY_SINE_CANDIDATE_EQUAL:', method, equality)
+              print('NUMPY_SINE_126_SHA:', method, sine_first['methods'][method]['sha256'])
+              print('NUMPY_SINE_246_SHA:', method, sine_second['methods'][method]['sha256'])
+              print('NUMPY_SINE_126_ERROR:', method, sine_first['methods'][method]['max_absolute_difference'])
+              print('NUMPY_SINE_246_ERROR:', method, sine_second['methods'][method]['max_absolute_difference'])
+
+          print('NUMPY_STAGE_MACHINE:', a['environment']['cpu_model'])
+          print('NUMPY_STAGE_IDENTICAL_RECORDINGS:', comparison['fully_identical_cases'])
+          print('NUMPY_STAGE_MATCHING_AGGREGATES:', comparison['matching_stages'])
+          print('NUMPY_STAGE_DIFFERING_AGGREGATES:', comparison['differing_stages'])
+          print('NUMPY_STAGE_PAIRED_DIFFERENCE_COUNTS:', comparison['paired_differing_recordings_by_stage'])
+          print('NUMPY_STAGE_ORDER_ONLY_DIFFERENCES:', comparison['aggregate_order_only_differences'])
+          for record, first_drift in comparison['first_divergent_stage_per_case'].items():
+              print('NUMPY_STAGE_FIRST_DIFFERENCE:', record, first_drift)
+          for name in sorted(set(a['stage_aggregate']) & set(b['stage_aggregate'])):
+              print('NUMPY_STAGE_REFERENCE_126:', name, a['stage_aggregate'][name]['sha256'])
+              print('NUMPY_STAGE_REFERENCE_246:', name, b['stage_aggregate'][name]['sha256'])
+          print('Same runner, same source recipe, two Python processes; numerical research only.')
+          PY

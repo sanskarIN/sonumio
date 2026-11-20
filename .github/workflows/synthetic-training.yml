@@ -1,0 +1,133 @@
+name: Private synthetic audio training (CPU)
+
+# Runs only on development PRs changing experimental model/data code.
+# All checkpoints remain in process; the sole written output is an ephemeral
+# metrics JSON on the runner. No actions/upload-artifact, release, cache of
+# weights, trained model files, or outside dataset downloads.
+on:
+  pull_request:
+    paths:
+      - 'research/**'
+      - 'src/sonumio/engines/procedural.py'
+      - '.github/workflows/synthetic-training.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sonumio-synthetic-training-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  extended-synthetic-training:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      OMP_NUM_THREADS: '2'
+      MKL_NUM_THREADS: '2'
+      OPENBLAS_NUM_THREADS: '2'
+      PYTHONHASHSEED: '0'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install project and CPU-only research dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e '.[test]' 'scipy>=1.12,<2'
+          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+      - name: Record independent exact training and evaluation data fingerprints
+        run: |
+          python -m research.data_reproducibility --output /tmp/sonumio-input-data.json > /dev/null
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          data = json.loads(Path('/tmp/sonumio-input-data.json').read_text(encoding='utf-8'))
+          assert data['no_audio_or_weights_saved']
+          assert data['splits']['train']['recording_count'] == 42
+          assert data['splits']['validation']['recording_count'] == 42
+          print('Independent train SHA256:', data['splits']['train']['dataset_fingerprint'])
+          print('Independent heldout SHA256:', data['splits']['validation']['dataset_fingerprint'])
+          for split in ('train', 'validation'):
+              print(split, 'source bucket 0.001 SHA256:', data['splits'][split]['bucket_0.001_sha256'])
+              print(split, 'source bucket 0.01 SHA256:', data['splits'][split]['bucket_0.01_sha256'])
+          print('Training runner CPU model:', data['environment']['cpu_model'])
+          print('Synthetic research input provenance audited before training.')
+          PY
+      - name: Trace original DSP source layers and numerical resampling
+        run: |
+          python -m research.dsp_pipeline_trace --output /tmp/sonumio-pipeline-trace.json > /dev/null
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          original = json.loads(Path('/tmp/sonumio-input-data.json').read_text(encoding='utf-8'))
+          traced = json.loads(Path('/tmp/sonumio-pipeline-trace.json').read_text(encoding='utf-8'))
+          index = {(r['split'], tuple(r['sources']), r['seed']): r for r in original['entries']}
+          assert len(traced['records']) == 84
+          assert traced['source_recipe_unchanged']
+          assert traced['matches_original_renderer_exactly']
+          assert not traced['audio_files_saved'] and not traced['model_weights_saved']
+          for row in traced['records']:
+              key = (row['split'], tuple(row['sources']), row['seed'])
+              assert row['stages']['cropped_8k']['sha256'] == index[key]['exact_sha256']
+          print('Training pipeline original DSP SHA256 agrees with independently rebuilt training manifest.')
+          print('Training pipeline CPU:', traced['environment']['cpu_model'])
+          for key, stat in traced['stage_aggregate'].items():
+              print('Stage exact SHA256:', key, stat['sha256'], 'count', stat['count'])
+          for category, group in traced['single_source_aggregate'].items():
+              for key, stat in group.items():
+                  if key.startswith('layer_') or key == 'cropped_8k':
+                      print('Single-source stage exact SHA256:', category, key, stat['sha256'])
+          PY
+      - name: Train paired epsilon and velocity models from identical weights and noise
+        run: |
+          python -m research.velocity_ablation \
+            --seeds 17,29,41 \
+            --codec-steps 128 --denoiser-steps 256 \
+            --schedule-steps 8 --channels 16 \
+            --output checkpoints/private-research/velocity-objective.json
+      - name: Verify coupled objective training and pre-clamp audio numerical guards
+        run: |
+          python - <<'PY'
+          import json, math
+          from pathlib import Path
+          root = Path('checkpoints')
+          path = root / 'private-research' / 'velocity-objective.json'
+          report = json.loads(path.read_text(encoding='utf-8'))
+          assert report['protocol'] == 'paired-epsilon-v-objective-cosine-v1'
+          assert report['seeds'] == [17, 29, 41]
+          manifest = json.loads(Path('/tmp/sonumio-input-data.json').read_text(encoding='utf-8'))
+          assert report['configuration']['train_fingerprint'] == manifest['splits']['train']['dataset_fingerprint']
+          assert report['configuration']['validation_fingerprint'] == manifest['splits']['validation']['dataset_fingerprint']
+          print('Training input SHA256 matches separately regenerated first-party corpus.')
+
+          assert report['configuration']['codec_steps'] == 128
+          assert report['configuration']['denoiser_steps_per_arm_objective'] == 256
+          assert report['configuration']['diffusion_steps'] == 8
+          assert report['configuration']['training_recordings'] == 42
+          assert report['configuration']['evaluation_recordings'] == 42
+          assert report['configuration']['schedule_profile'] == 'cosine_zero_terminal_v1'
+          assert report['paired_model_initialization']
+          assert report['paired_batch_timesteps_noise_and_condition_dropout']
+          assert not report['model_weights_written']
+          assert not report['audio_files_written']
+          assert not report['release_authorized']
+          assert len(report['per_seed']) == 3
+          assert [p for p in root.rglob('*') if p.is_file()] == [path]
+          for arm in ('raw', 'latent'):
+              measures = ('preclip_peak', 'preclip_rms',
+                          'preclip_out_of_range_fraction',
+                          'postclip_clipping_fraction', 'postclip_rms',
+                          'rain_vs_wind_mae')
+              if arm == 'latent':
+                  measures += ('codec_tanh_saturation_fraction',)
+              for metric in measures:
+                  stat = report['within_arm_difference_summary'][arm][metric]
+                  assert stat['count'] == 3 and math.isfinite(stat['mean'])
+                  print(arm, metric, 'v_minus_eps=', round(stat['mean'], 6),
+                        'decreased_seeds=', stat['negative_runs'], '/3',
+                        'increased_seeds=', stat['positive_runs'], '/3')
+          print('Paired v-objective experiment:', report['configuration_sha256'])
+          print('Only private numeric JSON was written: no WAVs, weights, or release artifacts.')
+          PY

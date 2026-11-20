@@ -1,0 +1,381 @@
+name: Independent DSP CPU pipeline trace (research only)
+
+# Runs on separate hosted CPU machines. It does NOT claim that a matching
+# coarse waveform hash establishes byte identity or a perceptual equivalence.
+# Numeric stage hashes are printed to logs, never uploaded as artifacts.
+on:
+  pull_request:
+    paths:
+      - 'research/dsp_pipeline_trace.py'
+      - 'research/dsp_convolution_probe.py'
+      - 'research/stable_convolution_candidate.py'
+      - 'research/full_convolution_candidate.py'
+      - 'research/complete_dsp_candidate.py'
+      - 'research/candidate_reference.py'
+      - 'research/vectorized_convolution_candidate.py'
+      - 'research/fast_dsp_candidate.py'
+      - 'research/ambient_sine_candidate.py'
+      - 'research/heldout_dsp_probe.py'
+      - 'benchmarks/dsp_three_way.py'
+      - 'tests/test_stable_convolution_candidate.py'
+      - 'tests/test_full_convolution_candidate.py'
+      - 'tests/test_complete_dsp_candidate.py'
+      - 'tests/test_candidate_reference.py'
+      - 'tests/test_vectorized_convolution_candidate.py'
+      - 'tests/test_fast_dsp_candidate.py'
+      - 'tests/test_ambient_sine_candidate.py'
+      - 'tests/test_heldout_dsp_probe.py'
+      - 'tests/test_dsp_three_way.py'
+      - 'research/data_reproducibility.py'
+      - 'research/latent_audio.py'
+      - 'research/wave_diffusion.py'
+      - 'src/sonumio/engines/procedural.py'
+      - '.github/workflows/dsp-trace-matrix.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  cpu-stage-trace:
+    name: CPU stage trace ${{ matrix.instance }} / ${{ matrix.runner }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { instance: 1, runner: ubuntu-24.04 }
+          - { instance: 2, runner: ubuntu-24.04 }
+          - { instance: 3, runner: ubuntu-22.04 }
+          - { instance: 4, runner: ubuntu-22.04 }
+    env:
+      OMP_NUM_THREADS: '2'
+      MKL_NUM_THREADS: '2'
+      OPENBLAS_NUM_THREADS: '2'
+      PYTHONHASHSEED: '0'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install first-party DSP and CPU-only test dependencies
+        run: |
+          python -m pip install -e '.[test]'
+          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+      - name: Trace original DSP twice in independent processes (no audio files)
+        run: |
+          python -m research.dsp_pipeline_trace --output /tmp/sonumio-stage-a.json > /dev/null
+          python -m research.dsp_pipeline_trace --output /tmp/sonumio-stage-b.json > /dev/null
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from research.dsp_pipeline_trace import compare_traces
+
+          a = json.loads(Path('/tmp/sonumio-stage-a.json').read_text(encoding='utf-8'))
+          b = json.loads(Path('/tmp/sonumio-stage-b.json').read_text(encoding='utf-8'))
+          compared = compare_traces(a, b)
+          assert compared['recordings_compared'] == 84
+          assert compared['exact_stage_arrays_match']
+          assert a['matches_original_renderer_exactly']
+          assert not a['audio_files_saved'] and not a['model_weights_saved']
+          print('CPU_TRACE_INSTANCE:', '${{ matrix.instance }}')
+          print('CPU_TRACE_RUNNER_IMAGE:', '${{ matrix.runner }}')
+          print('CPU_TRACE_MODEL:', a['environment']['cpu_model'])
+          print('CPU_TRACE_NUMPY:', a['environment']['numpy'])
+          print('CPU_TRACE_PYTORCH:', a['environment']['torch'])
+          print('CPU_TRACE_SAME_HOST_EXACT:', compared['exact_stage_arrays_match'])
+          for name in sorted(a['stage_aggregate']):
+              entry = a['stage_aggregate'][name]
+              print('CPU_TRACE_STAGE:', name, entry['sha256'])
+              print('CPU_TRACE_STAGE_BUCKET_0.001:', name,
+                    entry['bucket_0.001_sha256'])
+          for category in sorted(a['single_source_aggregate']):
+              subset = a['single_source_aggregate'][category]
+              for name in sorted(subset):
+                  if name.startswith('layer_') or name == 'cropped_8k':
+                      print('CPU_TRACE_SOURCE:', category, name, subset[name]['sha256'])
+          print('All stage digest comparisons are numerical diagnostics only.')
+          PY
+      - name: Isolate original NumPy source convolutions and scalar references
+        run: |
+          python -m research.dsp_convolution_probe --output /tmp/sonumio-conv-a.json > /dev/null
+          python -m research.dsp_convolution_probe --output /tmp/sonumio-conv-b.json > /dev/null
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from research.dsp_convolution_probe import compare_probes
+          a = json.loads(Path('/tmp/sonumio-conv-a.json').read_text(encoding='utf-8'))
+          b = json.loads(Path('/tmp/sonumio-conv-b.json').read_text(encoding='utf-8'))
+          same = compare_probes(a, b)
+          assert same['all_exact_stages_match']
+          assert not a['audio_files_saved'] and not a['model_weights_saved']
+          print('CPU_CONV_INSTANCE:', '${{ matrix.instance }}')
+          print('CPU_CONV_HOST:', a['environment']['cpu_model'])
+          print('CPU_CONV_EXACT_SAME_HOST:', same['all_exact_stages_match'])
+          for source, stages in a['source_stage_aggregate'].items():
+              for name, metrics in stages.items():
+                  print('CPU_CONV_STAGE:', source, name, metrics['sha256'])
+          for source in ('rain', 'thunder', 'wind', 'water'):
+              rows = [row for row in a['recordings'] if row['source'] == source]
+              print('CPU_CONV_SCALAR_DIFF_MAX:', source,
+                    max(row['max_selected_fsum_difference'] for row in rows))
+          PY
+
+      - name: Gate scalar convolution known-byte reference vectors
+        run: python -m pytest -q tests/test_stable_convolution_candidate.py -k golden_float32_sample_bytes
+      - name: Cross-check scalar convolution candidate in two isolated processes
+        run: |
+          python -m research.stable_convolution_candidate --output /tmp/sonumio-candidate-first.json > /dev/null
+          python -m research.stable_convolution_candidate --output /tmp/sonumio-candidate-second.json > /dev/null
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from research.stable_convolution_candidate import compare_probes
+          first = json.loads(Path('/tmp/sonumio-candidate-first.json').read_text(encoding='utf-8'))
+          second = json.loads(Path('/tmp/sonumio-candidate-second.json').read_text(encoding='utf-8'))
+          result = compare_probes(first, second)
+          assert result['cases_compared'] == 16
+          assert result['same_input_and_kernel_hashes']
+          assert result['candidate_sampled_hashes_equal']
+          assert result['original_sampled_hashes_equal']
+          assert first['audio_files_saved'] is False and first['weights_saved'] is False
+          print('CANDIDATE_CPU_MODEL:', first['environment']['cpu_model'])
+          print('CANDIDATE_SAME_HOST_SAMPLED_EXACT:', result['candidate_sampled_hashes_equal'])
+          for source, row in first['source_aggregate'].items():
+              print('CANDIDATE_RESEARCH_SCALAR_HASH:', source, row['candidate_sha256'])
+              print('CANDIDATE_ORIGINAL_NUMPY_SELECTED_HASH:', source, row['original_selected_sha256'])
+              print('CANDIDATE_ORIGINAL_NUMPY_FULL_HASH:', source, row['original_full_sha256'])
+              print('CANDIDATE_MAX_SELECTED_ABS_DIFF:', source, row['max_selected_absolute_error'])
+          print('Samples-only diagnostics; do not claim global waveform or model quality.')
+          PY
+
+      - name: Reconstruct complete scalar source convolutions twice (no WAVs)
+        run: |
+          python -m research.full_convolution_candidate --output /tmp/sonumio-full-first.json > /dev/null
+          python -m research.full_convolution_candidate --output /tmp/sonumio-full-second.json > /dev/null
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from research.full_convolution_candidate import compare_full_probes
+          a = json.loads(Path('/tmp/sonumio-full-first.json').read_text(encoding='utf-8'))
+          b = json.loads(Path('/tmp/sonumio-full-second.json').read_text(encoding='utf-8'))
+          compared = compare_full_probes(a, b)
+          assert compared['cases'] == 16
+          assert compared['same_inputs_and_kernels']
+          assert compared['candidate_full_hashes_equal']
+          assert compared['original_full_hashes_equal']
+          assert a['full_convolution_evaluated'] is True
+          assert not a['audio_files_saved'] and not a['model_weights_saved']
+          print('FULL_SCALAR_CPU:', a['environment']['cpu_model'])
+          print('FULL_SCALAR_SAME_HOST_ALL_CASES:', compared['candidate_full_hashes_equal'])
+          for source, summary in a['source_aggregate'].items():
+              print('FULL_SCALAR_CANDIDATE_HASH:', source, summary['candidate_full_sha256'])
+              print('FULL_SCALAR_ORIGINAL_NUMPY_HASH:', source, summary['original_full_sha256'])
+              print('FULL_SCALAR_MAX_ABS_ERROR:', source, summary['max_full_output_absolute_error'])
+              print('FULL_SCALAR_CHANGED_FRAMES:', source, summary['different_full_output_float32_values'])
+          print('Full source convolutions only, not complete post-mix training audio.')
+          PY
+
+      - name: Compare isolated 24k-to-8k complete DSP candidate across independent processes
+        run: |
+          python -m research.complete_dsp_candidate --scope smoke --output /tmp/sonumio-complete-a.json > /dev/null
+          python -m research.complete_dsp_candidate --scope smoke --output /tmp/sonumio-complete-b.json > /dev/null
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from research.complete_dsp_candidate import compare_reports
+          a = json.loads(Path('/tmp/sonumio-complete-a.json').read_text(encoding='utf-8'))
+          b = json.loads(Path('/tmp/sonumio-complete-b.json').read_text(encoding='utf-8'))
+          result = compare_reports(a, b)
+          assert result['recordings'] == 40
+          assert result['candidate_24k_exact'] and result['candidate_8k_exact']
+          assert result['candidate_crops_exact'] and result['original_crops_exact']
+          assert not a['audio_files_saved'] and not a['model_weights_saved']
+          assert not a['candidate_used_for_neural_training']
+          assert not a['original_source_recipe_modified']
+          print('COMPLETE_DSP_CPU:', a['environment']['cpu_model'])
+          print('COMPLETE_DSP_NUMPY:', a['environment']['numpy'])
+          print('COMPLETE_DSP_SCOPE:', a['scope'])
+          print('COMPLETE_DSP_SAME_HOST_24K:', result['candidate_24k_exact'])
+          print('COMPLETE_DSP_SAME_HOST_8K:', result['candidate_8k_exact'])
+          print('COMPLETE_DSP_SAME_HOST_CROPS:', result['candidate_crops_exact'])
+          for split, data in a['splits'].items():
+              print('COMPLETE_DSP_CANDIDATE_CROP_SHA:', split, data['candidate_8k_dataset_sha256'])
+              print('COMPLETE_DSP_LEGACY_CROP_SHA:', split, data['original_8k_dataset_sha256'])
+              print('COMPLETE_DSP_CANDIDATE_RAW_SHA:', split, data['candidate_raw_sha256'])
+              print('COMPLETE_DSP_LEGACY_RAW_SHA:', split, data['original_raw_sha256'])
+              print('COMPLETE_DSP_MAX_24K_ERROR:', split, data['max_24k_absolute_error'])
+              print('COMPLETE_DSP_MAX_CROP_ERROR:', split, data['max_crop_absolute_error'])
+              print('COMPLETE_DSP_RECORDINGS:', split, data['recordings'])
+          print('Pilot scope 40/84 recordings; synthetic first-party research ONLY.')
+          PY
+
+      - name: Complete all 84 recording crop fingerprints (one research-only run)
+        run: |
+          python -m research.complete_dsp_candidate --scope full --output /tmp/sonumio-complete-84.json > /dev/null
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from research.complete_dsp_candidate import validate_report
+          data = json.loads(Path('/tmp/sonumio-complete-84.json').read_text(encoding='utf-8'))
+          validate_report(data)
+          assert data['scope'] == 'full'
+          assert len(data['recordings']) == 84
+          assert data['splits']['train']['recordings'] == 42
+          assert data['splits']['validation']['recordings'] == 42
+          assert not data['original_source_recipe_modified']
+          assert not data['candidate_used_for_neural_training']
+          assert not data['audio_files_saved'] and not data['model_weights_saved']
+          print('COMPLETE_84_CPU:', data['environment']['cpu_model'])
+          print('COMPLETE_84_NUMPY:', data['environment']['numpy'])
+          print('COMPLETE_84_PROCESSED:', len(data['recordings']))
+          print('COMPLETE_84_ELAPSED_SECONDS:', round(data['elapsed_seconds'], 3))
+          for split, info in data['splits'].items():
+              print('COMPLETE_84_CANDIDATE_CROP_SHA:', split, info['candidate_8k_dataset_sha256'])
+              print('COMPLETE_84_LEGACY_CROP_SHA:', split, info['original_8k_dataset_sha256'])
+              print('COMPLETE_84_CANDIDATE_24K_SHA:', split, info['candidate_raw_sha256'])
+              print('COMPLETE_84_LEGACY_24K_SHA:', split, info['original_raw_sha256'])
+              print('COMPLETE_84_MAX_24K_ERROR:', split, info['max_24k_absolute_error'])
+              print('COMPLETE_84_MAX_8K_CROP_ERROR:', split, info['max_crop_absolute_error'])
+          print('These are source-derived synthetic diagnostics, not model-training data.')
+          PY
+
+      - name: Enforce independently verified 84-recording candidate SHA reference
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from research.candidate_reference import verify_reference
+          path = Path('/tmp/sonumio-complete-84.json')
+          report = json.loads(path.read_text(encoding='utf-8'))
+          result = verify_reference(report)
+          assert result['recordings_checked'] == 84
+          assert result['candidate_full_corpus_matches_reference']
+          assert not result['original_numpy_hash_pinned']
+          assert result['no_audio_or_weights_published']
+          print('CANDIDATE_84_REFERENCE_MATCH:', True)
+          print('CANDIDATE_84_REFERENCE_CPU:', report['environment']['cpu_model'])
+          print('CANDIDATE_84_REFERENCE_WORKFLOW:', result['source_workflow'])
+          print('Candidate only: original NumPy SHA is host-sensitive by design.')
+          PY
+
+      - name: Probe faster float64 vectorized convolution without adopting it
+        run: |
+          python -m research.vectorized_convolution_candidate --output /tmp/sonumio-vectorized-a.json > /dev/null
+          python -m research.vectorized_convolution_candidate --output /tmp/sonumio-vectorized-b.json > /dev/null
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from research.vectorized_convolution_candidate import compare_probes
+          a = json.loads(Path('/tmp/sonumio-vectorized-a.json').read_text(encoding='utf-8'))
+          b = json.loads(Path('/tmp/sonumio-vectorized-b.json').read_text(encoding='utf-8'))
+          result = compare_probes(a, b)
+          assert result['cases'] == 16
+          assert result['identical_source_inputs_and_kernels']
+          assert result['identical_vectorized_full_bytes']
+          assert not a['vectorized_candidate_for_training']
+          assert not a['audio_files_saved'] and not a['model_weights_saved']
+          print('VECTOR_FLOAT64_CPU:', a['environment']['cpu_model'])
+          print('VECTOR_FLOAT64_NUMPY:', a['environment']['numpy'])
+          print('VECTOR_FLOAT64_SAME_HOST:', result['identical_vectorized_full_bytes'])
+          print('VECTOR_FLOAT64_EQUALS_SCALAR_ALL_SOURCES:',
+                result['matches_scalar_reference_all_sources'])
+          assert result['matches_scalar_reference_all_sources'], 'Vectorized source SHA differs from verified scalar reference'
+          for name, row in a['sources'].items():
+              print('VECTOR_FLOAT64_SOURCE_SHA:', name, row['vectorized_full_sha256'])
+              print('VECTOR_FLOAT64_EQUALS_VERIFIED_SCALAR:', name,
+                    row['matches_verified_scalar_full_reference'])
+              print('VECTOR_FLOAT64_SELECTED_ERROR_MAX:', name,
+                    row['max_selected_absolute_error'])
+              print('VECTOR_FLOAT64_MEDIAN_CONV_SECONDS:', name,
+                    row['median_vectorized_seconds'])
+          print('No promotion to DSP or neural training; these are numerical research results.')
+          PY
+
+      - name: Evaluate complete fast candidate on all 84 recordings (without adoption)
+        run: |
+          python -m research.fast_dsp_candidate --scope full --output /tmp/sonumio-fast-first.json > /dev/null
+          python -m research.fast_dsp_candidate --scope full --output /tmp/sonumio-fast-second.json > /dev/null
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from research.fast_dsp_candidate import compare_reports, matches_scalar_reference
+          a = json.loads(Path('/tmp/sonumio-fast-first.json').read_text(encoding='utf-8'))
+          b = json.loads(Path('/tmp/sonumio-fast-second.json').read_text(encoding='utf-8'))
+          compared = compare_reports(a, b)
+          assert compared['recordings'] == 84
+          assert compared['identical_candidate_raw_sha']
+          assert compared['identical_candidate_cropped_sha']
+          assert compared['identical_original_raw_sha']
+          assert not a['candidate_used_for_training']
+          assert not a['audio_files_saved'] and not a['model_weights_saved']
+          print('FAST_DSP_CPU:', a['environment']['cpu_model'])
+          print('FAST_DSP_NUMPY:', a['environment']['numpy'])
+          print('FAST_DSP_SCOPE:', a['scope'])
+          print('FAST_DSP_SAME_HOST_24K:', compared['identical_candidate_raw_sha'])
+          print('FAST_DSP_SAME_HOST_8K:', compared['identical_candidate_cropped_sha'])
+          print('FAST_DSP_EQUALS_SCALAR_84:', matches_scalar_reference(a))
+          assert matches_scalar_reference(a) and matches_scalar_reference(b), 'Fast 84-case waveform SHA drifted from verified scalar corpus'
+          for split, values in a['splits'].items():
+              print('FAST_DSP_24K_SHA:', split, values['fast_raw_sha256'])
+              print('FAST_DSP_8K_CROP_SHA:', split, values['fast_8k_crop_sha256'])
+              print('FAST_DSP_ORIGINAL_SHA:', split, values['original_8k_crop_sha256'])
+              print('FAST_DSP_MAX_24K_ERROR:', split, values['max_24k_abs_error'])
+              print('FAST_DSP_MAX_8K_CROP_ERROR:', split, values['max_8k_crop_abs_error'])
+              print('FAST_DSP_MEDIAN_24K_S:', split, values['median_fast_24k_seconds'])
+          print('Investigation only; fast candidate is not enabled in training.')
+          PY
+
+      - name: Fingerprint 105 previously unseen fast DSP source/seed combinations
+        run: |
+          python -m research.heldout_dsp_probe --output /tmp/sonumio-heldout-first.json > /dev/null
+          python -m research.heldout_dsp_probe --output /tmp/sonumio-heldout-second.json > /dev/null
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from research.heldout_dsp_probe import compare_reports, verify_heldout_reference
+          a = json.loads(Path('/tmp/sonumio-heldout-first.json').read_text(encoding='utf-8'))
+          b = json.loads(Path('/tmp/sonumio-heldout-second.json').read_text(encoding='utf-8'))
+          result = compare_reports(a, b)
+          assert result['distinct_recordings'] == 105
+          assert result['identical_fast_24k_hashes']
+          assert result['identical_fast_8k_crop_hashes']
+          assert result['identical_original_8k_crop_hashes']
+          checked = verify_heldout_reference(a)
+          assert checked['recordings'] == 105 and checked['matched_verified_sha256']
+          assert verify_heldout_reference(b)['matched_verified_sha256']
+          print('HELDOUT_DSP_GOLDEN_REFERENCE:', True)
+          assert not a['candidate_used_for_neural_training']
+          assert not a['audio_files_saved'] and not a['model_weights_saved']
+          print('HELDOUT_DSP_CPU:', a['environment']['cpu_model'])
+          print('HELDOUT_DSP_NUMPY:', a['environment']['numpy'])
+          print('HELDOUT_DSP_SAME_HOST:', result['identical_fast_8k_crop_hashes'])
+          print('HELDOUT_DSP_COUNT:', len(a['recordings']))
+          for seed, item in a['by_seed'].items():
+              print('HELDOUT_DSP_24K_SHA:', seed, item['fast_24k_sha256'])
+              print('HELDOUT_DSP_8K_CROP_SHA:', seed, item['fast_8k_crop_sha256'])
+              print('HELDOUT_DSP_ORIGINAL_8K_SHA:', seed, item['original_8k_crop_sha256'])
+              print('HELDOUT_DSP_MAX_CROP_ERROR:', seed, item['max_crop_abs_error'])
+          print('Held-out source seeds are NOT training/evaluation model-data splits.')
+          PY
+
+      - name: Probe ambient float64 and Python scalar sine candidates (hashes only)
+        run: |
+          python -m research.ambient_sine_candidate --output /tmp/sonumio-ambient-sine.json > /dev/null
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from research.ambient_sine_candidate import validate_probe
+          data = json.loads(Path('/tmp/sonumio-ambient-sine.json').read_text())
+          validate_probe(data)
+          assert data['original_source_unchanged'] and not data['audio_files_saved']
+          assert not data['model_weights_saved'] and not data['candidate_used_for_training']
+          print('AMBIENT_SINE_CPU:', data['environment']['cpu_model'])
+          print('AMBIENT_SINE_NUMPY:', data['environment']['numpy'])
+          print('AMBIENT_SINE_ORIGINAL_SHA:', data['methods']['numpy_float64']['original_sha256'])
+          for name, result in data['methods'].items():
+              print('AMBIENT_SINE_METHOD_SHA:', name, result['sha256'])
+              print('AMBIENT_SINE_METHOD_MAX_ERROR:', name, result['max_absolute_difference'])
+              print('AMBIENT_SINE_METHOD_SECONDS:', name, result['elapsed_seconds'])
+          print('New ambient sine research only, no switch to inference/training.')
+          PY

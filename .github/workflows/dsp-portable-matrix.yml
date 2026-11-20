@@ -1,0 +1,240 @@
+name: Portable ambient full DSP numerical experiment (research only)
+
+on:
+  pull_request:
+    paths:
+      - 'research/portable_dsp_candidate.py'
+      - 'research/portable_seed_stage_probe.py'
+      - 'research/forest_sine_probe.py'
+      - 'research/portable_forest_candidate.py'
+      - 'research/portable_forest_reference.py'
+      - 'research/portable_dsp_reference.py'
+      - 'research/ambient_sine_candidate.py'
+      - 'research/fast_dsp_candidate.py'
+      - 'tests/test_portable_dsp_candidate.py'
+      - 'tests/test_portable_seed_stage_probe.py'
+      - 'tests/test_forest_sine_probe.py'
+      - 'tests/test_portable_forest_candidate.py'
+      - 'tests/test_portable_forest_reference.py'
+      - 'tests/test_portable_dsp_reference.py'
+      - '.github/workflows/dsp-portable-matrix.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  portable-four-cpu:
+    name: Full 189-case variants / ${{ matrix.id }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { id: 'cpu-ubuntu24-a', runner: 'ubuntu-24.04' }
+          - { id: 'cpu-ubuntu24-b', runner: 'ubuntu-24.04' }
+          - { id: 'cpu-ubuntu22-a', runner: 'ubuntu-22.04' }
+          - { id: 'cpu-ubuntu22-b', runner: 'ubuntu-22.04' }
+    env:
+      OPENBLAS_NUM_THREADS: '2'
+      OMP_NUM_THREADS: '2'
+      MKL_NUM_THREADS: '2'
+      PYTHONHASHSEED: '0'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install exact study dependencies
+        run: |
+          python -m pip install -e '.[test]' 'numpy==2.4.6'
+          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+      - name: Rebuild original and held-out first-party corpus under both ambient hypotheses
+        run: |
+          python -m research.portable_dsp_candidate --output /tmp/sonumio-portable-research.json > /dev/null
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from research.portable_dsp_candidate import validate_report, METHODS
+          data = json.loads(Path('/tmp/sonumio-portable-research.json').read_text())
+          validate_report(data)
+          from research.portable_dsp_reference import verify_reference
+          checked = verify_reference(data)
+          assert checked['total_candidate_recordings'] == 378
+          assert checked['all_candidate_hashes_match_four_cpu_reference']
+          assert len(data['recordings']) == 378
+          assert data['case_count_per_method'] == 189
+          assert not data['original_renderer_modified']
+          assert not data['original_neural_data_modified']
+          assert not data['portable_candidate_used_for_training']
+          assert not data['audio_files_saved'] and not data['model_weights_saved']
+          print('PORTABLE_DSP_REFERENCE_MATCH:', checked['all_candidate_hashes_match_four_cpu_reference'])
+          print('PORTABLE_DSP_REFERENCE_RUN:', checked['reference_workflow'])
+          print('PORTABLE_DSP_CPU:', data['environment']['cpu_model'])
+          print('PORTABLE_DSP_NUMPY:', data['environment']['numpy'])
+          for method in METHODS:
+              for split, values in data['splits'][method].items():
+                  print('PORTABLE_DSP_24K_SHA:', method, split, values['portable_24k_sha256'])
+                  print('PORTABLE_DSP_8K_CROP_SHA:', method, split, values['portable_8k_crop_sha256'])
+                  print('PORTABLE_DSP_LEGACY_CROP_SHA:', method, split, values['legacy_8k_crop_sha256'])
+                  print('PORTABLE_DSP_MAX_8K_CROP_ERROR:', method, split, values['max_8k_crop_absolute_error'])
+                  print('PORTABLE_DSP_MEDIAN_RENDER_S:', method, split, values['median_24k_render_seconds'])
+          print('Numerical research candidate only: NO production/training substitution.')
+          PY
+
+
+      - name: Test both forest-aware complete DSP variants on this independent CPU
+        run: |
+          python -m research.portable_forest_candidate --output /tmp/sonumio-forest-aware.json > /dev/null
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from research.portable_forest_candidate import validate_report, METHODS
+          from research.portable_forest_reference import verify_reference as verify_forest_reference
+          data = json.loads(Path('/tmp/sonumio-forest-aware.json').read_text())
+          validate_report(data)
+          assert len(data['recordings']) == 378
+          assert not data['original_generator_modified']
+          assert not data['original_neural_data_modified']
+          assert not data['candidate_used_for_neural_training']
+          assert not data['audio_files_saved'] and not data['model_weights_saved']
+          checked = verify_forest_reference(data)
+          assert checked['matched_verified_full_raw_and_crop_reference']
+          print('FOREST_AWARE_GOLDEN_REFERENCE:', True)
+          print('FOREST_AWARE_CPU:', data['environment']['cpu_model'])
+          print('FOREST_AWARE_NUMPY:', data['environment']['numpy'])
+          for method in METHODS:
+              for split, values in data['splits'][method].items():
+                  print('FOREST_AWARE_24K_SHA:', method, split, values['candidate_24k_sha256'])
+                  print('FOREST_AWARE_8K_SHA:', method, split, values['candidate_8k_crop_sha256'])
+                  print('FOREST_AWARE_PREVIOUS_24K_SHA:', method, split, values['previous_portable_24k_sha256'])
+                  print('FOREST_AWARE_8K_MAX_ERROR:', method, split, values['max_8k_crop_abs_error'])
+          print('New forest sine candidate remains completely outside training.')
+          PY
+
+  same-cpu-two-numpy-versions:
+    name: One CPU NumPy 1.26.4 vs 2.4.6 / 378 waveforms
+    runs-on: ubuntu-24.04
+    timeout-minutes: 18
+    env:
+      OPENBLAS_NUM_THREADS: '2'
+      OMP_NUM_THREADS: '2'
+      MKL_NUM_THREADS: '2'
+      PYTHONHASHSEED: '0'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install NumPy 1.26.4 and CPU research tools
+        run: |
+          python -m pip install -e '.[test]' 'numpy==1.26.4'
+          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+          python -c "import numpy as np; assert np.__version__ == '1.26.4'"
+      - name: Render numerical SHA study under NumPy 1.26.4
+        run: |
+          python -m research.portable_dsp_candidate --output /tmp/sonumio-portable-126.json > /dev/null
+          python -m research.portable_seed_stage_probe --output /tmp/sonumio-portable-stages-126.json > /dev/null
+          python -m research.forest_sine_probe --output /tmp/sonumio-forest-126.json > /dev/null
+          python -m research.portable_forest_candidate --output /tmp/sonumio-forest-aware-126.json > /dev/null
+      - name: Swap only NumPy on the same runner
+        run: |
+          python -m pip install --force-reinstall --no-deps numpy==2.4.6
+          python -c "import numpy as np; assert np.__version__ == '2.4.6'"
+      - name: Compare independent full-corpus Python process under NumPy 2.4.6
+        run: |
+          python -m research.portable_dsp_candidate --output /tmp/sonumio-portable-246.json > /dev/null
+          python -m research.portable_seed_stage_probe --output /tmp/sonumio-portable-stages-246.json > /dev/null
+          python -m research.forest_sine_probe --output /tmp/sonumio-forest-246.json > /dev/null
+          python -m research.portable_forest_candidate --output /tmp/sonumio-forest-aware-246.json > /dev/null
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from research.portable_dsp_candidate import compare_reports, METHODS
+          old = json.loads(Path('/tmp/sonumio-portable-126.json').read_text())
+          new = json.loads(Path('/tmp/sonumio-portable-246.json').read_text())
+          result = compare_reports(old, new)
+          assert result['cases_per_method'] == 189
+          assert result['same_cpu_model']
+          assert result['numpy_versions'] == ['1.26.4','2.4.6']
+          from research.portable_seed_stage_probe import compare_reports as compare_seed_stages
+          old_stages = json.loads(Path('/tmp/sonumio-portable-stages-126.json').read_text())
+          new_stages = json.loads(Path('/tmp/sonumio-portable-stages-246.json').read_text())
+          stage_result = compare_seed_stages(old_stages, new_stages)
+          assert stage_result['same_cpu_model']
+          assert stage_result['total_method_records'] == 210
+          print('PORTABLE_SEED_STAGE_CPU:', old_stages['environment']['cpu_model'])
+          print('PORTABLE_SEED_STAGE_FULLY_IDENTICAL:', stage_result['fully_matching_method_records'])
+          from research.forest_sine_probe import compare_reports as compare_forest
+          forest_before = json.loads(Path('/tmp/sonumio-forest-126.json').read_text())
+          forest_after = json.loads(Path('/tmp/sonumio-forest-246.json').read_text())
+          forest_result = compare_forest(forest_before, forest_after)
+          assert forest_result['same_cpu_model'] and forest_result['records'] == 36
+          print('FOREST_NUMPY_VERSION_CPU:', forest_before['environment']['cpu_model'])
+          for seed, counts in forest_result['by_seed'].items():
+              print('FOREST_NUMPY_VERSION_SEED:', seed, counts)
+          for row in forest_result['first_differences']:
+              print('FOREST_NUMPY_VERSION_FIRST_DIFFERENCE:', row)
+          print('FOREST_NUMPY_VERSION_TOTAL_CONTEXT_DIFFS:', len(forest_result['first_differences']))
+          from research.portable_forest_candidate import compare_reports as compare_forest_aware
+          before_forest_aware = json.loads(Path('/tmp/sonumio-forest-aware-126.json').read_text())
+          after_forest_aware = json.loads(Path('/tmp/sonumio-forest-aware-246.json').read_text())
+          forest_aware = compare_forest_aware(before_forest_aware, after_forest_aware)
+          assert forest_aware['same_cpu_model'] and forest_aware['cases_per_method'] == 189
+          print('FOREST_AWARE_VERSION_CPU:', before_forest_aware['environment']['cpu_model'])
+          from research.portable_forest_reference import verify_reference as verify_forest_reference
+          assert forest_aware['all_candidate_bytes_match'], (
+              'Forest-aware 189-case source/crop bytes changed across NumPy versions'
+          )
+          assert verify_forest_reference(before_forest_aware)['matched_verified_full_raw_and_crop_reference']
+          assert verify_forest_reference(after_forest_aware)['matched_verified_full_raw_and_crop_reference']
+          print('FOREST_AWARE_CROSS_NUMPY_GOLDEN_REFERENCE:', True)
+          print('FOREST_AWARE_VERSION_MATCH:', forest_aware['all_candidate_bytes_match'])
+          print('FOREST_AWARE_PREVIOUS_VERSION_MATCH:', forest_aware['previous_candidate_hashes_match'])
+          for method, splits in forest_aware['by_method_split'].items():
+              for split, stats in splits.items():
+                  print('FOREST_AWARE_VERSION_SPLIT:', method, split, stats)
+                  print('FOREST_AWARE_VERSION_126_SHA:', method, split,
+                        before_forest_aware['splits'][method][split]['candidate_8k_crop_sha256'])
+                  print('FOREST_AWARE_VERSION_246_SHA:', method, split,
+                        after_forest_aware['splits'][method][split]['candidate_8k_crop_sha256'])
+          print('This is a numerical result, not permission to replace original DSP.')
+
+          for method, seed_counts in stage_result['by_method_seed'].items():
+              for seed, counts in seed_counts.items():
+                  print('PORTABLE_SEED_STAGE_SEED:', method, seed, counts)
+          for case in stage_result['first_differing_cases_capped_at_32']:
+              print('PORTABLE_SEED_STAGE_FIRST_DIFFERENCE:', case)
+          print('PORTABLE_VERSION_CPU:', old['environment']['cpu_model'])
+          print('PORTABLE_VERSION_EQUAL_24K:', result['portable_24k_exact'])
+          print('PORTABLE_VERSION_EQUAL_CROPS:', result['portable_final_crops_exact'])
+          print('PORTABLE_VERSION_LEGACY_CROPS_EQUAL:', result['legacy_crops_exact'])
+          assert result['original_84_portable_exact'], (
+              'The verified original 84-case train/validation fingerprints drifted'
+          )
+          print('PORTABLE_VERSION_ORIGINAL_84_EXACT:', result['original_84_portable_exact'])
+          for method, splits in result['discrepancies_by_method_split'].items():
+              for split, values in splits.items():
+                  print('PORTABLE_VERSION_DIFFERENCES:', method, split,
+                        'source_cases', values['cases'],
+                        '24k', values['different_24k'],
+                        '8k_crop', values['different_8k_crop'],
+                        'legacy_crop', values['different_legacy_crop'])
+                  print('PORTABLE_VERSION_24K_BY_SEED:', method, split,
+                        values['by_seed_24k'])
+                  print('PORTABLE_VERSION_8K_BY_SEED:', method, split,
+                        values['by_seed_8k_crop'])
+                  for case in values['first_different_cases']:
+                      print('PORTABLE_VERSION_DIFFERENT_CASE:', method, split, case)
+
+          for method in METHODS:
+              for split, values in new['splits'][method].items():
+                  print('PORTABLE_VERSION_246_24K_SHA:', method, split, values['portable_24k_sha256'])
+                  print('PORTABLE_VERSION_246_8K_SHA:', method, split, values['portable_8k_crop_sha256'])
+                  print('PORTABLE_VERSION_126_24K_SHA:', method, split, old['splits'][method][split]['portable_24k_sha256'])
+                  print('PORTABLE_VERSION_126_8K_SHA:', method, split, old['splits'][method][split]['portable_8k_crop_sha256'])
+          assert not old['portable_candidate_used_for_training']
+          assert not new['portable_candidate_used_for_training']
+          print('If hashes differ, do not promote this candidate to training.')
+          PY
