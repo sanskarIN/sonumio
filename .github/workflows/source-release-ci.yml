@@ -1,0 +1,28 @@
+name: Source-only v0.0.1 build gate
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  archive-smoke:
+    name: ${{ matrix.os }} / Python ${{ matrix.python }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-24.04, python: '3.11' }
+          - { os: ubuntu-24.04, python: '3.13' }
+          - { os: windows-2022, python: '3.12' }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Check actual Git source archive and clean install
+        run: python scripts/source_release_gate.py --smoke

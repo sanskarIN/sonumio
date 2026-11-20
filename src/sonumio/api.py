@@ -5,6 +5,7 @@ import re
 import tempfile
 from uuid import uuid4
 from fastapi import FastAPI, HTTPException
+from . import __version__
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from .errors import GenerationError
@@ -12,7 +13,7 @@ from .registry import list_models
 from .scenes import SceneLayer, compose_scene
 from .service import generate_audio
 
-app = FastAPI(title="Sonumio experimental API", version="0.1.0-dev", docs_url="/docs")
+app = FastAPI(title="Sonumio experimental API", version=__version__, docs_url="/docs")
 OUTPUT_DIR = Path(os.environ.get("SONUMIO_OUTPUT_DIR", "outputs")).resolve()
 
 class GenerationRequest(BaseModel):

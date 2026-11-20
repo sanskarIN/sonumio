@@ -4,6 +4,17 @@
 
 > Experimental development: the default procedural DSP synthesizer generates actual WAV audio, but is NOT an AI model. Original Sonumio-1 does NOT exist yet.
 
+## Source-only v0.0.1 preparation
+
+The first software pre-release is planned as **v0.0.1**, distributed only as
+GitHub's automatic source archives (no wheels, binaries, data, audio or model
+weights attached). It is **not published yet**. Python 3.11+ can install
+from a checked-out source tree with `python -m pip install .`, then run
+`sonumio --version` and `sonumio generate "rain" --seconds 1`.
+The experimental web client builds separately using Node/npm; a committed
+npm dependency lockfile is still pending. The local API is not for public
+hosting and the neural research is not a release-ready original model.
+
 ## Setup
 Python 3.11+:
 1. `python -m venv .venv`

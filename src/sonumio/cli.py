@@ -3,6 +3,7 @@ import argparse
 import json
 from pathlib import Path
 import sys
+from . import __version__
 from .errors import GenerationError
 from .registry import list_models
 from .service import generate_audio
@@ -13,6 +14,7 @@ from .audio_core.wave_pipeline import (
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="sonumio", description="Imagine it. Hear it.")
+    parser.add_argument("--version", action="version", version=f"sonumio {__version__}")
     sub = parser.add_subparsers(dest="command", required=True)
     create = sub.add_parser("generate", help="Generate a WAV file from a supported prompt")
     create.add_argument("prompt")
