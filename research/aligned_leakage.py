@@ -58,7 +58,7 @@ class AlignedLeakageGuard:
         if len(set(self._positions.tolist())) != PROBE_COUNT:
             raise ValueError("probe pattern requires distinct positions")
         self._entries: list[_IndexedClip] = []
-        self._bands: dict[tuple[int, int], list[int]] = defaultdict(list)
+        self._bands: dict[tuple[str, int, int], list[int]] = defaultdict(list)
         self.compared_pairs = 0
 
     def _sketch(self, samples: np.ndarray, mean: float) -> tuple[int, ...]:
@@ -86,16 +86,19 @@ class AlignedLeakageGuard:
         keys = self._sketch(samples, mean)
         candidates: set[int] = set()
         mask = (1 << BITS_PER_BAND) - 1
-        for band, bits in enumerate(keys):
-            for code in (bits, bits ^ mask):
-                for idx in self._bands.get((band, code), ()):
-                    if self._entries[idx].split != split:
-                        candidates.add(idx)
-                        if len(candidates) > self.max_candidates:
-                            raise ManifestError(
-                                "aligned overlap audit exceeded bounded candidate budget; "
-                                "split source recordings into smaller reviewed batches"
-                            )
+        # Index by split as well as sketch; a large train-only dataset must
+        # not spend quadratic time scanning thousands of other train clips.
+        for other_split in ("train", "validation", "test"):
+            if other_split == split:
+                continue
+            for band, bits in enumerate(keys):
+                for code in (bits, bits ^ mask):
+                    candidates.update(self._bands.get((other_split, band, code), ()))
+                    if len(candidates) > self.max_candidates:
+                        raise ManifestError(
+                            "aligned overlap audit exceeded bounded candidate budget; "
+                            "split source recordings into smaller reviewed batches"
+                        )
         for idx in sorted(candidates):
             previous = self._entries[idx]
             other = previous.samples.astype(np.float64) - previous.mean
@@ -111,7 +114,7 @@ class AlignedLeakageGuard:
         idx = len(self._entries)
         self._entries.append(_IndexedClip(samples, split, line, piece, mean, norm))
         for band, code in enumerate(keys):
-            self._bands[(band, code)].append(idx)
+            self._bands[(split, band, code)].append(idx)
 
     @property
     def indexed_clips(self) -> int:
