@@ -110,6 +110,32 @@ def test_within_split_duplicate_crops_do_not_fake_recording_count(tmp_path):
     assert report["asset_counts"]["train"] == 1
 
 
+def test_gain_and_dc_changed_model_input_cannot_cross_data_splits(tmp_path):
+    # New bytes, new full decoded-audio digest and new exact resampled hashes:
+    # the same aligned physical waveform was merely gained and DC-offset.
+    original = _source()
+    edited = np.rint(original.astype(np.float64) * 0.5 + 1000).astype("<i2")
+    assert not np.array_equal(original, edited)
+    manifest, root = _manifest(tmp_path, _wav(original), _wav(edited))
+    with pytest.raises(ManifestError, match=r"line 2: aligned gain/DC/polarity-invariant model-input overlap"):
+        load_reviewed_splits(manifest, root, clips_per_asset=1)
+
+
+def test_distinct_model_inputs_report_narrow_aligned_overlap_audit(tmp_path):
+    original = _source()
+    modified = original.copy()
+    modified[4200:5400] = -modified[4200:5400]
+    manifest, root = _manifest(tmp_path, _wav(original), _wav(modified))
+    loaded, report = load_reviewed_splits(manifest, root, clips_per_asset=1)
+    assert report["aligned_overlap_indexed_clips"] == 2
+    assert report["aligned_overlap_full_clip_comparisons"] >= 0
+    assert "aligned centered abs(correlation)" in report["aligned_cross_split_overlap_gate"]
+    # This does not establish absence of shifted/remixed/semantic duplicates.
+    assert report["near_duplicate_or_semantic_similarity_checked"] is False
+    assert loaded["train"].clips.shape[0] == 1
+
+
+
 def test_crop_fingerprint_checks_exact_shape_dtype_and_nonfinite_inputs():
     good = np.zeros(2048, dtype=np.float32)
     assert _cropped_clip_digest(good) == _cropped_clip_digest(good.copy())
