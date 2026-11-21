@@ -34,6 +34,7 @@ class SceneLayer:
     seed: int = 0
     pan: float = 0.0  # -1 fully left; 0 centered; +1 fully right (stereo opt-in)
     pan_end: float | None = None  # Optional pan sweep over this layer's frames
+    gain_end_db: float | None = None  # Optional end gain; linear interpolation in dB
 
 
 def _valid_number(value: float, minimum: float, maximum: float, field: str) -> float:
@@ -48,6 +49,8 @@ def _validate_layer(layer: SceneLayer, total: float) -> None:
     _valid_number(layer.start_seconds, 0, MAX_SCENE_SECONDS, "start_seconds")
     _valid_number(layer.duration_seconds, 0.5, 15, "duration_seconds")
     _valid_number(layer.gain_db, -60, 12, "gain_db")
+    if layer.gain_end_db is not None:
+        _valid_number(layer.gain_end_db, -60, 12, "gain_end_db")
     _valid_number(layer.pan, -1, 1, "pan")
     if layer.pan_end is not None:
         _valid_number(layer.pan_end, -1, 1, "pan_end")
@@ -93,6 +96,20 @@ def _pan_sweep_gains(start_pan: float, end_pan: float,
     return left, right
 
 
+def _gain_sweep_db(start_db: float, end_db: float, frames: int) -> np.ndarray:
+    """Return sample-exact gain from start dB to end dB, inclusive.
+
+    Interpolate decibels (rather than linear amplitude) for perceptually
+    consistent changes. A single frame uses the start value. The constant
+    gain path is deliberately handled separately by compose_scene, keeping
+    pre-existing WAV outputs byte-identical.
+    """
+    if frames < 1:
+        raise ValueError("Gain sweep requires at least one sample")
+    decibels = np.linspace(start_db, end_db, frames, dtype=np.float64)
+    return np.power(10.0, decibels / 20.0)
+
+
 def compose_scene(layers: Sequence[SceneLayer], duration_seconds: float) -> Generated:
     validate_scene_plan(layers, duration_seconds)
     total = float(duration_seconds)
@@ -116,7 +133,11 @@ def compose_scene(layers: Sequence[SceneLayer], duration_seconds: float) -> Gene
             samples[:attack] *= np.sin(np.linspace(0, np.pi / 2, attack, endpoint=True)) ** 2
         if release:
             samples[-release:] *= np.cos(np.linspace(0, np.pi / 2, release, endpoint=True)) ** 2
-        samples *= 10 ** (layer.gain_db / 20)
+        if layer.gain_end_db is None or layer.gain_end_db == layer.gain_db:
+            # Retain exact original static-gain arithmetic and fingerprints.
+            samples *= 10 ** (layer.gain_db / 20)
+        else:
+            samples *= _gain_sweep_db(layer.gain_db, layer.gain_end_db, count)
         position = round(layer.start_seconds * SAMPLE_RATE)
         if position + count > frames:
             # Floating point rounding might produce a one-sample discrepancy.
