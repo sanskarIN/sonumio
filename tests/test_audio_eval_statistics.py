@@ -55,7 +55,11 @@ def test_paired_sign_flip_reports_finite_nonzero_p(correlated_groups):
     assert 0 < row.p_value <= 1
     assert row.groups == 4
     assert row.direction == "two-sided"
-    assert row.report_protocol.endswith("-v1")
+    assert row.report_protocol.endswith("-v2")
+    assert row.method == "exact"
+    assert row.permutations == 16
+    assert row.requested_permutations == 1000
+    assert row.p_value == pytest.approx(0.125)
 
 
 def test_directional_tests_and_grouped_summary(correlated_groups):

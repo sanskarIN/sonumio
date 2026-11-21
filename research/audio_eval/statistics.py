@@ -8,6 +8,7 @@ It does not claim clinical/statistical significance or calibrated MOS.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from itertools import product
 import math
 from collections import defaultdict
 from typing import Mapping, Sequence
@@ -15,6 +16,10 @@ from typing import Mapping, Sequence
 import numpy as np
 
 from sonumio.audio_core.errors import AudioContractError
+
+# 2**16 = 65,536 complete sign assignments; bounded and practical on CPU.
+# A small group study has a discrete p-value floor, not arbitrary precision.
+EXACT_SIGN_FLIP_MAX_GROUPS = 16
 
 
 def _finite_values(values: Sequence[float], *, minimum_count: int = 1
@@ -56,7 +61,10 @@ class PairedComparison:
     permutations: int
     groups: int
     direction: str
-    report_protocol: str = "sonumio-grouped-paired-test-v1"
+    report_protocol: str = "sonumio-grouped-paired-test-v2"
+    method: str = "monte_carlo"
+    requested_permutations: int = 0
+    resampling_unit: str = "source_group"
 
     def as_dict(self) -> dict:
         from dataclasses import asdict
@@ -112,32 +120,70 @@ def paired_sign_flip_test(a: Sequence[float], b: Sequence[float],
                           permutations: int = 5000,
                           seed: int = 0,
                           direction: str = "two-sided") -> PairedComparison:
+    """Paired source-group inference: exact small-N, Monte Carlo otherwise.
+
+    The null distribution flips the sign of each INDEPENDENT source-group
+    mean once, never individual audio clips. For 2..16 groups all 2**N
+    assignments are enumerated, so small studies do not claim precision
+    that a seeded Monte Carlo sample cannot establish. With >16 groups
+    use bounded Monte Carlo and a plus-one p-value correction.
+    """
     if direction not in ("two-sided", "a-greater", "b-greater"):
         raise AudioContractError("Invalid paired permutation direction")
     if type(permutations) is not int or not 100 <= permutations <= 100_000:
         raise AudioContractError("Expected 100..100000 sign-flip permutations")
+    _seed(seed)  # Reject invalid provenance seed even for exhaustive inference.
     aa, bb = _finite_values(a), _finite_values(b)
     if aa.shape != bb.shape:
         raise AudioContractError("Paired samples require same case count")
-    differences, n = _group_means((aa - bb).tolist(), groups)
-    if len(differences) < 2:
+    differences, _ = _group_means((aa - bb).tolist(), groups)
+    n = len(differences)
+    if n < 2:
         raise AudioContractError("Paired test requires at least two independent groups")
-    observed = float(np.mean(differences))
-    rng = np.random.default_rng(_seed(seed))
-    successes = 0
-    for _ in range(permutations):
-        signs = rng.choice(np.array([-1.0, 1.0]), size=len(differences))
-        trial = float(np.mean(differences * signs))
-        if direction == "two-sided":
-            successes += abs(trial) >= abs(observed) - 1e-12
-        elif direction == "a-greater":
-            successes += trial >= observed - 1e-12
-        else:
-            successes += trial <= observed + 1e-12
-    # Add-one correction prevents impossible p==0 from finite random trials.
-    return PairedComparison(observed, (successes + 1) / (permutations + 1),
-                            permutations, len(differences), direction)
+    observed = math.fsum(map(float, differences)) / n
+    if not math.isfinite(observed):
+        raise AudioContractError("Nonfinite aggregate paired effect")
 
+    # Reuse one threshold rule for exact and randomized paths, including ties.
+    # Floating comparisons tolerate roundoff when the observed assignment
+    # is reconstructed under another sign configuration.
+    tolerance = 1e-12
+    def extreme(trial: float) -> bool:
+        if direction == "two-sided":
+            return abs(trial) >= abs(observed) - tolerance
+        if direction == "a-greater":
+            return trial >= observed - tolerance
+        return trial <= observed + tolerance
+
+    if n <= EXACT_SIGN_FLIP_MAX_GROUPS:
+        trials = 1 << n
+        extreme_count = 0
+        # math.fsum avoids order-dependent accumulation and 2**16 assignments
+        # are small enough to enumerate without a large temporary matrix.
+        for signs in product((-1.0, 1.0), repeat=n):
+            candidate = math.fsum(float(x) * sign
+                                  for x, sign in zip(differences, signs)) / n
+            extreme_count += extreme(candidate)
+        # This is the entire discrete null distribution; no plus-one
+        # Monte Carlo correction and no false zero-probability claim.
+        p_value = extreme_count / trials
+        method = "exact"
+    else:
+        trials = permutations
+        rng = np.random.default_rng(seed)
+        extreme_count = 0
+        for _ in range(trials):
+            signs = rng.choice(np.array([-1.0, 1.0]), size=n)
+            candidate = math.fsum(float(x) * float(sign)
+                                  for x, sign in zip(differences, signs)) / n
+            extreme_count += extreme(candidate)
+        # Include the observed configuration to prevent zero Monte Carlo p.
+        p_value = (extreme_count + 1) / (trials + 1)
+        method = "monte_carlo"
+    return PairedComparison(
+        observed, p_value, trials, n, direction,
+        method=method, requested_permutations=permutations,
+    )
 
 def holm_adjust(p_values: Sequence[float]) -> list[float]:
     """Holm step-down FWER adjustment, with original order preserved."""
@@ -174,7 +220,7 @@ def group_effect_report(reference: Sequence[float], candidate: Sequence[float],
         permutations=permutations, seed=seed,
     )
     return {
-        "protocol": "sonumio-group-level-audio-metric-effect-v1",
+        "protocol": "sonumio-group-level-audio-metric-effect-v2",
         "direction": "candidate-minus-reference",
         "interval": interval.as_dict(),
         "sign_flip": test.as_dict(),
@@ -186,6 +232,8 @@ def group_effect_report(reference: Sequence[float], candidate: Sequence[float],
         "multiple_comparisons_adjusted": False,
         "caution": (
             "Intervals assume the defined groups are independent. "
+            "Exact small-group p-values have a discrete resolution floor; "
+            "Monte Carlo p-values have simulation uncertainty. "
             "These tests do not make metric changes perceptually meaningful; "
             "multiple comparisons require prespecified correction."
         ),
