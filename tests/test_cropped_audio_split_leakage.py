@@ -38,6 +38,8 @@ def _manifest(tmp_path, training: bytes, validation: bytes):
     ):
         name = f"{split}.wav"
         (root / name).write_bytes(content)
+        with wave.open(io.BytesIO(content), "rb") as recorder:
+            duration = recorder.getnframes() / recorder.getframerate()
         records.append({
             "asset_id": f"asset-{i}",
             "source_url": "https://example.org/fixture-only",
@@ -53,7 +55,7 @@ def _manifest(tmp_path, training: bytes, validation: bytes):
             "creator_permission": False,
             "voice_present": False,
             "sample_rate": RATE,
-            "duration_seconds": 0.5,
+            "duration_seconds": duration,
         })
     path = tmp_path / "manifest.jsonl"
     path.write_text(
@@ -97,13 +99,14 @@ def test_different_cropped_inputs_are_accepted(tmp_path):
 def test_within_split_duplicate_crops_do_not_fake_recording_count(tmp_path):
     # Repeated selections from short files stay allowed within their split;
     # the loader reports this instead of pretending they're independent.
-    original = _source()
+    original = _source()[:6144]  # exactly one complete 8-kHz crop
     altered = original.copy()
-    altered[4200:5400] = -altered[4200:5400]
+    altered[2500:3500] = -altered[2500:3500]
     manifest, root = _manifest(tmp_path, _wav(original), _wav(altered))
     loaded, report = load_reviewed_splits(manifest, root, clips_per_asset=3)
     assert loaded["train"].clips.shape == (3, 1, 2048)
-    assert report["within_split_repeated_model_input_clips"] >= 0
+    assert report["within_split_repeated_model_input_clips"] == 4
+    assert report["distinct_model_input_clip_hashes"] == 2
     assert report["asset_counts"]["train"] == 1
 
 
