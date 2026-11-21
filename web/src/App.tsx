@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type ChangeEvent, type FormEvent } from 'react';
 import {
   submitGenerationJob, submitSceneJob, awaitJob, cancelJob, getHealth, getModels, validateScene,
+  parseScenePlan, serializeScenePlan, MAX_SCENE_JSON_BYTES,
   type JobStatus,
   type GeneratedAudio, type ModelEntry, type SceneLayer,
 } from './api';
@@ -24,6 +25,8 @@ export function App() {
   const [seed, setSeed] = useState(42);
   const [sceneDuration, setSceneDuration] = useState(6);
   const [layers, setLayers] = useState<SceneLayer[]>([makeLayer()]);
+  const [sceneNotice, setSceneNotice] = useState('');
+  const sceneFileInput = useRef<HTMLInputElement | null>(null);
   const [models, setModels] = useState<ModelEntry[]>([]);
   const [connected, setConnected] = useState<boolean | null>(null);
   const [busy, setBusy] = useState(false);
@@ -43,6 +46,9 @@ export function App() {
 
   const activeModel = models.find(model => model.id === 'procedural-sfx-v0');
   const sceneError = validateScene({ duration_seconds: sceneDuration, layers });
+  const sceneExportHref = sceneError ? '' :
+    'data:application/json;charset=utf-8,' +
+    encodeURIComponent(serializeScenePlan({ duration_seconds: sceneDuration, layers }));
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -76,7 +82,29 @@ export function App() {
     if (!busy) { setMode(value); setError(''); setResult(null); }
   }
   function changeLayer(index: number, key: keyof SceneLayer, value: number | string | undefined) {
+    setSceneNotice('');
     setLayers(previous => previous.map((layer, i) => i === index ? { ...layer, [key]: value } : layer));
+  }
+  async function importScene(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.currentTarget.files?.[0];
+    event.currentTarget.value = '';
+    if (!file || busy) return;
+    if (file.size > MAX_SCENE_JSON_BYTES) {
+      setError('Scene file exceeds the 16 KiB local import limit.');
+      setSceneNotice('');
+      return;
+    }
+    try {
+      const scene = parseScenePlan(await file.text());
+      setSceneDuration(scene.duration_seconds);
+      setLayers(scene.layers);
+      setResult(null);
+      setError('');
+      setSceneNotice('Imported ' + file.name.slice(0, 80) + ' locally. Ready to edit or render.');
+    } catch (problem) {
+      setSceneNotice('');
+      setError(problem instanceof Error ? problem.message : 'Could not read scene JSON.');
+    }
   }
   function cancel() {
     const identifier = jobId.current;
@@ -123,7 +151,13 @@ export function App() {
               </div>
             </> : <>
               <p className="hint">Arrange up to eight procedural layers on a shared timeline. Every layer must end before the scene finishes. Set pan from -1 (left) to +1 (right) for stereo; add an optional end pan to move the sound across the stereo field. Set an end gain to swell or fade a layer smoothly in dB. All-center scenes remain mono.</p>
-              <div className="field-grid"><label>Scene duration <small>0.5–30 seconds</small><input type="number" min="0.5" max="30" step="0.5" required value={sceneDuration} onChange={e => setSceneDuration(numberValue(e.target.value))}/></label></div>
+              <div className="field-grid"><label>Scene duration <small>0.5–30 seconds</small><input type="number" min="0.5" max="30" step="0.5" required value={sceneDuration} onChange={e => { setSceneNotice(''); setSceneDuration(numberValue(e.target.value)); }}/></label></div>
+              <div className="scene-file-actions">
+                <button type="button" className="secondary-button" disabled={busy} onClick={() => sceneFileInput.current?.click()}>Import scene JSON</button>
+                <input ref={sceneFileInput} className="scene-file-input" type="file" accept=".json,application/json" aria-label="Select local scene JSON file" disabled={busy} onChange={importScene}/>
+                {!sceneError && <a className="secondary-button" download="sonumio-scene.json" href={sceneExportHref}>Export scene JSON</a>}
+              </div>
+              {sceneNotice && <p className="hint" role="status">{sceneNotice}</p>}
               <div className="layer-heading"><span className="field-heading">SOUND LAYERS ({layers.length}/8)</span><button type="button" className="secondary-button" disabled={layers.length >= 8} onClick={() => setLayers(existing => [...existing, makeLayer(existing.length)])}>+ Add layer</button></div>
               <div className="layers">{layers.map((layer, index) => <fieldset key={index} className="layer">
                 <legend>Layer {index + 1}</legend>

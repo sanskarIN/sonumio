@@ -109,6 +109,82 @@ export function validateScene(scene: SceneInput): string | null {
   return null;
 }
 
+
+/** Human-editable, local-only scene plans. Never reads external URLs. */
+export const MAX_SCENE_JSON_BYTES = 16 * 1024;
+const SCENE_FORMAT = 'sonumio-scene-v1';
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function sceneNumber(row: Record<string, unknown>, key: string, fallback: number): number {
+  const value = row[key] === undefined ? fallback : row[key];
+  if (typeof value !== 'number') throw new Error('Scene field "' + key + '" must be a number.');
+  return value;
+}
+
+function sceneOptionalNumber(row: Record<string, unknown>, key: string): number | undefined {
+  const value = row[key];
+  if (value == null) return undefined;
+  if (typeof value !== 'number') throw new Error('Scene field "' + key + '" must be a number.');
+  return value;
+}
+
+/** Parse both Sonumio JSON exports and simple CLI scene JSON. Never coerce types. */
+export function parseScenePlan(text: string): SceneInput {
+  if (text.length > MAX_SCENE_JSON_BYTES)
+    throw new Error('Scene JSON exceeds the 16 KiB local import limit.');
+  let raw: unknown;
+  try { raw = JSON.parse(text); }
+  catch { throw new Error('Scene file is not valid JSON.'); }
+  if (!isRecord(raw) || !Array.isArray(raw.layers))
+    throw new Error('Scene JSON must contain an object with a layers array.');
+  if (raw.format !== undefined && raw.format !== SCENE_FORMAT)
+    throw new Error('Unsupported Sonumio scene file format.');
+  if (raw.layers.length < 1 || raw.layers.length > 8)
+    throw new Error('A scene needs 1–8 layers.');
+  const layers: SceneLayer[] = raw.layers.map((item: unknown, index: number) => {
+    if (!isRecord(item) || typeof item.prompt !== 'string')
+      throw new Error('Layer ' + (index + 1) + ' needs a string prompt.');
+    return {
+      prompt: item.prompt,
+      start_seconds: sceneNumber(item, 'start_seconds', 0),
+      duration_seconds: sceneNumber(item, 'duration_seconds', 3),
+      gain_db: sceneNumber(item, 'gain_db', 0),
+      gain_end_db: sceneOptionalNumber(item, 'gain_end_db'),
+      fade_in_seconds: sceneNumber(item, 'fade_in_seconds', 0.02),
+      fade_out_seconds: sceneNumber(item, 'fade_out_seconds', 0.05),
+      seed: sceneNumber(item, 'seed', 0),
+      pan: sceneNumber(item, 'pan', 0),
+      pan_end: sceneOptionalNumber(item, 'pan_end'),
+    };
+  });
+  const scene = { duration_seconds: sceneNumber(raw, 'duration_seconds', 5), layers };
+  const error = validateScene(scene);
+  if (error) throw new Error(error);
+  return scene;
+}
+
+/** Export only supported fields; ignore any unrelated object properties. */
+export function serializeScenePlan(scene: SceneInput): string {
+  const error = validateScene(scene);
+  if (error) throw new Error(error);
+  return JSON.stringify({
+    format: SCENE_FORMAT,
+    duration_seconds: scene.duration_seconds,
+    layers: scene.layers.map(layer => ({
+      prompt: layer.prompt, start_seconds: layer.start_seconds,
+      duration_seconds: layer.duration_seconds, gain_db: layer.gain_db,
+      ...(layer.gain_end_db == null ? {} : { gain_end_db: layer.gain_end_db }),
+      fade_in_seconds: layer.fade_in_seconds,
+      fade_out_seconds: layer.fade_out_seconds, seed: layer.seed,
+      pan: layer.pan ?? 0,
+      ...(layer.pan_end == null ? {} : { pan_end: layer.pan_end }),
+    })),
+  }, null, 2) + '\n';
+}
+
 /** Bounded, development-only background audio tasks. */
 export type JobStatus = 'queued' | 'running' | 'cancelling' | 'succeeded' | 'failed' | 'cancelled';
 export type AudioJob = {

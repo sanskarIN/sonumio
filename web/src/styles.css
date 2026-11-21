@@ -71,6 +71,9 @@ dt{color:#92a0ba}dd{color:#d8dded;text-align:right;margin:0}
 .layer-heading{display:flex;justify-content:space-between;align-items:center;gap:10px;margin:20px 0 11px}
 .layer-heading .field-heading{margin:0}
 .secondary-button{background:#2a2a47;color:#d8d2ff;border:1px solid #555087;border-radius:7px;padding:8px 11px;font-size:11px}
+.scene-file-actions{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin:0 0 10px}
+.scene-file-actions .secondary-button{display:inline-flex;align-items:center;min-height:35px}
+.scene-file-input{display:none}
 .layers{max-height:510px;overflow:auto;padding:2px}
 .layer{position:relative;border:1px solid #424660;border-radius:10px;padding:15px;margin:0 0 15px}
 .layer legend{color:#c8bfff;font-size:12px;padding:0 6px;font-weight:650}
