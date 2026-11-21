@@ -27,6 +27,7 @@ class SceneLayerRequest(BaseModel):
     start_seconds: float = Field(default=0.0, ge=0, le=30)
     duration_seconds: float = Field(default=3.0, ge=0.5, le=15)
     gain_db: float = Field(default=0.0, ge=-60, le=12)
+    gain_end_db: float | None = Field(default=None, ge=-60, le=12)
     pan: float = Field(default=0.0, ge=-1, le=1)
     pan_end: float | None = Field(default=None, ge=-1, le=1)
     fade_in_seconds: float = Field(default=0.02, ge=0, le=10)

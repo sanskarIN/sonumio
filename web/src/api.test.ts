@@ -39,11 +39,12 @@ describe('same-origin API client', () => {
   it('POSTs procedural scene plans', async () => {
     const mock = vi.fn().mockResolvedValue(fake(201, audio));
     vi.stubGlobal('fetch', mock);
-    const positioned = { ...layer, pan: -0.5, pan_end: 0.75 };
+    const positioned = { ...layer, pan: -0.5, pan_end: 0.75, gain_end_db: -12 };
     await expect(generateScene({ duration_seconds: 3, layers: [positioned] })).resolves.toEqual(audio);
     const submitted = JSON.parse(mock.mock.calls[0][1].body);
     expect(submitted.layers[0].pan).toBe(-0.5);
     expect(submitted.layers[0].pan_end).toBe(0.75);
+    expect(submitted.layers[0].gain_end_db).toBe(-12);
   });
 });
 describe('scene client-side guardrails', () => {
@@ -69,5 +70,11 @@ describe('scene client-side guardrails', () => {
     expect(validateScene({ duration_seconds: 3, layers: [{ ...layer, pan_end: -1.1 }] })).toContain('End pan');
     expect(validateScene({ duration_seconds: 3, layers: [{ ...layer, pan_end: Number.NaN }] })).toContain('End pan');
     expect(validateScene({ duration_seconds: 3, layers: [{ ...layer, pan_end: Number.POSITIVE_INFINITY }] })).toContain('End pan');
+    expect(validateScene({ duration_seconds: 3, layers: [{ ...layer, gain_end_db: -60 }] })).toBe(null);
+    expect(validateScene({ duration_seconds: 3, layers: [{ ...layer, gain_end_db: 12 }] })).toBe(null);
+    expect(validateScene({ duration_seconds: 3, layers: [{ ...layer, gain_end_db: null }] })).toBe(null);
+    for (const invalid of [-60.01, 12.01, Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect(validateScene({ duration_seconds: 3, layers: [{ ...layer, gain_end_db: invalid }] })).toContain('End gain');
+    }
   });
 });

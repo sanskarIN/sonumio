@@ -1,0 +1,28 @@
+{
+  "duration_seconds": 6,
+  "layers": [
+    {
+      "prompt": "rain and wind",
+      "start_seconds": 0,
+      "duration_seconds": 6,
+      "gain_db": -36,
+      "gain_end_db": -12,
+      "fade_in_seconds": 0.1,
+      "fade_out_seconds": 0.35,
+      "seed": 3,
+      "pan": -0.6,
+      "pan_end": 0.4
+    },
+    {
+      "prompt": "birds in a forest",
+      "start_seconds": 1,
+      "duration_seconds": 4,
+      "gain_db": -18,
+      "gain_end_db": -30,
+      "fade_in_seconds": 0.25,
+      "fade_out_seconds": 0.3,
+      "seed": 8,
+      "pan": 0.7
+    }
+  ]
+}

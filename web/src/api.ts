@@ -10,6 +10,7 @@ export type GenerationInput = {
 export type SceneLayer = {
   prompt: string; start_seconds: number; duration_seconds: number; gain_db: number;
   fade_in_seconds: number; fade_out_seconds: number; seed: number;
+  gain_end_db?: number | null; // Optional layer end level, interpolated in decibels
   pan?: number; // -1 left, 0 centered/legacy mono, +1 right
   pan_end?: number | null; // optional end position; omitted means constant pan
 };
@@ -89,6 +90,9 @@ export function validateScene(scene: SceneInput): string | null {
       return 'Layer ' + n + ' exceeds the scene timeline.';
     if (!Number.isFinite(layer.gain_db) || layer.gain_db < -60 || layer.gain_db > 12)
       return 'Invalid gain in layer ' + n + '.';
+    if (layer.gain_end_db != null &&
+        (!Number.isFinite(layer.gain_end_db) || layer.gain_end_db < -60 || layer.gain_end_db > 12))
+      return 'End gain in layer ' + n + ' must be between -60 and +12 dB.';
     const pan = layer.pan ?? 0;
     if (!Number.isFinite(pan) || pan < -1 || pan > 1)
       return 'Pan in layer ' + n + ' must be between -1 (left) and +1 (right).';
