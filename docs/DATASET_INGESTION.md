@@ -72,3 +72,21 @@ changing any WAV bytes therefore changes the research split fingerprint.
 This prevents accidental silent caption changes between validation and text
 training. **It does not verify whether declarations are truthful**, nor does
 it make future filesystem modifications or unreviewed recordings safe.
+
+## Exact model-input crop leakage gate
+
+In addition to whole-WAV and decoded-recording checksum gates, ingestion now
+SHA256-fingerprints the **actual float32, 8 kHz, 2048-frame training crops**.
+If one crop is exactly repeated across train/validation/test splits, loading
+fails closed even when the full files and declared recording groups differ.
+Such an overlap could otherwise contaminate held-out model evaluation.
+
+Repeated crops **within** one split remain accepted for compatibility with
+short recordings, but their count is surfaced as
+`within_split_repeated_model_input_clips` instead of silently implying
+they are new independent source groups. The report includes
+`distinct_model_input_clip_hashes` and labels the exact gate explicitly.
+
+This gate does **not** identify near-duplicates, pitch/time shifts, overlapping
+but non-identical excerpts, or related recording sessions. It does not prove
+source independence or declared recording rights.

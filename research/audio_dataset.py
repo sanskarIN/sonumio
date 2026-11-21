@@ -116,6 +116,25 @@ def _decoded_audio_digest(signal: np.ndarray, rate: int) -> str:
     return digest.hexdigest()
 
 
+def _cropped_clip_digest(samples: np.ndarray) -> str:
+    """Exact bytes of the *actual 8 kHz model input*, not the source WAV.
+
+    Distinct recordings may share an excerpt even when whole-file SHA and
+    full decoded-audio fingerprints differ. Exact SHA across train and
+    evaluation clips is a strong leakage witness, not near-duplicate
+    detection or proof of statistically independent recordings.
+    """
+    if (samples.shape != (CLIP_FRAMES,)
+            or samples.dtype != np.float32
+            or not np.isfinite(samples).all()):
+        raise ManifestError("invalid resampled clip for fingerprinting")
+    digest = sha256(b"sonumio-reviewed-model-input-f32-v1\0")
+    digest.update(SAMPLE_RATE.to_bytes(4, "little"))
+    digest.update(CLIP_FRAMES.to_bytes(8, "little"))
+    digest.update(np.asarray(samples, dtype="<f4", order="C").tobytes())
+    return digest.hexdigest()
+
+
 def _crop_clips(signal: np.ndarray, rate: int, per_asset: int) -> list[np.ndarray]:
     # Local import: scipy is required only for rights-gated research ingestion.
     from scipy.signal import resample_poly
@@ -168,6 +187,10 @@ def load_reviewed_splits(manifest: str | Path, audio_root: str | Path, *,
     fingerprints = {split: sha256() for split in clips}
     counts = {split: 0 for split in clips}
     decoded_recordings: dict[str, tuple[int, str]] = {}
+    # Identical normalized model-input clips across declared splits are
+    # leakage even if entire recordings are legitimately different files.
+    cropped_clips: dict[str, tuple[int, str, int]] = {}
+    repeated_within_split = 0
 
     for line_no, row in records:
             try:
@@ -198,8 +221,21 @@ def load_reviewed_splits(manifest: str | Path, audio_root: str | Path, *,
                         "recording must not be reused"
                     )
                 pieces = _crop_clips(mono, rate, clips_per_asset)
-                decoded_recordings[decoded_hash] = (line_no, row["split"])
                 split = row["split"]
+                for piece_number, piece in enumerate(pieces, 1):
+                    crop_sha = _cropped_clip_digest(piece)
+                    if crop_sha in cropped_clips:
+                        prior_line, prior_split, prior_piece = cropped_clips[crop_sha]
+                        if prior_split != split:
+                            raise ManifestError(
+                                "resampled model-input clip duplicates line "
+                                f"{prior_line} ({prior_split} split, clip {prior_piece}); "
+                                "do not reuse an exact training crop for evaluation"
+                            )
+                        repeated_within_split += 1
+                    else:
+                        cropped_clips[crop_sha] = (line_no, split, piece_number)
+                decoded_recordings[decoded_hash] = (line_no, split)
                 clips[split].extend(pieces)
                 labels[split].extend([label] * len(pieces))
                 captions[split].extend([row["caption"]] * len(pieces))
@@ -232,6 +268,10 @@ def load_reviewed_splits(manifest: str | Path, audio_root: str | Path, *,
         "wav_bytes_verified": True,
         "decoded_audio_duplicate_gate": "exact mono PCM at identical sample rate",
         "decoded_audio_distinct_recordings": len(decoded_recordings),
+        "cross_split_crop_duplicate_gate": "exact float32 8 kHz model-input PCM",
+        "distinct_model_input_clip_hashes": len(cropped_clips),
+        "within_split_repeated_model_input_clips": repeated_within_split,
+        "near_duplicate_or_semantic_similarity_checked": False,
         "complete_clips_without_zero_padding": True,
         "human_rights_review_remains_required": True,
         "voice_detection_performed": False,
