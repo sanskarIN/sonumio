@@ -4,11 +4,11 @@
 
 > Experimental development: the default procedural DSP synthesizer generates actual WAV audio, but is NOT an AI model. Original Sonumio-1 does NOT exist yet.
 
-## Source-only v0.0.1 preparation
+## Source-only v0.0.1 pre-release
 
-The first software pre-release is planned as **v0.0.1**, distributed only as
-GitHub's automatic source archives (no wheels, binaries, data, audio or model
-weights attached). It is **not published yet**. Python 3.11+ can install
+The first software pre-release, **[v0.0.1](https://github.com/sanskarIN/sonumio/releases/tag/v0.0.1)**,
+was published on **20 November 2026** with GitHub source archives only:
+no wheels, binaries, datasets, generated audio, or model weights attached. Python 3.11+ can install
 from a checked-out source tree with `python -m pip install .`, then run
 `sonumio --version` and `sonumio generate "rain" --seconds 1`.
 The experimental web client builds separately using Node/npm; a committed
@@ -103,7 +103,7 @@ python -m research.wave_diffusion sample --checkpoint checkpoints/wave-diffusion
 ```
 
 See [diffusion research limitations](docs/DIFFUSION_EXPERIMENT.md). Locally trained
-weights are excluded from Git, and no weights, releases or pre-releases are authorized.
+weights are excluded from Git. Neural model weights and subsequent releases require separate authorization.
 
 ## Rights-gated local WAV training (experimental)
 
@@ -118,7 +118,7 @@ python -m research.wave_diffusion train --steps 50 --manifest /path/to/manifest.
 ~~~
 
 See [dataset ingestion requirements](docs/DATASET_INGESTION.md).
-No GitHub release, pre-release, or model weight publication is authorized.
+No model weight publication is authorized; the software-only v0.0.1 pre-release is separate.
 
 ## Experimental two-sound neural research (not Sonumio-1)
 
@@ -148,7 +148,7 @@ Start `sonumio serve` from the repository root. In a second terminal, run
 `/health` endpoints. For checks, run `npm run typecheck`, `npm test` and
 `npm run build` from `web/`. This is not hardened for public deployment.
 
-No GitHub releases or pre-releases are authorized.
+The only published software pre-release at this stage is source-only v0.0.1.
 
 ## Bounded background audio jobs (experimental)
 
@@ -160,9 +160,17 @@ waiting jobs, expires local job outputs after 30 minutes while running, and
 rejects unsupported models before dispatch. Running generation cannot be
 forcibly interrupted, and jobs do not survive a server restart.
 
+API previews are stored in a dedicated subdirectory,
+`SONUMIO_OUTPUT_DIR/.sonumio-api-audio/` (default `outputs/.sonumio-api-audio/`),
+not among manually saved CLI WAVs. Previews expire after 60 minutes and the
+oldest files are evicted when 128 files or 256 MiB would be exceeded; each
+file is limited to 8 MiB. Download or save wanted audio before it expires;
+this is **not durable project storage**. Queued jobs still expire their own
+outputs after 30 minutes, and API cleanup does not delete CLI exports.
+
 See [development job limitations](docs/LOCAL_JOBS.md). This local-only
 prototype has **no production authentication or durable model scheduling**.
-No releases, pre-releases or weight distribution are authorized.
+Further software releases and any model weight distribution require separate approval.
 
 ## New learned-text neural audio research (NOT Sonumio-1)
 
@@ -192,7 +200,7 @@ caption helps predict noise on held-out synthetic clips. Audio quality
 and natural-language prompt adherence require separate evaluation.
 
 See [limitations and methodology](docs/TEXT_CONDITIONING_EXPERIMENT.md).
-No model weights, tags, GitHub pre-releases or releases are authorized.
+No original Sonumio model weights have been published; new releases need explicit approval.
 
 
 ## One-second latent diffusion research (development branch only)
@@ -211,7 +219,7 @@ python -m research.latent_alignment --checkpoint checkpoints/private-latent-expe
 ~~~
 
 See [isolated latent audio research methodology](docs/LATENT_AUDIO_EXPERIMENT.md).
-All checkpoints remain local. No release, pre-release or weight publication.
+All research checkpoints remain local; there is no neural model weight publication.
 
 
 ### Research evaluation controls
@@ -516,4 +524,4 @@ the new assertion runs require separate verification.
 The [isolated DSP resource study](docs/DSP_RESOURCE_PROFILE.md)
 also passed 411 CPU research tests at [run #44097168528](https://github.com/sanskarIN/sonumio/actions/runs/44097168528);
 whole-process memory includes research imports, not just DSP allocations.
-No model weight, WAV, tag or release has been published.
+No trained model weights or WAV assets were published with the source-only v0.0.1 pre-release.
