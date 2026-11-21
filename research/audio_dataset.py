@@ -19,6 +19,7 @@ import wave
 import numpy as np
 
 from research.dataset_manifest import ManifestError, load_manifest_snapshot
+from research.aligned_leakage import AlignedLeakageGuard
 from research.wave_diffusion import CATEGORIES, CLIP_FRAMES, SAMPLE_RATE
 from sonumio.engines.procedural import TOKENS
 
@@ -191,6 +192,9 @@ def load_reviewed_splits(manifest: str | Path, audio_root: str | Path, *,
     # leakage even if entire recordings are legitimately different files.
     cropped_clips: dict[str, tuple[int, str, int]] = {}
     repeated_within_split = 0
+    # Additional, narrow content-level gate: gain/DC/polarity-invariant
+    # cross-split copies that survive exact SHA256 checking.
+    aligned_overlap = AlignedLeakageGuard(frames=CLIP_FRAMES)
 
     for line_no, row in records:
             try:
@@ -235,6 +239,8 @@ def load_reviewed_splits(manifest: str | Path, audio_root: str | Path, *,
                         repeated_within_split += 1
                     else:
                         cropped_clips[crop_sha] = (line_no, split, piece_number)
+                    aligned_overlap.add(piece, split=split, line=line_no,
+                                        piece=piece_number)
                 decoded_recordings[decoded_hash] = (line_no, split)
                 clips[split].extend(pieces)
                 labels[split].extend([label] * len(pieces))
@@ -271,6 +277,9 @@ def load_reviewed_splits(manifest: str | Path, audio_root: str | Path, *,
         "cross_split_crop_duplicate_gate": "exact float32 8 kHz model-input PCM",
         "distinct_model_input_clip_hashes": len(cropped_clips),
         "within_split_repeated_model_input_clips": repeated_within_split,
+        "aligned_cross_split_overlap_gate": "aligned centered abs(correlation) >= 0.9995; deterministic sign-sketch prefilter",
+        "aligned_overlap_indexed_clips": aligned_overlap.indexed_clips,
+        "aligned_overlap_full_clip_comparisons": aligned_overlap.compared_pairs,
         "near_duplicate_or_semantic_similarity_checked": False,
         "complete_clips_without_zero_padding": True,
         "human_rights_review_remains_required": True,
