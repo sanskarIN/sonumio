@@ -1,17 +1,16 @@
 """Local-only initial REST API. Do not expose publicly without auth/rate limits."""
+from functools import lru_cache
 from pathlib import Path
 import os
-import re
-import tempfile
-from uuid import uuid4
 from fastapi import FastAPI, HTTPException
 from . import __version__
-from fastapi.responses import FileResponse
+from fastapi.responses import Response
 from pydantic import BaseModel, Field
 from .errors import GenerationError
 from .registry import list_models
 from .scenes import SceneLayer, compose_scene
 from .service import generate_audio
+from .output_store import LocalAudioStore, OutputStoreError
 
 app = FastAPI(title="Sonumio experimental API", version=__version__, docs_url="/docs")
 OUTPUT_DIR = Path(os.environ.get("SONUMIO_OUTPUT_DIR", "outputs")).resolve()
@@ -39,30 +38,26 @@ class SceneRequest(BaseModel):
     layers: list[SceneLayerRequest] = Field(min_length=1, max_length=8)
 
 
-def _store_audio(wav_bytes: bytes) -> str:
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    identifier = str(uuid4())
-    filename = OUTPUT_DIR / f"{identifier}.wav"
-    temp_path = None
+@lru_cache(maxsize=16)
+def _store_for(root: Path) -> LocalAudioStore:
+    """Keep API outputs separate from user-managed CLI audio files."""
+    return LocalAudioStore(root / ".sonumio-api-audio")
+
+
+def _store_audio(wav_bytes: bytes, store: LocalAudioStore) -> str:
     try:
-        with tempfile.NamedTemporaryFile(dir=OUTPUT_DIR, suffix=".tmp", delete=False) as tmp:
-            tmp.write(wav_bytes)
-            temp_path = Path(tmp.name)
-        os.replace(temp_path, filename)
-    finally:
-        if temp_path is not None:
-            temp_path.unlink(missing_ok=True)
-    return identifier
+        return store.write(wav_bytes)
+    except (OutputStoreError, OSError) as exc:
+        raise HTTPException(status_code=507, detail="Local audio storage is unavailable or full") from exc
 
 
-@app.post("/v1/scenes", status_code=201)
-def generate_scene(request: SceneRequest) -> dict:
+def _generate_scene(request: SceneRequest, store: LocalAudioStore) -> dict:
     try:
         layers = [SceneLayer(**layer.model_dump()) for layer in request.layers]
         generated = compose_scene(layers, request.duration_seconds)
     except GenerationError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    identifier = _store_audio(generated.wav_bytes)
+    identifier = _store_audio(generated.wav_bytes, store)
     return {
         "id": identifier, "engine_id": generated.result.engine_id,
         "audio_url": f"/v1/generations/{identifier}/audio",
@@ -75,6 +70,11 @@ def generate_scene(request: SceneRequest) -> dict:
     }
 
 
+@app.post("/v1/scenes", status_code=201)
+def generate_scene(request: SceneRequest) -> dict:
+    return _generate_scene(request, _store_for(OUTPUT_DIR))
+
+
 @app.get("/health")
 def health() -> dict:
     return {"status": "ok", "original_sonumio_models_available": 0}
@@ -83,13 +83,12 @@ def health() -> dict:
 def models() -> list[dict]:
     return list_models()
 
-@app.post("/v1/generations", status_code=201)
-def generate(request: GenerationRequest) -> dict:
+def _generate(request: GenerationRequest, store: LocalAudioStore) -> dict:
     try:
         generated = generate_audio(**request.model_dump())
     except GenerationError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    generation_id = _store_audio(generated.wav_bytes)
+    generation_id = _store_audio(generated.wav_bytes, store)
     return {
         "id": generation_id,
         "model_id": generated.result.engine_id,
@@ -101,14 +100,26 @@ def generate(request: GenerationRequest) -> dict:
         "disclaimer": "Procedural DSP is not a trained AI model" if request.model_id == "procedural-sfx-v0" else "Third-party pretrained model",
     }
 
+
+@app.post("/v1/generations", status_code=201)
+def generate(request: GenerationRequest) -> dict:
+    return _generate(request, _store_for(OUTPUT_DIR))
+
+
 @app.get("/v1/generations/{generation_id}/audio")
 def audio(generation_id: str):
-    if not re.fullmatch(r"[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}", generation_id):
-        raise HTTPException(status_code=404, detail="Audio not found")
-    path = OUTPUT_DIR / f"{generation_id}.wav"
-    if not path.is_file():
-        raise HTTPException(status_code=404, detail="Audio not found")
-    return FileResponse(path, media_type="audio/wav", filename="sonumio.wav")
+    try:
+        wav_bytes = _store_for(OUTPUT_DIR).read(generation_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Audio not found") from exc
+    except (OutputStoreError, OSError) as exc:
+        raise HTTPException(status_code=503, detail="Local audio storage unavailable") from exc
+    return Response(
+        content=wav_bytes, media_type="audio/wav",
+        headers={"Content-Disposition": 'attachment; filename="sonumio.wav"',
+                 "Cache-Control": "no-store"},
+    )
+
 
 # ---------------------------------------------------------------------------
 # Development-only, bounded in-process jobs. These endpoints deliberately do
@@ -123,13 +134,9 @@ from .engines.procedural import recognized_sound_classes
 JOBS = LocalJobQueue(max_active=4, max_history=32, ttl_seconds=1800)
 
 
-def _cleanup_job_audio(result: dict, root: Path) -> None:
-    """Remove only locally generated, ID-validated WAV outputs."""
-    identifier = result.get("id")
-    if isinstance(identifier, str) and re.fullmatch(
-        r"[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}", identifier
-    ):
-        (root / f"{identifier}.wav").unlink(missing_ok=True)
+def _cleanup_job_audio(result: dict, store: LocalAudioStore) -> None:
+    """Remove only the audio associated with this queued job."""
+    store.delete(result.get("id") if isinstance(result, dict) else None)
 
 
 def _queue_response(job: dict) -> dict:
@@ -141,13 +148,14 @@ def _queue_response(job: dict) -> dict:
     }
 
 
-def _enqueue(kind: str, callback) -> dict:
-    # Keep the output path fixed per task so later config changes do not delete
-    # unrelated files when a cancelled/expired job is cleaned up.
-    output_root = OUTPUT_DIR
+def _enqueue(kind: str, callback, store: LocalAudioStore) -> dict:
+    # Capture the exact storage instance alongside the queued callback:
+    # changing OUTPUT_DIR later cannot redirect the render or its cleanup.
     try:
-        task = JOBS.submit(kind, callback,
-                           lambda result: _cleanup_job_audio(result, output_root))
+        task = JOBS.submit(
+            kind, callback,
+            lambda result: _cleanup_job_audio(result, store),
+        )
     except QueueFullError as exc:
         raise HTTPException(status_code=429, detail=str(exc)) from exc
     return _queue_response(task)
@@ -162,7 +170,8 @@ def enqueue_generation(request: GenerationRequest) -> dict:
         recognized_sound_classes(request.prompt)
     except GenerationError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    return _enqueue("generation", lambda: generate(request))
+    store = _store_for(OUTPUT_DIR)
+    return _enqueue("generation", lambda: _generate(request, store), store)
 
 
 @app.post("/v1/jobs/scenes", status_code=202)
@@ -174,7 +183,8 @@ def enqueue_scene(request: SceneRequest) -> dict:
             recognized_sound_classes(layer.prompt)
     except GenerationError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    return _enqueue("scene", lambda: generate_scene(request))
+    store = _store_for(OUTPUT_DIR)
+    return _enqueue("scene", lambda: _generate_scene(request, store), store)
 
 
 @app.get("/v1/jobs/{job_id}")
