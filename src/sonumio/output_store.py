@@ -229,7 +229,11 @@ class LocalAudioStore:
                 # device/inode comparison alone cannot identify a replaced
                 # regular file. Also check size and nanosecond metadata before
                 # reading. A modified preview is rejected rather than served.
+                # Ordinary published previews have exactly one hardlink
+                # after the staging temp is removed. Refuse a hardlinked
+                # external file smuggled under a UUID-shaped filename.
                 if (not stat.S_ISREG(opened.st_mode)
+                        or opened.st_nlink != 1
                         or (opened.st_dev, opened.st_ino, opened.st_size,
                             opened.st_mtime_ns, opened.st_ctime_ns)
                         != (expected.st_dev, expected.st_ino, expected.st_size,
