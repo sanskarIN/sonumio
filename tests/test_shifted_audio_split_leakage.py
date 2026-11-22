@@ -70,7 +70,7 @@ def _source(seed: int) -> np.ndarray:
     )
 
 
-@pytest.mark.parametrize("shift", [1, 97, 240])
+@pytest.mark.parametrize("shift", [1, 97, 240, 512, 768, 900])
 def test_distinct_wav_files_with_shifted_recording_are_rejected(tmp_path, shift):
     source = _source(11)
     shifted = np.roll(source, shift)
@@ -99,5 +99,16 @@ def test_unrelated_clips_are_accepted_with_narrow_audit_report(tmp_path):
     assert report["shifted_overlap_indexed_clips"] == 2
     assert report["shifted_overlap_indexed_anchors"] > 0
     assert report["shifted_overlap_full_clip_comparisons"] >= 0
-    assert "256 integer 8 kHz frames" in report["shifted_cross_split_overlap_gate"]
+    assert "1024 frames / 128 ms" in report["shifted_cross_split_overlap_gate"]
+    assert report["shifted_overlap_postings_examined"] >= 0
+    assert report["shifted_overlap_max_posting_visits_per_clip"] == 100_000
     assert report["near_duplicate_or_semantic_similarity_checked"] is False
+
+
+
+def test_long_shift_with_reverse_polarity_rejected_in_actual_crop(tmp_path):
+    original = _source(23)
+    edited = np.rint(-0.5 * np.roll(original, 816) + 600).astype(np.int16)
+    manifest, root = _dataset(tmp_path, original, edited)
+    with pytest.raises(ManifestError, match=r"line 2: shifted .* offset 816 frames"):
+        load_reviewed_splits(manifest, root, clips_per_asset=1)
