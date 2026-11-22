@@ -10,6 +10,7 @@ from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 import logging
+from math import isfinite
 import re
 import threading
 from time import monotonic
@@ -26,6 +27,10 @@ ID_PATTERN = re.compile(r"^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$")
 
 class QueueFullError(RuntimeError):
     """The local concurrency / queue limit was reached."""
+
+
+class QueueUnavailableError(RuntimeError):
+    """A local worker cannot accept a job or is shutting down."""
 
 
 class JobNotFoundError(KeyError):
@@ -76,11 +81,12 @@ class LocalJobQueue:
     """
 
     def __init__(self, *, max_active: int = 4, max_history: int = 32, ttl_seconds: float = 1800):
-        if not isinstance(max_active, int) or not 1 <= max_active <= 128:
+        if type(max_active) is not int or not 1 <= max_active <= 128:
             raise ValueError("max_active must be in [1, 128]")
-        if not isinstance(max_history, int) or max_history < max_active:
+        if type(max_history) is not int or max_history < max_active:
             raise ValueError("max_history must be >= max_active")
-        if not 1 <= ttl_seconds <= 86400:
+        if (type(ttl_seconds) not in (int, float)
+                or not 1 <= ttl_seconds <= 86400 or not isfinite(ttl_seconds)):
             raise ValueError("ttl_seconds must be between 1 and 86400")
         self.max_active = max_active
         self.max_history = max_history
@@ -117,10 +123,21 @@ class LocalJobQueue:
             raise ValueError("unsupported job kind")
         with self._cv:
             if self._closing:
-                raise RuntimeError("job queue is shutting down")
+                raise QueueUnavailableError("Local generation queue is shutting down")
             self._prune()
             if sum(job.status in ACTIVE for job in self._jobs.values()) >= self.max_active:
                 raise QueueFullError("Local generation queue is full; retry after another job finishes")
+            # Reserve an unused ID before modifying terminal history. A UUID
+            # collision must never overwrite a still-visible or queued job.
+            job_id = None
+            for _ in range(8):
+                candidate = str(uuid4())
+                if candidate not in self._jobs:
+                    job_id = candidate
+                    break
+            if job_id is None:
+                raise QueueUnavailableError("Could not allocate a unique local job ID")
+
             # Reserve one record while preserving the freshest terminal history.
             if len(self._jobs) >= self.max_history:
                 oldest_finished = next((key for key, value in self._jobs.items()
@@ -128,18 +145,31 @@ class LocalJobQueue:
                 if oldest_finished is None:
                     raise QueueFullError("Job history is full; retry later")
                 self._cleanup(self._jobs.pop(oldest_finished))
-            job_id = str(uuid4())
             task = _Job(id=job_id, kind=kind, produce=produce, cleanup=cleanup)
             self._jobs[job_id] = task
             self._pending.append(job_id)
-            if self._thread is None:
-                self._thread = threading.Thread(target=self._work, name="sonumio-local-jobs", daemon=True)
-                self._thread.start()
+            if self._thread is None or not self._thread.is_alive():
+                # A worker-start error must not leave a queued record that
+                # can never run. Roll back both in-memory reservations before
+                # reporting unavailability to the local HTTP endpoint.
+                try:
+                    worker = threading.Thread(
+                        target=self._work, name="sonumio-local-jobs", daemon=True
+                    )
+                    worker.start()
+                except Exception as exc:
+                    self._pending.remove(job_id)
+                    del self._jobs[job_id]
+                    self._thread = None
+                    raise QueueUnavailableError(
+                        "Local generation worker unavailable"
+                    ) from exc
+                self._thread = worker
             self._cv.notify_all()
             return task.public()
 
     def _find(self, job_id: str) -> _Job:
-        if not ID_PATTERN.fullmatch(job_id):
+        if not isinstance(job_id, str) or not ID_PATTERN.fullmatch(job_id):
             raise JobNotFoundError(job_id)
         job = self._jobs.get(job_id)
         if job is None:
@@ -192,10 +222,19 @@ class LocalJobQueue:
             message = None
             try:
                 result = task.produce()
+                if not isinstance(result, dict):
+                    message = "Generation failed; invalid renderer result"
+                    result = None
             except GenerationError as exc:
                 message = str(exc)
             except Exception:
                 LOG.exception("Local audio generation job failed")
+                message = "Generation failed; see local server logs"
+            except (SystemExit, KeyboardInterrupt):
+                # Renderers sometimes invoke sys.exit() or surface an
+                # interrupt inside the daemon thread. Never strand a running
+                # record or silently kill the queue's sole worker.
+                LOG.exception("Local audio generation worker interrupted")
                 message = "Generation failed; see local server logs"
             with self._cv:
                 if task.cancel_requested or self._closing:
@@ -217,14 +256,27 @@ class LocalJobQueue:
     def shutdown(self, *, wait: bool = True) -> None:
         with self._cv:
             self._closing = True
+            now = monotonic()
             for task in self._jobs.values():
-                if task.status in ACTIVE:
+                if task.status == "queued":
+                    # Queued renders cannot execute after shutdown. Make them
+                    # terminal *immediately* and clear their pending IDs, even
+                    # when the active renderer is still blocked.
                     task.cancel_requested = True
+                    task.status = "cancelled"
+                    task.finished_at = _utc()
+                    task.finished_clock = now
+                elif task.status in ("running", "cancelling"):
+                    task.cancel_requested = True
+                    task.status = "cancelling"
+            self._pending.clear()
             self._cv.notify_all()
-        if wait and self._thread is not None:
-            self._thread.join(timeout=10)
+        worker = self._thread
+        # Calling shutdown from a renderer must not attempt to join itself.
+        if wait and worker is not None and worker is not threading.current_thread():
+            worker.join(timeout=10)
         with self._cv:
-            if self._thread is None or not self._thread.is_alive():
+            if worker is None or not worker.is_alive():
                 for task in self._jobs.values():
                     self._cleanup(task)
                 self._jobs.clear()
