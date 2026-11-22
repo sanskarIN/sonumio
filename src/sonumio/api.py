@@ -126,7 +126,8 @@ def audio(generation_id: str):
 # not expose multi-user/public inference, arbitrary model paths or voice tasks.
 # The queue owns one background worker, not a thread per request.
 # ---------------------------------------------------------------------------
-from .jobs import LocalJobQueue, JobNotFoundError, JobConflictError, QueueFullError
+from .jobs import (LocalJobQueue, JobNotFoundError, JobConflictError,
+                   QueueFullError, QueueUnavailableError)
 from .scenes import validate_scene_plan
 from .validation import validate_request
 from .engines.procedural import recognized_sound_classes
@@ -158,6 +159,8 @@ def _enqueue(kind: str, callback, store: LocalAudioStore) -> dict:
         )
     except QueueFullError as exc:
         raise HTTPException(status_code=429, detail=str(exc)) from exc
+    except QueueUnavailableError as exc:
+        raise HTTPException(status_code=503, detail="Local generation queue unavailable") from exc
     return _queue_response(task)
 
 
