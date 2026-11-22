@@ -132,7 +132,24 @@ from .scenes import validate_scene_plan
 from .validation import validate_request
 from .engines.procedural import recognized_sound_classes
 
-JOBS = LocalJobQueue(max_active=4, max_history=32, ttl_seconds=1800)
+# Opt-in only: the default remains RAM-only until local crash-recovery
+# behavior is field-tested. The ledger records limited status/audio references,
+# not prompts, audio bytes, renderer arguments, or neural checkpoints.
+_JOB_JOURNAL = (
+    OUTPUT_DIR / ".sonumio-api-jobs.json"
+    if os.environ.get("SONUMIO_LOCAL_JOB_JOURNAL") == "1" else None
+)
+
+
+def _cleanup_recovered_audio(result: dict) -> None:
+    _cleanup_job_audio(result, _store_for(OUTPUT_DIR))
+
+
+JOBS = LocalJobQueue(
+    max_active=4, max_history=32, ttl_seconds=1800,
+    journal_path=_JOB_JOURNAL,
+    recovered_cleanup=_cleanup_recovered_audio,
+)
 
 
 def _cleanup_job_audio(result: dict, store: LocalAudioStore) -> None:
