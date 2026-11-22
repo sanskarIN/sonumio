@@ -6,9 +6,9 @@ and probes every possible frame offset of the new clip. A fingerprint hit is
 NEVER enough to reject audio: the corresponding full overlapping waveforms
 must have a high centered absolute correlation.
 
-Scope: integer offsets of at most 256 frames at the fixed 8 kHz model-input
-rate, and approximately gain/DC/polarity-preserving copies whose sign anchors
-remain recognizable. The detector intentionally ignores low-complexity
+Scope: integer offsets of at most half the model-input clip (default 1024
+frames = 128 ms at 8 kHz), and approximately gain/DC/polarity-preserving
+copies whose sign anchors remain recognizable. The detector intentionally ignores low-complexity
 anchors and cannot certify absence of leakage, arbitrary edits, time warps,
 resampling differences, remixing, or semantically related recordings.
 """
@@ -28,10 +28,11 @@ _ANCHOR_STRIDE = 128
 _MIN_TURNS = 8
 _TRIPLES = ((0, 1, 2), (0, 1, 3), (0, 2, 3), (1, 2, 3))
 _MASK48 = (1 << 48) - 1
-DEFAULT_MAX_SHIFT = 256
+DEFAULT_MAX_SHIFT = 1024
 DEFAULT_THRESHOLD = 0.9995
 DEFAULT_MAX_CANDIDATES = 256
 DEFAULT_MAX_BUCKET_ITEMS = 4096
+DEFAULT_MAX_POSTING_VISITS = 100_000
 
 
 @dataclass(frozen=True)
@@ -97,32 +98,40 @@ class ShiftedLeakageGuard:
         self,
         *,
         frames: int,
-        max_shift_frames: int = DEFAULT_MAX_SHIFT,
+        max_shift_frames: int | None = None,
         threshold: float = DEFAULT_THRESHOLD,
         max_candidates: int = DEFAULT_MAX_CANDIDATES,
         max_bucket_items: int = DEFAULT_MAX_BUCKET_ITEMS,
+        max_posting_visits: int = DEFAULT_MAX_POSTING_VISITS,
     ) -> None:
         if type(frames) is not int or frames < 1024:
             raise ValueError("frames must be an integer >= 1024")
+        if max_shift_frames is None:
+            max_shift_frames = min(DEFAULT_MAX_SHIFT, frames // 2)
         if (type(max_shift_frames) is not int
-                or not 1 <= max_shift_frames <= frames // 4):
-            raise ValueError("max_shift_frames must be an integer in [1, frames//4]")
+                or not 1 <= max_shift_frames <= frames // 2):
+            raise ValueError("max_shift_frames must be an integer in [1, frames//2]")
         if type(threshold) is not float or not 0.99 <= threshold < 1.0:
             raise ValueError("threshold must be a float in [0.99, 1.0)")
         if type(max_candidates) is not int or not 1 <= max_candidates <= 4096:
             raise ValueError("max_candidates must be an integer in [1, 4096]")
         if type(max_bucket_items) is not int or not 1 <= max_bucket_items <= 65536:
             raise ValueError("max_bucket_items must be an integer in [1, 65536]")
+        if (type(max_posting_visits) is not int
+                or not 1 <= max_posting_visits <= 1_000_000):
+            raise ValueError("max_posting_visits must be an integer in [1, 1000000]")
         self.frames = frames
         self.max_shift_frames = max_shift_frames
         self.threshold = threshold
         self.max_candidates = max_candidates
         self.max_bucket_items = max_bucket_items
+        self.max_posting_visits = max_posting_visits
         self._entries: list[_Clip] = []
         self._buckets: dict[tuple[str, int, int], list[tuple[int, int]]] = defaultdict(list)
         self._split_counts: Counter[str] = Counter()
         self.compared_pairs = 0
         self.indexed_anchors = 0
+        self.postings_examined = 0
 
     @property
     def indexed_clips(self) -> int:
@@ -149,6 +158,7 @@ class ShiftedLeakageGuard:
         keys, active = _sign_fingerprints(samples)
         if any(self._split_counts[other] for other in _SPLITS if other != split):
             considered: set[tuple[int, int]] = set()
+            posting_visits = 0
             for q in np.flatnonzero(active):
                 q = int(q)
                 for column in range(len(_TRIPLES)):
@@ -157,6 +167,16 @@ class ShiftedLeakageGuard:
                         if other == split:
                             continue
                         for idx, p in self._buckets.get((other, column, code), ()):
+                            # Counting every visited posting, not merely
+                            # plausible lags, prevents repeated but distant
+                            # anchors from making a single check unbounded.
+                            posting_visits += 1
+                            self.postings_examined += 1
+                            if posting_visits > self.max_posting_visits:
+                                raise ManifestError(
+                                    "shifted overlap audit exceeded bounded posting visit budget; "
+                                    "split recordings into smaller manually reviewed batches"
+                                )
                             lag = q - p
                             if abs(lag) > self.max_shift_frames:
                                 continue
