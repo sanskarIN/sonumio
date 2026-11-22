@@ -140,13 +140,14 @@ class LocalAudioStore:
             self._directory()
             now = self._clock()
             records = self._prune(now)
-            total = sum(row[2] for row in records)
-            while records and (len(records) >= self.max_files
-                               or total + len(audio) > self.max_total_bytes):
-                _, old, size = records.pop(0)
-                old.unlink(missing_ok=True)
-                total -= size
+
+            # Stage and link the *complete* replacement before evicting valid
+            # previews. If staging, fsync, or the no-clobber link fails, the
+            # old previews must remain available to clients. The completed
+            # write is visible only while holding the same process-local lock
+            # used for reads, and quotas are restored before this call returns.
             staged: Path | None = None
+            published: Path | None = None
             try:
                 with tempfile.NamedTemporaryFile(
                     mode="wb", dir=self.root, prefix=_TEMP_PREFIX,
@@ -156,19 +157,35 @@ class LocalAudioStore:
                     handle.write(audio)
                     handle.flush()
                     os.fsync(handle.fileno())
-                # Record the managed lifetime before exposing the completed inode.
                 os.utime(staged, (now, now))
+
+                identifier: str | None = None
                 for _ in range(5):
-                    identifier = str(uuid4())
-                    destination = self.root / f"{identifier}.wav"
+                    candidate = str(uuid4())
+                    destination = self.root / f"{candidate}.wav"
                     try:
-                        # Link is atomic and fails rather than overwriting an
-                        # existing file, unlike os.replace on UUID collision.
                         os.link(staged, destination)
-                        return identifier
                     except FileExistsError:
                         continue
-                raise OutputStoreError("Failed to allocate unique audio ID")
+                    identifier = candidate
+                    published = destination
+                    break
+                if identifier is None:
+                    raise OutputStoreError("Failed to allocate unique audio ID")
+
+                total = sum(entry[2] for entry in records)
+                while records and (len(records) + 1 > self.max_files
+                                   or total + len(audio) > self.max_total_bytes):
+                    _, old, size = records.pop(0)
+                    old.unlink(missing_ok=True)
+                    total -= size
+                return identifier
+            except Exception:
+                # A link may have succeeded before a later quota cleanup error.
+                # Do not leave an unreported, newly published audio file.
+                if published is not None:
+                    published.unlink(missing_ok=True)
+                raise
             finally:
                 if staged is not None:
                     staged.unlink(missing_ok=True)
