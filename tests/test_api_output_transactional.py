@@ -18,7 +18,7 @@ def _wav(frames: int) -> bytes:
         writer.setnchannels(1)
         writer.setsampwidth(2)
         writer.setframerate(24_000)
-        writer.writeframes(b"\\x01\\x02" * frames)
+        writer.writeframes(b"\x01\x02" * frames)
     return stream.getvalue()
 
 
