@@ -8,6 +8,8 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+import subprocess
+import sys
 import threading
 import time
 from uuid import uuid4
@@ -294,3 +296,51 @@ def test_new_renderer_results_do_not_leak_secrets_in_ledger(tmp_path):
         assert "private_key" not in payload
     finally:
         queue.shutdown()
+
+
+
+def test_api_opt_in_expired_recovery_works_during_initial_import(tmp_path):
+    """Recovery cleanup can execute before later API helpers are declared."""
+    output = tmp_path / "outputs"
+    output.mkdir()
+    journal_path = output / ".sonumio-api-jobs.json"
+    item = _reference()
+    finished = {
+        "id": str(uuid4()), "kind": "generation", "status": "succeeded",
+        "created_at": "2026-01-01T00:00:00+00:00",
+        "started_at": "2026-01-01T00:00:01+00:00",
+        "finished_at": "2026-01-01T00:00:02+00:00",
+        "finished_epoch": 1.0,
+        "error": None,
+        "result": {"id": item["id"], "audio_url": item["audio_url"]},
+    }
+    job_journal.LocalJobJournal(journal_path).save([finished])
+    environment = {
+        **os.environ,
+        "SONUMIO_OUTPUT_DIR": str(output),
+        "SONUMIO_LOCAL_JOB_JOURNAL": "1",
+    }
+    child = subprocess.run(
+        [sys.executable, "-c",
+         "from sonumio import api; assert api.JOBS._journal is not None"],
+        env=environment, capture_output=True, text=True, timeout=25,
+        check=False,
+    )
+    assert child.returncode == 0, child.stderr
+    assert job_journal.LocalJobJournal(journal_path).load() == []
+
+
+def test_api_opt_in_refuses_corrupted_restart_journal(tmp_path):
+    output = tmp_path / "outputs"
+    output.mkdir()
+    path = output / ".sonumio-api-jobs.json"
+    path.write_bytes(b"not valid JSON")
+    child = subprocess.run(
+        [sys.executable, "-c", "from sonumio import api"],
+        env={**os.environ, "SONUMIO_OUTPUT_DIR": str(output),
+             "SONUMIO_LOCAL_JOB_JOURNAL": "1"},
+        capture_output=True, text=True, timeout=25, check=False,
+    )
+    assert child.returncode != 0
+    assert "JobJournalError" in child.stderr
+    assert path.read_bytes() == b"not valid JSON"
