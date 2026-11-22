@@ -1,7 +1,8 @@
 """Small, bounded, in-process generation queue for LOCAL DEVELOPMENT ONLY.
 
-One worker prevents simultaneous heavy renderers from exhausting memory. It is
-not durable across restarts; cancel of an active renderer is non-preemptive.
+One worker prevents simultaneous heavy renderers from exhausting memory.
+An optional bounded metadata ledger can report interrupted work after restarts,
+but never replays renders; active cancellation remains non-preemptive.
 No model weights or network access are involved in scheduling.
 """
 from __future__ import annotations
@@ -235,13 +236,17 @@ class LocalJobQueue:
             if job_id is None:
                 raise QueueUnavailableError("Could not allocate a unique local job ID")
 
-            # Reserve one record while preserving the freshest terminal history.
+            # Defer cleaning any evicted history until both the new record
+            # and worker admission succeed. If a journal write or worker
+            # startup fails, the previous completed result stays available.
+            history_before = self._jobs.copy()
+            evicted: _Job | None = None
             if len(self._jobs) >= self.max_history:
                 oldest_finished = next((key for key, value in self._jobs.items()
                                         if value.status in TERMINAL), None)
                 if oldest_finished is None:
                     raise QueueFullError("Job history is full; retry later")
-                self._cleanup(self._jobs.pop(oldest_finished))
+                evicted = self._jobs.pop(oldest_finished)
             task = _Job(id=job_id, kind=kind, produce=produce, cleanup=cleanup)
             self._jobs[job_id] = task
             self._pending.append(job_id)
@@ -251,7 +256,8 @@ class LocalJobQueue:
                 self._save_journal(strict=True)
             except QueueUnavailableError:
                 self._pending.remove(job_id)
-                del self._jobs[job_id]
+                self._jobs.clear()
+                self._jobs.update(history_before)
                 raise
             if self._thread is None or not self._thread.is_alive():
                 # A worker-start error must not leave a queued record that
@@ -264,13 +270,16 @@ class LocalJobQueue:
                     worker.start()
                 except Exception as exc:
                     self._pending.remove(job_id)
-                    del self._jobs[job_id]
+                    self._jobs.clear()
+                    self._jobs.update(history_before)
                     self._thread = None
                     self._save_journal()
                     raise QueueUnavailableError(
                         "Local generation worker unavailable"
                     ) from exc
                 self._thread = worker
+            if evicted is not None:
+                self._cleanup(evicted)
             self._cv.notify_all()
             return task.public()
 
