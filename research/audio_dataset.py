@@ -287,12 +287,14 @@ def load_reviewed_splits(manifest: str | Path, audio_root: str | Path, *,
         "aligned_overlap_indexed_clips": aligned_overlap.indexed_clips,
         "aligned_overlap_full_clip_comparisons": aligned_overlap.compared_pairs,
         "shifted_cross_split_overlap_gate": (
-            "up to 256 integer 8 kHz frames; high-variation derivative-sign "
+            "up to half the 2048-frame input (1024 frames / 128 ms at 8 kHz); high-variation derivative-sign "
             "anchors, then full overlapping centered abs(correlation) >= 0.9995"
         ),
         "shifted_overlap_indexed_clips": shifted_overlap.indexed_clips,
         "shifted_overlap_indexed_anchors": shifted_overlap.indexed_anchors,
         "shifted_overlap_full_clip_comparisons": shifted_overlap.compared_pairs,
+        "shifted_overlap_postings_examined": shifted_overlap.postings_examined,
+        "shifted_overlap_max_posting_visits_per_clip": shifted_overlap.max_posting_visits,
         "near_duplicate_or_semantic_similarity_checked": False,
         "complete_clips_without_zero_padding": True,
         "human_rights_review_remains_required": True,
