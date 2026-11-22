@@ -86,7 +86,7 @@ def test_link_swap_between_lstat_and_open_cannot_escape_store(
     assert target.is_symlink()
 
 
-def test_fd_read_keeps_original_bytes_when_path_changes_after_open(
+def test_unlinked_open_descriptor_fails_closed_after_path_replacement(
     tmp_path, monkeypatch,
 ):
     store = LocalAudioStore(tmp_path / "api")
@@ -105,7 +105,10 @@ def test_fd_read_keeps_original_bytes_when_path_changes_after_open(
         return fd
 
     monkeypatch.setattr(output_store.os, "open", change_after_open)
-    assert store.read(identifier) == expected_audio
+    # Unlinking the opened inode changes its link count/ctime. Treat this as
+    # tampering rather than serving a stale, anonymously unlinked preview.
+    with pytest.raises(FileNotFoundError, match="Audio not found"):
+        store.read(identifier)
     assert outside.read_bytes() == b"private bytes"
     assert target.read_bytes() == b"other audio file on this path"
 
