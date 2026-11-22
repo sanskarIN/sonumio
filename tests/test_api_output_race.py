@@ -137,3 +137,38 @@ def test_regular_uuid_named_directory_is_not_read_as_audio(tmp_path):
     target.mkdir()
     with pytest.raises(FileNotFoundError, match="Audio not found"):
         store.read(identifier)
+
+
+
+def test_same_size_file_swap_is_rejected(tmp_path, monkeypatch):
+    original = _wav(16)
+    store = LocalAudioStore(tmp_path / "api")
+    identifier = store.write(original)
+    target = store.root / f"{identifier}.wav"
+    altered = bytearray(original)
+    altered[-1] ^= 0x7F
+    assert len(altered) == len(original)
+
+    def replace():
+        target.unlink()
+        target.write_bytes(altered)
+
+    _swap_on_open(monkeypatch, target, replace)
+    with pytest.raises(FileNotFoundError, match="Audio not found"):
+        store.read(identifier)
+
+
+def test_hardlinked_external_file_is_not_served_as_managed_preview(tmp_path):
+    store = LocalAudioStore(tmp_path / "api")
+    identifier = store.write(_wav(3))
+    target = store.root / f"{identifier}.wav"
+    outside = tmp_path / "private.txt"
+    outside.write_bytes(b"sensitive data from elsewhere")
+    target.unlink()
+    try:
+        os.link(outside, target)
+    except (OSError, NotImplementedError):
+        pytest.skip("Hard links not supported by this filesystem")
+    with pytest.raises(FileNotFoundError, match="Audio not found"):
+        store.read(identifier)
+    assert outside.read_bytes() == b"sensitive data from elsewhere"
