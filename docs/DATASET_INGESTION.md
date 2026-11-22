@@ -97,16 +97,20 @@ source independence or declared recording rights.
 After exact 8 kHz crop hashes and aligned gain/DC/polarity correlation,
 a second fail-closed check looks for highly correlated *time-shifted*
 copies across train, validation and test. It scans all integer offsets
-within **256 frames (32 ms at 8 kHz)**, but uses only high-variation
+within **1024 frames (128 ms at 8 kHz)**, retaining at least 50% of the
+original 2048-frame crop for each verified comparison, but uses only high-variation
 65-frame derivative-sign anchors to retrieve plausible candidates.
 For each candidate, the decision uses centered absolute correlation
 of the full real overlap (threshold 0.9995), never matching a zero-padded
 tail. The index separates splits, limits both candidate comparisons and
-per-key fanout, and reports audited clip and anchor counts. Extra index
-or candidate saturation aborts ingestion rather than silently passing.
+per-key fanout, and **total posting-list visits per new clip**. Each
+new clip is limited to 100,000 posting visits, regardless of how many
+candidate lags survive the time-offset prefilter. The report includes
+clip, anchor, candidate-comparison and posting-visit counts. Any work-budget
+saturation aborts ingestion rather than silently passing.
 
 This is not comprehensive near-duplicate search: low-variation tones,
-offsets beyond 32 ms, time stretching, sample-rate edits, mixing,
+offsets beyond 128 ms, time stretching, sample-rate edits, mixing,
 complex processing and semantically similar recordings may evade the gate.
 It cannot prove recording independence, legal rights or model quality.
 Human review remains mandatory.
