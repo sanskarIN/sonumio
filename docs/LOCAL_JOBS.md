@@ -29,7 +29,26 @@ existing `/v1/generations/{uuid}/audio` endpoint. State may briefly be
 
 ## Guarantees and limitations
 
-- Jobs are in memory, not durable. Restarting the application loses job state.
+- By default, jobs remain in memory and restarting the application loses
+  their state. An **opt-in local status ledger** can retain bounded metadata:
+  set `SONUMIO_LOCAL_JOB_JOURNAL=1` before starting the API. The ledger file is
+  `<SONUMIO_OUTPUT_DIR>/.sonumio-api-jobs.json` (or the corresponding default
+  output directory). It is intended for one loopback-only API process.
+- Journaled jobs are **never automatically resumed** after a crash. An
+  interrupted `queued`, `running` or `cancelling` job becomes `failed`
+  with the generic message `Generation interrupted by local server restart`.
+  Terminal states survive within the configured retention period. Successful
+  jobs retain only a validated local WAV ID and audio URL; metrics and other
+  result fields are not restored. WAV availability still depends on storage
+  retention, so a recovered success may refer to an expired audio file.
+- The journal uses bounded, fsynced temporary snapshots and atomic rename.
+  It stores no prompts, waveforms, arbitrary renderer results or checkpoint
+  data. Corrupted, oversized, symlinked or incompatible journal files cause
+  fail-closed startup rather than silent data discard. Back up and inspect
+  such a file before changing it. If journal writes fail at submission, new
+  work is rejected instead of receiving an untracked accepted job. Journal
+  writes during ongoing work are best-effort and can leave last-known states
+  after a storage error; this is **not** a transactional job queue.
 - One worker executes tasks sequentially. This prevents unlimited parallel
   local generation but is not GPU scheduling or process isolation.
 - Additional submissions beyond the 4-job active budget return HTTP `429`.
@@ -51,14 +70,17 @@ existing `/v1/generations/{uuid}/audio` endpoint. State may briefly be
   server logs. The single worker continues after a failed job.
 - Terminal records are retained for up to 30 minutes while the process is
   active; their audio files are removed on expiry or history eviction.
-  A background idle sweep and API reads can trigger expiry. On shutdown,
-  best-effort cleanup occurs, but crashes/restarts can leave orphan WAV files
-  under `outputs/`; users must review and remove them manually.
+  A background idle sweep and API reads can trigger expiry. With the default
+  RAM queue, shutdown attempts to clean up its completed audio files. With
+  the opt-in journal, graceful shutdown preserves terminal metadata and its
+  WAV references for later cleanup at the original TTL. A crash can still
+  leave orphan WAVs if audio was committed immediately before a metadata
+  update; the output store's own separate retention cleanup remains necessary.
 - Existing synchronous endpoints remain available for development callers.
   They do **not** use job retention or cleanup, so their files persist until
   manually deleted.
 - This service has **no user authentication, per-user quotas, abuse prevention,
-  multi-process persistence, encrypted storage, or production security audit**.
+  multi-process coordination, encrypted storage, or production security audit**.
   Do not expose the API to a public network or deploy this as a shared service.
 
 Do not merge or publish Sonumio releases, pre-releases, tags or model weights
