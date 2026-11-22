@@ -16,7 +16,7 @@ def _add(guard, audio, split="train", line=1):
     guard.add(audio, split=split, line=line, piece=1)
 
 
-@pytest.mark.parametrize("shift", [1, 31, 64, 101, 256])
+@pytest.mark.parametrize("shift", [-1024, -900, -300, -1, 1, 31, 64, 101, 256, 300, 900, 1024])
 def test_integer_shifted_copies_are_rejected(shift):
     source = _random(7)
     guard = ShiftedLeakageGuard(frames=2048)
@@ -60,7 +60,7 @@ def test_lag_beyond_bound_is_not_claimed_detected():
     source = _random(0)
     guard = ShiftedLeakageGuard(frames=2048)
     _add(guard, source)
-    _add(guard, np.roll(source, 300), "validation", 2)
+    _add(guard, np.roll(source, 1200), "validation", 2)
     assert guard.indexed_clips == 2
 
 
@@ -112,7 +112,9 @@ def test_candidate_budget_fails_closed():
 @pytest.mark.parametrize("options", [
     {"frames": True}, {"frames": 64},
     {"frames": 2048, "max_shift_frames": 0},
-    {"frames": 2048, "max_shift_frames": 600},
+    {"frames": 2048, "max_shift_frames": 1025},
+    {"frames": 2048, "max_posting_visits": 0},
+    {"frames": 2048, "max_posting_visits": True},
     {"frames": 2048, "threshold": 1.0},
     {"frames": 2048, "max_candidates": 0},
     {"frames": 2048, "max_bucket_items": 0},
@@ -131,3 +133,59 @@ def test_many_train_only_clips_do_not_trigger_full_comparisons():
     _add(guard, _random(9999), "validation", 501)
     assert guard.indexed_clips == 501
     assert guard.compared_pairs <= guard.max_candidates
+
+
+
+def test_half_clip_default_and_small_frame_configuration():
+    full = ShiftedLeakageGuard(frames=2048)
+    assert full.max_shift_frames == 1024
+    assert full.max_posting_visits == 100_000
+    assert ShiftedLeakageGuard(frames=1024).max_shift_frames == 512
+    assert ShiftedLeakageGuard(frames=2048, max_shift_frames=384).max_shift_frames == 384
+
+
+def test_reject_long_shift_with_gain_and_dc_change():
+    original = _random(123)
+    edited = (np.roll(original, -896) * 0.63 - 0.11).astype(np.float32)
+    guard = ShiftedLeakageGuard(frames=2048)
+    _add(guard, original)
+    with pytest.raises(ManifestError, match="offset -896 frames"):
+        _add(guard, edited, "validation", 2)
+    assert guard.indexed_clips == 1
+
+
+def test_posting_visit_limit_fails_closed_without_partial_new_index():
+    guard = ShiftedLeakageGuard(frames=2048, max_posting_visits=1)
+    original = _random(20)
+    for index in range(2):
+        edited = _random(100 + index)
+        edited[:65] = original[:65]
+        _add(guard, edited, "train", index + 1)
+    with pytest.raises(ManifestError, match="posting visit budget"):
+        _add(guard, original, "validation", 3)
+    assert guard.indexed_clips == 2
+    assert guard.postings_examined >= 2
+
+
+def test_posting_visit_budget_is_per_new_clip_not_lifetime():
+    guard = ShiftedLeakageGuard(frames=2048, max_posting_visits=100)
+    original = _random(42)
+    _add(guard, original, "train", 1)
+    # Independent clips produce no high-correlation matched overlap and the
+    # configured scan allowance resets for each new validated clip.
+    for i in range(5):
+        _add(guard, _random(i + 900), "validation", i + 2)
+    assert guard.indexed_clips == 6
+    assert guard.postings_examined <= 5 * guard.max_posting_visits
+
+
+def test_half_clip_overlap_uses_real_samples_not_wraparound():
+    guard = ShiftedLeakageGuard(frames=2048)
+    source = _random(2)
+    _add(guard, source)
+    # Exactly 1024 real samples overlap; the leading 1024 are an unrelated
+    # recording, not synthetic padding. The rest is a genuine shifted copy.
+    modified = _random(3)
+    modified[1024:] = source[:1024]
+    with pytest.raises(ManifestError, match="overlap 1024 frames"):
+        _add(guard, modified, "validation", 2)
