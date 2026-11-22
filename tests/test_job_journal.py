@@ -344,3 +344,40 @@ def test_api_opt_in_refuses_corrupted_restart_journal(tmp_path):
     assert child.returncode != 0
     assert "JobJournalError" in child.stderr
     assert path.read_bytes() == b"not valid JSON"
+
+
+
+def test_failed_new_admission_preserves_full_history_and_existing_audio(
+    tmp_path, monkeypatch,
+):
+    """A failed snapshot must not evict the only known successful WAV."""
+    path = tmp_path / "jobs.json"
+    original_audio = _reference()
+    removed = []
+    q = jobs.LocalJobQueue(
+        max_active=1, max_history=1, journal_path=path,
+    )
+    try:
+        old = q.submit(
+            "generation", lambda: original_audio,
+            lambda result: removed.append(result["id"]),
+        )
+        assert _wait(q, old["id"], {"succeeded"})
+        previous = path.read_bytes()
+
+        with monkeypatch.context() as patch:
+            patch.setattr(
+                q._journal, "save",
+                lambda _: (_ for _ in ()).throw(job_journal.JobJournalError("full")),
+            )
+            with pytest.raises(jobs.QueueUnavailableError, match="journal unavailable"):
+                q.submit("generation", lambda: _reference(), lambda _: None)
+
+        assert q.get(old["id"])["status"] == "succeeded"
+        assert q.get(old["id"])["result"] == original_audio
+        assert removed == []
+        assert path.read_bytes() == previous
+        assert not q._pending
+        assert len(q._jobs) == 1
+    finally:
+        q.shutdown()
