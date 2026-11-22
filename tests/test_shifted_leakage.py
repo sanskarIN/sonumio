@@ -21,7 +21,10 @@ def test_integer_shifted_copies_are_rejected(shift):
     source = _random(7)
     guard = ShiftedLeakageGuard(frames=2048)
     _add(guard, source)
-    with pytest.raises(ManifestError, match=rf"shifted .* offset {shift} frames"):
+    # At exactly half a circular buffer, +1024 and -1024 are equally
+    # valid; the retrieval order may choose either offset.
+    expected_offset = r"-?1024" if abs(shift) == 1024 else str(shift)
+    with pytest.raises(ManifestError, match=rf"shifted .* offset {expected_offset} frames"):
         _add(guard, np.roll(source, shift), "validation", 2)
     assert guard.indexed_clips == 1
     assert guard.compared_pairs >= 1
@@ -60,7 +63,12 @@ def test_lag_beyond_bound_is_not_claimed_detected():
     source = _random(0)
     guard = ShiftedLeakageGuard(frames=2048)
     _add(guard, source)
-    _add(guard, np.roll(source, 1200), "validation", 2)
+    # A circular roll by +1200 also represents a legitimate -848 overlap.
+    # Use unrelated leading content instead: the *only* common region has
+    # 848 frames at +1200, below the minimum accepted 1024-frame overlap.
+    shifted = _random(55)
+    shifted[1200:] = source[:848]
+    _add(guard, shifted, "validation", 2)
     assert guard.indexed_clips == 2
 
 
