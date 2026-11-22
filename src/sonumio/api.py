@@ -142,7 +142,10 @@ _JOB_JOURNAL = (
 
 
 def _cleanup_recovered_audio(result: dict) -> None:
-    _cleanup_job_audio(result, _store_for(OUTPUT_DIR))
+    # JOBS is constructed during module import. Expired recovered records can
+    # trigger cleanup before the later queue helper is defined.
+    # Resolve the stored output ID directly using already-defined functions.
+    _store_for(OUTPUT_DIR).delete(result.get("id") if isinstance(result, dict) else None)
 
 
 JOBS = LocalJobQueue(
