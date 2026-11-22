@@ -90,3 +90,23 @@ they are new independent source groups. The report includes
 This gate does **not** identify near-duplicates, pitch/time shifts, overlapping
 but non-identical excerpts, or related recording sessions. It does not prove
 source independence or declared recording rights.
+
+
+## Narrow shift-aware overlap audit
+
+After exact 8 kHz crop hashes and aligned gain/DC/polarity correlation,
+a second fail-closed check looks for highly correlated *time-shifted*
+copies across train, validation and test. It scans all integer offsets
+within **256 frames (32 ms at 8 kHz)**, but uses only high-variation
+65-frame derivative-sign anchors to retrieve plausible candidates.
+For each candidate, the decision uses centered absolute correlation
+of the full real overlap (threshold 0.9995), never matching a zero-padded
+tail. The index separates splits, limits both candidate comparisons and
+per-key fanout, and reports audited clip and anchor counts. Extra index
+or candidate saturation aborts ingestion rather than silently passing.
+
+This is not comprehensive near-duplicate search: low-variation tones,
+offsets beyond 32 ms, time stretching, sample-rate edits, mixing,
+complex processing and semantically similar recordings may evade the gate.
+It cannot prove recording independence, legal rights or model quality.
+Human review remains mandatory.
