@@ -33,6 +33,14 @@ existing `/v1/generations/{uuid}/audio` endpoint. State may briefly be
 - One worker executes tasks sequentially. This prevents unlimited parallel
   local generation but is not GPU scheduling or process isolation.
 - Additional submissions beyond the 4-job active budget return HTTP `429`.
+  A worker that cannot start, an exhausted unique job-ID reservation, or a
+  queue already shutting down returns HTTP `503` instead of accepting a
+  job that cannot run. Job IDs are reserved without overwriting existing
+  queued or terminal history, even if a collision is injected.
+- Nonblocking shutdown immediately marks all still-queued jobs
+  `cancelled` (including a finish timestamp) and clears pending work. An
+  in-progress render is marked `cancelling` until it returns, when its output
+  is discarded and best-effort cleaned. Shutdown does not preempt the renderer.
 - Pending jobs can be cancelled before starting. Once running, cancellation
   means **discarding the result when the current renderer returns**; it does
   not interrupt a model, stop a GPU kernel, or guarantee immediate release
