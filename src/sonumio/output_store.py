@@ -203,8 +203,8 @@ class LocalAudioStore:
             # a swapped symlink between the check and open. Verify the *same*
             # regular-file identity on both sides of opening the descriptor.
             # O_NOFOLLOW rejects the leaf symlink outright on POSIX; on
-            # platforms without that flag, comparing lstat to fstat still
-            # rejects an exchanged inode before any bytes are read.
+            # platforms without that flag, comparing lstat and fstat metadata still
+            # rejects ordinary file replacement before any bytes are read.
             try:
                 expected = path.lstat()
             except (FileNotFoundError, NotADirectoryError) as exc:
@@ -225,9 +225,15 @@ class LocalAudioStore:
 
             with os.fdopen(descriptor, "rb") as handle:
                 opened = os.fstat(handle.fileno())
+                # Inodes may be immediately recycled after unlink, so
+                # device/inode comparison alone cannot identify a replaced
+                # regular file. Also check size and nanosecond metadata before
+                # reading. A modified preview is rejected rather than served.
                 if (not stat.S_ISREG(opened.st_mode)
-                        or (opened.st_dev, opened.st_ino)
-                        != (expected.st_dev, expected.st_ino)
+                        or (opened.st_dev, opened.st_ino, opened.st_size,
+                            opened.st_mtime_ns, opened.st_ctime_ns)
+                        != (expected.st_dev, expected.st_ino, expected.st_size,
+                            expected.st_mtime_ns, expected.st_ctime_ns)
                         or opened.st_size > self.max_file_bytes):
                     raise FileNotFoundError("Audio not found")
                 data = handle.read(self.max_file_bytes + 1)
