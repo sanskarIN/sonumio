@@ -11,13 +11,18 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 import logging
 from math import isfinite
+from pathlib import Path
 import re
 import threading
-from time import monotonic
+from time import monotonic, time as wall_time
 from typing import Callable
 from uuid import uuid4
 
 from .errors import GenerationError
+from .job_journal import (
+    JobJournalError, LocalJobJournal, MAX_RECORDS,
+    recoverable_audio_result,
+)
 
 LOG = logging.getLogger(__name__)
 TERMINAL = frozenset({"succeeded", "failed", "cancelled"})
@@ -56,6 +61,7 @@ class _Job:
     started_at: str | None = None
     finished_at: str | None = None
     finished_clock: float | None = None
+    finished_epoch: float | None = None
     result: dict | None = None
     error: str | None = None
     cancel_requested: bool = False
@@ -80,7 +86,12 @@ class LocalJobQueue:
     cancellation of an already running model. Not suitable for public servers.
     """
 
-    def __init__(self, *, max_active: int = 4, max_history: int = 32, ttl_seconds: float = 1800):
+    def __init__(
+        self, *, max_active: int = 4, max_history: int = 32,
+        ttl_seconds: float = 1800,
+        journal_path: str | Path | None = None,
+        recovered_cleanup: Callable[[dict], None] | None = None,
+    ):
         if type(max_active) is not int or not 1 <= max_active <= 128:
             raise ValueError("max_active must be in [1, 128]")
         if type(max_history) is not int or max_history < max_active:
@@ -88,6 +99,10 @@ class LocalJobQueue:
         if (type(ttl_seconds) not in (int, float)
                 or not 1 <= ttl_seconds <= 86400 or not isfinite(ttl_seconds)):
             raise ValueError("ttl_seconds must be between 1 and 86400")
+        if journal_path is not None and max_history > MAX_RECORDS:
+            raise ValueError("journaled job history exceeds bounded record limit")
+        if recovered_cleanup is not None and not callable(recovered_cleanup):
+            raise TypeError("recovered_cleanup must be callable")
         self.max_active = max_active
         self.max_history = max_history
         self.ttl_seconds = ttl_seconds
@@ -96,6 +111,83 @@ class LocalJobQueue:
         self._jobs: dict[str, _Job] = {}
         self._thread: threading.Thread | None = None
         self._closing = False
+        self._journal = (LocalJobJournal(journal_path)
+                         if journal_path is not None else None)
+        self._recovered_cleanup = recovered_cleanup or (lambda result: None)
+        if self._journal is not None:
+            self._recover()
+
+    def _journal_rows(self) -> list[dict]:
+        rows = []
+        for job in self._jobs.values():
+            rows.append({
+                "id": job.id,
+                "kind": job.kind,
+                "status": job.status,
+                "created_at": job.created_at,
+                "started_at": job.started_at,
+                "finished_at": job.finished_at,
+                "finished_epoch": job.finished_epoch,
+                "result": (recoverable_audio_result(job.result)
+                           if job.status == "succeeded" else None),
+                "error": (
+                    job.error if job.error in (
+                        "Generation failed; see local server logs",
+                        "Generation failed; invalid renderer result",
+                        "Generation interrupted by local server restart",
+                    ) else "Generation failed; see local server logs"
+                ) if job.status == "failed" else None,
+            })
+        return rows
+
+    def _save_journal(self, *, strict: bool = False) -> None:
+        if self._journal is None:
+            return
+        try:
+            self._journal.save(self._journal_rows())
+        except JobJournalError as exc:
+            if strict:
+                raise QueueUnavailableError("Local job journal unavailable") from exc
+            LOG.exception("Unable to update local job metadata journal")
+
+    def _recover(self) -> None:
+        """Recover terminal metadata; interrupted work must NEVER execute."""
+        assert self._journal is not None
+        now_epoch, now_clock = wall_time(), monotonic()
+        for row in self._journal.load():
+            status = row["status"]
+            finished_epoch = row["finished_epoch"]
+            finished_at = row["finished_at"]
+            error = row.get("error")
+            result = row.get("result")
+            if status in ACTIVE:
+                status = "failed"
+                finished_epoch = now_epoch
+                finished_at = _utc()
+                error = "Generation interrupted by local server restart"
+                result = None
+            # Wall-clock ages survive restarts; monotonic() timestamps do not.
+            age = max(0.0, now_epoch - finished_epoch)
+            if age >= self.ttl_seconds:
+                if result is not None:
+                    try:
+                        self._recovered_cleanup(result)
+                    except Exception:
+                        LOG.exception("Could not expire recovered local job audio")
+                continue
+            self._jobs[row["id"]] = _Job(
+                id=row["id"], kind=row["kind"],
+                produce=lambda: {}, cleanup=self._recovered_cleanup,
+                status=status, created_at=row["created_at"],
+                started_at=row["started_at"], finished_at=finished_at,
+                finished_clock=now_clock - age,
+                finished_epoch=finished_epoch, result=result, error=error,
+            )
+        while len(self._jobs) > self.max_history:
+            key = next(iter(self._jobs))
+            self._cleanup(self._jobs.pop(key))
+        # Commit the interrupted-to-failed transition before new admissions.
+        self._save_journal(strict=True)
 
     def _cleanup(self, job: _Job) -> None:
         if job.result is not None:
@@ -109,14 +201,19 @@ class LocalJobQueue:
         now = monotonic()
         old = [job_id for job_id, job in self._jobs.items()
                if job.finished_clock is not None and now - job.finished_clock >= self.ttl_seconds]
+        changed = False
         for job_id in old:
             self._cleanup(self._jobs.pop(job_id))
+            changed = True
         while len(self._jobs) > self.max_history:
             oldest_finished = next((job_id for job_id, job in self._jobs.items()
                                     if job.status in TERMINAL), None)
             if oldest_finished is None:
                 break
             self._cleanup(self._jobs.pop(oldest_finished))
+            changed = True
+        if changed:
+            self._save_journal()
 
     def submit(self, kind: str, produce: Callable[[], dict], cleanup: Callable[[dict], None]) -> dict:
         if kind not in {"generation", "scene"}:
@@ -148,6 +245,14 @@ class LocalJobQueue:
             task = _Job(id=job_id, kind=kind, produce=produce, cleanup=cleanup)
             self._jobs[job_id] = task
             self._pending.append(job_id)
+            try:
+                # The caller must never receive a job ID that cannot even be
+                # recorded as queued on disk (when opt-in journaling is on).
+                self._save_journal(strict=True)
+            except QueueUnavailableError:
+                self._pending.remove(job_id)
+                del self._jobs[job_id]
+                raise
             if self._thread is None or not self._thread.is_alive():
                 # A worker-start error must not leave a queued record that
                 # can never run. Roll back both in-memory reservations before
@@ -161,6 +266,7 @@ class LocalJobQueue:
                     self._pending.remove(job_id)
                     del self._jobs[job_id]
                     self._thread = None
+                    self._save_journal()
                     raise QueueUnavailableError(
                         "Local generation worker unavailable"
                     ) from exc
@@ -194,11 +300,13 @@ class LocalJobQueue:
                 task.status = "cancelled"
                 task.finished_at = _utc()
                 task.finished_clock = monotonic()
+                task.finished_epoch = wall_time()
                 # Remove the pending ID now: cancellation must not leave an
                 # unbounded deque of tombstones while a renderer is blocked.
                 self._pending.remove(job_id)
             else:
                 task.status = "cancelling"
+            self._save_journal()
             self._cv.notify_all()
             return task.public()
 
@@ -217,6 +325,7 @@ class LocalJobQueue:
                     continue
                 task.status = "running"
                 task.started_at = _utc()
+                self._save_journal()
                 self._cv.notify_all()
             result = None
             message = None
@@ -251,6 +360,8 @@ class LocalJobQueue:
                     task.result = result
                 task.finished_at = _utc()
                 task.finished_clock = monotonic()
+                task.finished_epoch = wall_time()
+                self._save_journal()
                 self._cv.notify_all()
 
     def shutdown(self, *, wait: bool = True) -> None:
@@ -266,10 +377,12 @@ class LocalJobQueue:
                     task.status = "cancelled"
                     task.finished_at = _utc()
                     task.finished_clock = now
+                    task.finished_epoch = wall_time()
                 elif task.status in ("running", "cancelling"):
                     task.cancel_requested = True
                     task.status = "cancelling"
             self._pending.clear()
+            self._save_journal()
             self._cv.notify_all()
         worker = self._thread
         # Calling shutdown from a renderer must not attempt to join itself.
@@ -277,7 +390,12 @@ class LocalJobQueue:
             worker.join(timeout=10)
         with self._cv:
             if worker is None or not worker.is_alive():
-                for task in self._jobs.values():
-                    self._cleanup(task)
-                self._jobs.clear()
+                if self._journal is None:
+                    # Preserve existing in-memory-only shutdown semantics.
+                    for task in self._jobs.values():
+                        self._cleanup(task)
+                    self._jobs.clear()
+                # In journal mode, retain terminal metadata and published
+                # WAVs until TTL; the new process will perform expiry.
                 self._pending.clear()
+                self._save_journal()
