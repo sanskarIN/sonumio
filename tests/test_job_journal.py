@@ -381,3 +381,54 @@ def test_failed_new_admission_preserves_full_history_and_existing_audio(
         assert len(q._jobs) == 1
     finally:
         q.shutdown()
+
+
+
+def test_actual_api_audio_survives_graceful_journaled_restart(
+    tmp_path, monkeypatch,
+):
+    """New queue instance recovers the same playable, local-only WAV link."""
+    journal_path = tmp_path / ".sonumio-api-jobs.json"
+    store = api._store_for(tmp_path)
+
+    def clean_audio(result):
+        store.delete(result.get("id"))
+
+    first_queue = jobs.LocalJobQueue(
+        journal_path=journal_path, recovered_cleanup=clean_audio,
+    )
+    monkeypatch.setattr(api, "OUTPUT_DIR", tmp_path)
+    monkeypatch.setattr(api, "JOBS", first_queue)
+    with TestClient(api.app) as client:
+        response = client.post(
+            "/v1/jobs/generations",
+            json={"prompt": "rain", "duration_seconds": 0.5, "seed": 17},
+        )
+        assert response.status_code == 202
+        identifier = response.json()["id"]
+        finished = _wait(first_queue, identifier, {"succeeded"})
+        audio_url = finished["result"]["audio_url"]
+        original_wav = client.get(audio_url)
+        assert original_wav.status_code == 200
+        assert original_wav.content.startswith(b"RIFF")
+    first_queue.shutdown()
+
+    restarted = jobs.LocalJobQueue(
+        journal_path=journal_path, recovered_cleanup=clean_audio,
+    )
+    monkeypatch.setattr(api, "JOBS", restarted)
+    try:
+        with TestClient(api.app) as client:
+            result = client.get(f"/v1/jobs/{identifier}")
+            assert result.status_code == 200
+            payload = result.json()
+            assert payload["status"] == "succeeded"
+            assert payload["result"] == {
+                "id": finished["result"]["id"],
+                "audio_url": audio_url,
+            }
+            assert client.get(audio_url).content == original_wav.content
+            assert not restarted._pending
+            assert restarted._thread is None
+    finally:
+        restarted.shutdown()
