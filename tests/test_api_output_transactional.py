@@ -89,3 +89,30 @@ def test_publish_new_preview_before_evicting_old_one(tmp_path, monkeypatch):
     assert store.read(new_id) == replacement
     assert store.usage().files == 1
     assert store.usage().bytes == len(replacement)
+
+
+def test_quota_eviction_error_rolls_back_unreported_new_preview(
+    tmp_path, monkeypatch,
+):
+    store = LocalAudioStore(
+        tmp_path / "api", max_files=1,
+        max_total_bytes=100, max_file_bytes=90,
+    )
+    original_audio = _wav(8)
+    old_id = store.write(original_audio)
+    old_path = store.root / f"{old_id}.wav"
+    original_unlink = type(old_path).unlink
+
+    def fail_only_existing(self, *args, **kwargs):
+        if self == old_path:
+            raise OSError("simulated eviction failure")
+        return original_unlink(self, *args, **kwargs)
+
+    monkeypatch.setattr(type(old_path), "unlink", fail_only_existing)
+    with pytest.raises(OSError, match="simulated eviction failure"):
+        store.write(_wav(10))
+
+    # A newly linked preview must not silently survive a failed publication.
+    assert store.read(old_id) == original_audio
+    assert sorted(store.root.glob("*.wav")) == [old_path]
+    assert not list(store.root.glob(".sonumio-*.tmp"))
