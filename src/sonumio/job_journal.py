@@ -61,7 +61,8 @@ def _valid_record(row: object) -> bool:
     kind, status = row.get("kind"), row.get("status")
     epoch = row.get("finished_epoch")
     if (not isinstance(identifier, str) or _ID.fullmatch(identifier) is None
-            or kind not in _KINDS or status not in _STATES
+            or type(kind) is not str or kind not in _KINDS
+            or type(status) is not str or status not in _STATES
             or not all(_valid_timestamp(row.get(k)) for k in (
                 "created_at", "started_at", "finished_at"))):
         return False
@@ -122,8 +123,6 @@ class LocalJobJournal:
         try:
             descriptor = os.open(self.path, flags)
         except OSError as exc:
-            if exc.errno == errno.ENOENT:
-                return []
             raise JobJournalError("Cannot safely open local job journal") from exc
 
         try:
@@ -186,6 +185,16 @@ class LocalJobJournal:
             # it. Never rely on a prior existence check for the destination.
             os.replace(staged, self.path)
             staged = None
+            # Syncing the directory entry makes the rename more durable on
+            # POSIX local filesystems. Windows lacks portable directory fsync.
+            if os.name == "posix" and hasattr(os, "O_DIRECTORY"):
+                parent_fd = os.open(
+                    self.path.parent, os.O_RDONLY | os.O_DIRECTORY
+                )
+                try:
+                    os.fsync(parent_fd)
+                finally:
+                    os.close(parent_fd)
         except OSError as exc:
             raise JobJournalError("Cannot commit local job journal") from exc
         finally:
