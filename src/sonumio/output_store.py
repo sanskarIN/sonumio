@@ -7,6 +7,7 @@ This is not a multi-process or multi-user storage service.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import errno
 import os
 from pathlib import Path
 import re
@@ -197,13 +198,39 @@ class LocalAudioStore:
             self._directory()
             self._prune(self._clock())
             path = self.root / f"{identifier}.wav"
-            if path.is_symlink():
-                raise FileNotFoundError("Audio not found")
+
+            # Checking is_symlink() and then calling Path.open() would follow
+            # a swapped symlink between the check and open. Verify the *same*
+            # regular-file identity on both sides of opening the descriptor.
+            # O_NOFOLLOW rejects the leaf symlink outright on POSIX; on
+            # platforms without that flag, comparing lstat to fstat still
+            # rejects an exchanged inode before any bytes are read.
             try:
-                with path.open("rb") as handle:
-                    data = handle.read(self.max_file_bytes + 1)
-            except (FileNotFoundError, IsADirectoryError) as exc:
+                expected = path.lstat()
+            except (FileNotFoundError, NotADirectoryError) as exc:
                 raise FileNotFoundError("Audio not found") from exc
+            if not stat.S_ISREG(expected.st_mode):
+                raise FileNotFoundError("Audio not found")
+
+            flags = (os.O_RDONLY | getattr(os, "O_BINARY", 0)
+                     | getattr(os, "O_CLOEXEC", 0)
+                     | getattr(os, "O_NOFOLLOW", 0)
+                     | getattr(os, "O_NONBLOCK", 0))
+            try:
+                descriptor = os.open(path, flags)
+            except OSError as exc:
+                if exc.errno in (errno.ENOENT, errno.ENOTDIR, errno.ELOOP):
+                    raise FileNotFoundError("Audio not found") from exc
+                raise
+
+            with os.fdopen(descriptor, "rb") as handle:
+                opened = os.fstat(handle.fileno())
+                if (not stat.S_ISREG(opened.st_mode)
+                        or (opened.st_dev, opened.st_ino)
+                        != (expected.st_dev, expected.st_ino)
+                        or opened.st_size > self.max_file_bytes):
+                    raise FileNotFoundError("Audio not found")
+                data = handle.read(self.max_file_bytes + 1)
             if len(data) > self.max_file_bytes:
                 raise FileNotFoundError("Audio not found")
             return data
