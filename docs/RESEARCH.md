@@ -105,6 +105,11 @@ same-noise-seed prompt-change sensitivity for English/Hindi rain/wind
 prompts. This does not replace independent listening or rights-reviewed
 reference audio. No waveform or model-weight artifacts are published.
 
+The [generated source grounding experiment](GENERATED_SOURCE_GROUNDING.md)
+scores actual raw and latent DDIM outputs against a six-source synthetic
+reference probe. It uses seed-isolated probe calibration and holdout recordings,
+plus rotated labels, zero guidance, and noise controls.
+
 
 ## Empirical generation failures
 
