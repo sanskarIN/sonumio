@@ -60,6 +60,10 @@ def _validated_run(run: dict, *, seed: int, common: dict,
             or run.get("same_trained_parameters_across_budgets") is not True
             or training.get("train_and_validation_exact_overlap") is not False):
         raise ValueError("Study does not establish required paired controls")
+    state_sha = run.get("trained_model_state_sha256")
+    if (type(state_sha) is not str or len(state_sha) != 64
+            or any(ch not in "0123456789abcdef" for ch in state_sha)):
+        raise ValueError("Missing validated trained-model state fingerprint")
     if any(type(training.get(field)) is not int for field in (
         "unique_training_waveforms", "unique_heldout_waveforms",
         "heldout_captions_scored_for_velocity",
@@ -139,6 +143,7 @@ def replicate_studies(
         "guidance": guidance, "sample_rate": 8000, "frames": 8192,
     }
     runs, data_identity = [], None
+    model_fingerprints: set[str] = set()
     for seed in seeds:
         report = runner(
             seed=seed, train_steps=train_steps, codec_steps=codec_steps,
@@ -149,6 +154,10 @@ def replicate_studies(
             report, seed=seed, common=common, budgets=budgets,
             sample_seeds=sample_seeds, previous_data=data_identity,
         )
+        current_fingerprint = report["trained_model_state_sha256"]
+        if current_fingerprint in model_fingerprints:
+            raise ValueError("Different initialization seeds produced the same model state")
+        model_fingerprints.add(current_fingerprint)
         runs.append(report)
     summary = {}
     for arm in ("raw", "latent"):
@@ -189,6 +198,7 @@ def replicate_studies(
             "training_heldout_velocity_mse": run["training"]["heldout_velocity_mse"],
             "training_codec_reconstruction_mae":
                 run["training"]["heldout_codec_waveform_mae"],
+            "trained_model_state_sha256": run["trained_model_state_sha256"],
             "by_arm_budget": run["by_arm_budget"],
             "sample_count": run["sample_count"],
         } for seed, run in zip(seeds, runs)],
