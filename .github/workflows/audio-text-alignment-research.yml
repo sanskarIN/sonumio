@@ -1,0 +1,63 @@
+name: Original bilingual audio-text alignment research (CPU)
+
+on:
+  pull_request:
+    paths:
+      - 'research/audio_text_alignment.py'
+      - 'research/audio_text_alignment_study.py'
+      - 'tests/test_audio_text_alignment.py'
+      - 'tests/test_audio_text_alignment_study.py'
+      - '.github/workflows/audio-text-alignment-research.yml'
+      - 'research/text_audio.py'
+      - 'research/latent_audio.py'
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  bilingual-audio-text-alignment:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      OMP_NUM_THREADS: '2'
+      MKL_NUM_THREADS: '2'
+      PYTHONHASHSEED: '0'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install original CPU-only research dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e '.[test]' 'scipy>=1.12,<2'
+          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+      - name: Test original contrastive model gradients, false-negative and retrieval guards
+        run: |
+          python -m pytest -q tests/test_audio_text_alignment.py tests/test_audio_text_alignment_study.py
+      - name: Train original synthetic bilingual alignment probe and inspect source-level retrieval
+        run: |
+          python -m research.audio_text_alignment_study \
+            --seed 17 --updates 2 --batch-categories 4 \
+            --temperature 0.1 --learning-rate 0.0005 \
+            --training-seeds 0 --validation-seeds 101 \
+            > /tmp/sonumio-bilingual-alignment.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          report = json.loads(Path('/tmp/sonumio-bilingual-alignment.json').read_text(encoding='utf8'))
+          assert report['protocol'] == 'sonumio-first-party-bilingual-audio-text-training-study-v1'
+          assert report['data']['unique_training_recordings'] == 21
+          assert report['data']['unique_heldout_recordings'] == 21
+          assert report['data']['training_bilingual_caption_examples'] == 42
+          assert report['data']['heldout_bilingual_caption_examples'] == 42
+          assert report['training']['same_category_false_negatives_used'] is False
+          assert report['heldout_retrieval']['unique_source_categories'] == 21
+          assert report['heldout_retrieval']['same_audio_candidates_for_both_languages'] is True
+          assert report['model']['unchanged_during_evaluation'] is True
+          assert report['no_model_weights_or_audio_saved'] is True
+          assert report['model_publication_authorized'] is False
+          print('Original Sonumio bilingual contrastive pilot passed; no weights or WAVs saved')
+          PY
