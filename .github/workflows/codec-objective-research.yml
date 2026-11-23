@@ -1,0 +1,64 @@
+name: Neural codec objective research (CPU)
+
+on:
+  pull_request:
+    paths:
+      - 'research/codec_objectives.py'
+      - 'research/codec_loss_study.py'
+      - 'tests/test_codec_objectives.py'
+      - 'tests/test_codec_loss_study.py'
+      - '.github/workflows/codec-objective-research.yml'
+      - 'research/latent_audio.py'
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  neural-codec-objective:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      OMP_NUM_THREADS: '2'
+      MKL_NUM_THREADS: '2'
+      PYTHONHASHSEED: '0'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install project and CPU spectral research dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e '.[test]' 'scipy>=1.12,<2'
+          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+      - name: Exercise real differentiable multiresolution spectral objectives
+        run: |
+          python -m pytest -q tests/test_codec_objectives.py tests/test_codec_loss_study.py
+      - name: Compare two actual codecs trained with isolated loss differences
+        run: |
+          python -m research.codec_loss_study \
+            --model-seed 17 --updates 2 \
+            --training-batch 2 --learning-rate 0.001 \
+            --training-seeds 0 --heldout-seeds 101 \
+            > /tmp/sonumio-codec-objective.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          r = json.loads(Path('/tmp/sonumio-codec-objective.json').read_text(encoding='utf8'))
+          assert r['protocol'] == 'sonumio-paired-neural-codec-loss-study-v1'
+          assert r['data']['training_recordings'] == 21
+          assert r['data']['heldout_recordings'] == 21
+          assert r['data']['english_hindi_captions_per_split'] == 42
+          assert r['models']['trained_states_distinct'] is True
+          assert r['models']['unchanged_during_evaluation'] is True
+          assert r['paired_controls']['only_reconstruction_training_loss_differs']
+          assert r['heldout_reconstruction_diagnostics'][
+              'independent_acoustic_recordings_scored'] == 21
+          assert r['heldout_reconstruction_diagnostics'][
+              'no_perceptual_quality_or_statistical_significance_claim'] is True
+          assert r['no_model_weights_or_audio_saved'] is True
+          assert r['model_publication_authorized'] is False
+          print('Two original neural codec objective candidates trained and validated; no weights')
+          PY
