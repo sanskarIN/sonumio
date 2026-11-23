@@ -99,10 +99,10 @@ def test_head_reports_correct_lengths_without_body(preview):
     assert full.content == b""
     assert full.headers["content-length"] == str(len(audio))
     partial = client.head(url, headers={"Range": "bytes=5-11"})
-    assert partial.status_code == 206
+    assert partial.status_code == 200
     assert partial.content == b""
-    assert partial.headers["content-range"] == f"bytes 5-11/{len(audio)}"
-    assert partial.headers["content-length"] == "7"
+    assert "content-range" not in partial.headers
+    assert partial.headers["content-length"] == str(len(audio))
 
 
 def test_missing_audio_is_not_exposed_by_range_or_head(preview):

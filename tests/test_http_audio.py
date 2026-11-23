@@ -49,9 +49,10 @@ def test_if_range_without_validator_falls_back_to_entire_file():
 
 def test_head_has_length_of_selected_representation_without_body():
     response = wav_http_response(AUDIO, range_header="bytes=6-9", head=True)
-    assert response.status_code == 206
+    assert response.status_code == 200
     assert response.body == b""
-    assert response.headers["content-length"] == "4"
+    assert response.headers["content-length"] == str(len(AUDIO))
+    assert "content-range" not in response.headers
 
 
 def test_full_response_keeps_existing_download_headers():

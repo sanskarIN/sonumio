@@ -66,7 +66,7 @@ def wav_http_response(
     }
     selection = (
         _parse_single_range(range_header, size)
-        if range_header is not None and if_range is None else None
+        if not head and range_header is not None and if_range is None else None
     )
     if selection is _UNSATISFIABLE:
         headers["Content-Range"] = f"bytes */{size}"
