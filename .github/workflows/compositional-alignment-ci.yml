@@ -1,0 +1,72 @@
+name: Original compositional audio-text contrastive controls (CPU)
+
+on:
+  pull_request:
+    paths:
+      - 'research/compositional_alignment.py'
+      - 'tests/test_compositional_alignment.py'
+      - '.github/workflows/compositional-alignment-ci.yml'
+      - 'research/audio_text_alignment.py'
+      - 'research/audio_text_alignment_study.py'
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  compositional-alignment:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      OMP_NUM_THREADS: '2'
+      MKL_NUM_THREADS: '2'
+      PYTHONHASHSEED: '0'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install original CPU text/audio neural research dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e '.[test]' 'scipy>=1.12,<2'
+          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+      - name: Validate exact/shared/disjoint source semantics and differentiable grouped training
+        run: |
+          python -m pytest -q tests/test_compositional_alignment.py
+      - name: Run bounded first-party bilingual compositional category evaluation
+        run: |
+          python - <<'PY'
+          import torch
+          from research.audio_text_alignment import OriginalAudioTextAligner
+          from research.compositional_alignment import (
+              SOURCE_GROUPS, PROTOCOL, LOSS_PROTOCOL,
+              category_relation_matrix, overlap_masked_info_nce,
+              evaluate_bilingual_composition,
+          )
+          torch.manual_seed(17)
+          model = OriginalAudioTextAligner(channels=16, embedding_dim=32)
+          relationships, topology = category_relation_matrix(SOURCE_GROUPS)
+          assert topology['number_of_groups'] == 21
+          assert topology['ordered_exact_relations'] == 21
+          assert topology['ordered_partially_shared_relations'] == 180
+          assert topology['ordered_disjoint_relations'] == 240
+          vectors = torch.eye(3)
+          loss, controls = overlap_masked_info_nce(
+              vectors, vectors, ((0,), (0, 1), (2,)), temperature=0.1
+          )
+          assert torch.isfinite(loss)
+          assert controls['protocol'] == LOSS_PROTOCOL
+          assert controls['ignored_partially_shared_negative_edges'] == 2
+          assert controls['partial_overlap_groups_used_as_negatives'] is False
+          report = evaluate_bilingual_composition(model, validation_seeds=(101,))
+          assert report['protocol'] == PROTOCOL
+          assert report['independent_source_recordings_in_candidate_panel'] == 21
+          assert report['two_languages_not_two_independent_recordings'] is True
+          assert report['model_state_unchanged'] is True
+          assert report['global_torch_rng_unchanged'] is True
+          assert report['existing_model_weights_not_saved_or_released'] is True
+          assert report['perceptual_or_open_vocabulary_prompt_alignment_claim'] is False
+          print('Original 21-category compositional bilingual negative controls passed')
+          PY
