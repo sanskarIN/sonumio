@@ -1,6 +1,6 @@
 """Independent EMA numeric/atomicity tests; research-only CPU weights."""
 import pytest
-import torch
+torch = pytest.importorskip("torch")
 from torch import nn
 
 from research.weight_ema import WeightEMA, model_state_sha256
