@@ -241,6 +241,18 @@ class LocalAudioStore:
                         or opened.st_size > self.max_file_bytes):
                     raise FileNotFoundError("Audio not found")
                 data = handle.read(self.max_file_bytes + 1)
+                # File contents may be modified or the path unlinked after
+                # the initial fstat but before or during read(). Verify the
+                # descriptor *again* before serving any collected bytes.
+                final = os.fstat(handle.fileno())
+                if (not stat.S_ISREG(final.st_mode)
+                        or final.st_nlink != 1
+                        or (final.st_dev, final.st_ino, final.st_size,
+                            final.st_mtime_ns, final.st_ctime_ns)
+                        != (opened.st_dev, opened.st_ino, opened.st_size,
+                            opened.st_mtime_ns, opened.st_ctime_ns)
+                        or len(data) != opened.st_size):
+                    raise FileNotFoundError("Audio not found")
             if len(data) > self.max_file_bytes:
                 raise FileNotFoundError("Audio not found")
             return data
