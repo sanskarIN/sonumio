@@ -188,3 +188,36 @@ def test_all_neural_experiments_load_original_checked_bytes_after_disk_swap(
     assert calls and schedule.steps == 8
     assert manifest["weights_publication_authorized"] is False
     assert all(torch.equal(state[name], value) for name, value in loaded.state_dict().items())
+
+
+@pytest.mark.parametrize(("family", "field", "value"), [
+    ("wave", "not_original_sonumio_1", False),
+    ("wave", "weights_publication_authorized", True),
+    ("text", "weights_publication_authorized", True),
+    ("latent", "weights_publication_authorized", True),
+])
+def test_research_checkpoint_rejects_forged_publication_claim(
+    tmp_path, family, field, value,
+):
+    pytest.importorskip("torch")
+    import json
+    from research.wave_diffusion import TinyWaveDenoiser, DiffusionSchedule
+    if family == "wave":
+        from research import wave_diffusion as module
+        model = TinyWaveDenoiser(16)
+        save, manifest_name = module.save_checkpoint, "manifest.json"
+    elif family == "text":
+        from research import text_audio as module
+        model = module.TextWaveDenoiser(16)
+        save, manifest_name = module.save_checkpoint, "text_manifest.json"
+    else:
+        from research import latent_audio as module
+        model = module.LatentResearchModel(16)
+        save, manifest_name = module._save_checkpoint, "latent_manifest.json"
+    save(tmp_path, model, DiffusionSchedule(8), {"source": "synthetic"})
+    manifest_path = tmp_path / manifest_name
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest[field] = value
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    with pytest.raises(ValueError):
+        module.load_checkpoint(tmp_path)
