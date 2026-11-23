@@ -68,12 +68,23 @@ regression tests.
 
 ## Background jobs in the web studio
 
-The interface now submits the sound/scene form through the bounded local
-`/v1/jobs` queue. It polls job status, reports queued/running states and
-requests server-side cancellation via `DELETE /v1/jobs/{id}`. Running work
-is non-preemptive, so cancellation is best effort. Job audio and records
-expire after 30 minutes while the local API process is alive. The previous
-synchronous `/v1/generations` and `/v1/scenes` endpoints remain supported.
+The studio submits sound and scene renders through the local `/v1/jobs`
+queue. It saves the latest job ID in the tab before submitting. If the
+acknowledgement is lost, polling fails, or the tab reloads, select
+**Check last job** to look up the original render with GET. This action sends
+no new render request. The tab stores only its latest job ID, and a new
+submission replaces it unless the API rejects it. Use the API and studio
+from the same source tree.
+
+The studio waits up to 10 seconds for submission or cancellation and up to
+five minutes for polling. **Stop waiting** ends the browser's wait during
+submission or lookup. Once the studio confirms that the job exists,
+**Cancel request** asks the local queue to cancel it. Active rendering can
+take time to finish, and a completed result can still be recovered when
+cancellation arrives too late. Job audio and records expire after at most
+30 minutes while the local API is running. With the optional journal, the
+studio can recover a previously completed WAV after a server restart if it
+is still in local storage.
 
 Frontend job/client validation has automated Vitest coverage; see
 [queue safeguards](../docs/LOCAL_JOBS.md). No public deployment or

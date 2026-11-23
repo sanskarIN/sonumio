@@ -1,9 +1,8 @@
 import { useEffect, useRef, useState, type ChangeEvent, type FormEvent } from 'react';
 import {
   submitGenerationJob, submitSceneJob, awaitJob, cancelJob, getHealth, getModels, validateScene,
-  parseScenePlan, serializeScenePlan, MAX_SCENE_JSON_BYTES,
-  type JobStatus,
-  type GeneratedAudio, type ModelEntry, type SceneLayer,
+  parseScenePlan, serializeScenePlan, MAX_SCENE_JSON_BYTES, ApiError, isClientJobId, isRejectedJobSubmission,
+  type AudioJob, type JobAudio, type JobStatus, type ModelEntry, type SceneLayer,
 } from './api';
 import { loadLocalWaveform, type WaveformPreview } from './waveform';
 
@@ -19,6 +18,17 @@ function makeLayer(index = 0): SceneLayer {
     fade_in_seconds: 0.02, fade_out_seconds: 0.05, seed: index, pan: 0 };
 }
 const numberValue = (value: string) => Number(value);
+const lastJobStorageKey = 'sonumio.last-job-id';
+
+function readLastJob(): string | null {
+  try {
+    const id = sessionStorage.getItem(lastJobStorageKey);
+    return id && isClientJobId(id) ? id : null;
+  } catch {
+    return null;
+  }
+}
+
 export function App() {
   const [mode, setMode] = useState<'sound' | 'scene'>('sound');
   const [prompt, setPrompt] = useState(presets[0]);
@@ -30,14 +40,15 @@ export function App() {
   const sceneFileInput = useRef<HTMLInputElement | null>(null);
   const [models, setModels] = useState<ModelEntry[]>([]);
   const [connected, setConnected] = useState<boolean | null>(null);
-  const [busy, setBusy] = useState(false);
+  const [activity, setActivity] = useState<'submitting' | 'checking' | 'rendering' | 'cancelling' | null>(null);
+  const busy = activity !== null;
   const [jobStatus, setJobStatus] = useState<JobStatus>('queued');
+  const [lastJob, setLastJob] = useState(readLastJob);
   const [error, setError] = useState('');
-  const [result, setResult] = useState<GeneratedAudio | null>(null);
+  const [result, setResult] = useState<JobAudio | null>(null);
   const [waveform, setWaveform] = useState<WaveformPreview | null>(null);
-  const [waveformStatus, setWaveformStatus] = useState<'idle' | 'loading' | 'unavailable'>('idle');
+  const [waveformStatus, setWaveformStatus] = useState<'idle' | 'loading' | 'unavailable' | 'missing'>('idle');
   const controller = useRef<AbortController | null>(null);
-  const jobId = useRef<string | null>(null);
 
   useEffect(() => {
     const pending = new AbortController();
@@ -66,8 +77,10 @@ export function App() {
           setWaveformStatus('idle');
         }
       })
-      .catch(() => {
-        if (!pending.signal.aborted) setWaveformStatus('unavailable');
+      .catch(problem => {
+        if (!pending.signal.aborted) {
+          setWaveformStatus(problem instanceof ApiError && problem.status === 404 ? 'missing' : 'unavailable');
+        }
       });
     return () => pending.abort();
   }, [previewUrl]);
@@ -78,31 +91,97 @@ export function App() {
     'data:application/json;charset=utf-8,' +
     encodeURIComponent(serializeScenePlan({ duration_seconds: sceneDuration, layers }));
 
-  async function submit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (busy) return;
-    setError(''); setResult(null);
-    if (!connected) { setError('Start the local Sonumio API on port 8000 first.'); return; }
-    if (mode === 'scene' && sceneError) { setError(sceneError); return; }
+  function rememberJob(id: string | null) {
+    setLastJob(id);
+    try {
+      if (id) sessionStorage.setItem(lastJobStorageKey, id);
+      else sessionStorage.removeItem(lastJobStorageKey);
+    } catch { /* The current page can still recover without browser storage. */ }
+  }
+
+  async function runJob(id: string, submitTask?: (signal: AbortSignal) => Promise<AudioJob>) {
+    if (controller.current) return;
     const next = new AbortController();
     controller.current = next;
-    setBusy(true);
+    setError('');
+    setResult(null);
+    setActivity(submitTask ? 'submitting' : 'checking');
     setJobStatus('queued');
     try {
-      const task = mode === 'sound'
-        ? await submitGenerationJob({ prompt, duration_seconds: duration, seed, model_id: 'procedural-sfx-v0' }, next.signal)
-        : await submitSceneJob({ duration_seconds: sceneDuration, layers }, next.signal);
-      jobId.current = task.id;
-      setJobStatus(task.status);
-      const response = await awaitJob(task.id, next.signal, setJobStatus);
+      if (submitTask) {
+        rememberJob(id);
+        try {
+          const task = await submitTask(next.signal);
+          next.signal.throwIfAborted();
+          setJobStatus(task.status);
+          setActivity('rendering');
+        } catch (problem) {
+          if (!next.signal.aborted && isRejectedJobSubmission(problem)) rememberJob(lastJob);
+          throw problem;
+        }
+      }
+      const response = await awaitJob(id, next.signal, status => {
+        setJobStatus(status);
+        setActivity('rendering');
+        if (status === 'failed' || status === 'cancelled') rememberJob(null);
+      });
       if (!next.signal.aborted) setResult(response);
     } catch (problem) {
-      if (!next.signal.aborted) setError(problem instanceof Error ? problem.message : 'Audio generation failed.');
+      if (!next.signal.aborted) {
+        const message = !submitTask && problem instanceof ApiError && problem.status === 404
+          ? 'The queue has no record of this job. If you just submitted it, check again shortly.'
+          : problem instanceof Error ? problem.message : 'Audio generation failed.';
+        setError(message);
+      }
     } finally {
       if (controller.current === next) {
         controller.current = null;
-        jobId.current = null;
-        setBusy(false);
+        setActivity(null);
+      }
+    }
+  }
+
+  function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (controller.current) return;
+    if (!connected) { setError('Start the local Sonumio API on port 8000 first.'); return; }
+    if (mode === 'scene' && sceneError) { setError(sceneError); return; }
+    const id = crypto.randomUUID();
+    void runJob(id, signal => mode === 'sound'
+      ? submitGenerationJob({ prompt, duration_seconds: duration, seed, model_id: 'procedural-sfx-v0' }, { id, signal })
+      : submitSceneJob({ duration_seconds: sceneDuration, layers }, { id, signal }));
+  }
+
+  async function cancel() {
+    if (!controller.current || activity === 'cancelling') return;
+    controller.current?.abort();
+    if (activity !== 'rendering' || !lastJob) {
+      controller.current = null;
+      setActivity(null);
+      setError('Stopped waiting. Use Check last job to see whether the server received it.');
+      return;
+    }
+    const next = new AbortController();
+    controller.current = next;
+    setActivity('cancelling');
+    try {
+      const job = await cancelJob(lastJob, next.signal);
+      if (job.status === 'cancelled') {
+        rememberJob(null);
+        setError('Job cancelled.');
+      } else {
+        setError('Cancellation requested. Active rendering may take time to stop.');
+      }
+    } catch (problem) {
+      if (!next.signal.aborted) {
+        setError(problem instanceof ApiError && problem.status === 409
+          ? 'The job finished before cancellation. Use Check last job to see the result.'
+          : 'Cancellation could not be confirmed. Use Check last job to see its status.');
+      }
+    } finally {
+      if (controller.current === next) {
+        controller.current = null;
+        setActivity(null);
       }
     }
   }
@@ -134,16 +213,14 @@ export function App() {
       setError(problem instanceof Error ? problem.message : 'Could not read scene JSON.');
     }
   }
-  function cancel() {
-    const identifier = jobId.current;
-    controller.current?.abort();
-    controller.current = null;
-    jobId.current = null;
-    if (identifier) void cancelJob(identifier).catch(() => {});
-    setBusy(false);
-    setJobStatus('cancelling');
-    setError('Cancellation requested. Active rendering cannot stop immediately and may finish before cancellation takes effect.');
-  }
+  const activityLabel = activity === 'submitting' ? 'Submitting local job…'
+    : activity === 'checking' ? 'Checking local job…'
+    : activity === 'cancelling' ? 'Requesting cancellation…'
+    : jobStatus === 'queued' ? 'Waiting in local queue…'
+    : jobStatus === 'cancelling' ? 'Waiting for cancellation…' : 'Generating audio…';
+  const resultDuration = waveform?.durationSeconds ?? result?.duration_seconds;
+  const resultRate = waveform?.sampleRate ?? result?.sample_rate;
+  const resultChannels = waveform?.channels ?? result?.channels ?? (resultRate === undefined ? undefined : 1);
   return <div className="shell">
     <header className="topbar">
       <a href="#main" className="brand" aria-label="Sonumio audio studio">◖◗ <strong>sonumio<span>.</span></strong></a>
@@ -204,9 +281,14 @@ export function App() {
               {sceneError && <p role="status" className="warning">{sceneError}</p>}
             </>}
             <button className="primary-button" type="submit" disabled={busy || connected !== true || (mode === 'scene' && Boolean(sceneError))}>
-              {busy ? (jobStatus === 'queued' ? 'Waiting in local queue…' : 'Generating audio…') : mode === 'sound' ? '✦ Generate sound' : '✦ Render sound scene'} <span>↗</span>
+              {busy ? activityLabel : mode === 'sound' ? '✦ Generate sound' : '✦ Render sound scene'} <span>↗</span>
             </button>
-            {busy && <button type="button" className="cancel" onClick={cancel}>Cancel request</button>}
+            {busy && activity !== 'cancelling' && <button type="button" className="cancel" onClick={cancel}>
+              {activity === 'rendering' ? 'Cancel request' : 'Stop waiting'}
+            </button>}
+            {!busy && lastJob && !result && <button type="button" className="cancel" onClick={() => void runJob(lastJob)}>
+              Check last job
+            </button>}
             <p className="footnote">Local Sonumio API. Audio is not uploaded to an external provider.</p>
           </form>
         </section>
@@ -214,7 +296,9 @@ export function App() {
           <section className="panel preview" aria-labelledby="preview-heading">
             <span className="overline">OUTPUT / 02</span><h2 id="preview-heading">Listen & export</h2>
             {error && <div role="alert" className="warning">{error}</div>}
-            {result ? <div className="ready" aria-live="polite">
+            {result && waveformStatus === 'missing' ? <p role="status" className="warning">
+              This job finished, but its WAV is no longer in local storage.
+            </p> : result ? <div className="ready" aria-live="polite">
               {waveform ? <div className="wave actual-wave" role="img"
                 aria-label={'Actual PCM waveform with ' + waveform.peaks.length + ' peak-amplitude bars'}>
                 {waveform.peaks.map((amplitude, i) => <i key={i}
@@ -227,12 +311,13 @@ export function App() {
               <span className="overline mint">AUDIO READY</span><h3>Your sound is ready.</h3>
               <audio controls preload="none" src={result.audio_url} aria-label="Generated WAV audio preview">Your browser cannot play WAV files.</audio>
               <a className="download" download="sonumio.wav" href={result.audio_url}>↓ Download WAV</a>
-              <p className="hint">{result.duration_seconds.toFixed(2)}s · {(result.sample_rate / 1000).toFixed(0)} kHz {result.channels === 2 ? 'stereo' : 'mono'} WAV</p>
+              {resultDuration !== undefined && resultRate !== undefined &&
+                <p className="hint">{resultDuration.toFixed(2)}s · {(resultRate / 1000).toFixed(0)} kHz {resultChannels === 2 ? 'stereo' : 'mono'} WAV</p>}
               {waveform && <p className="hint">Waveform: measured PCM sample peaks, not a loudness or quality rating.</p>}
-              <p className="hint">{result.disclaimer}</p>
+              {result.disclaimer && <p className="hint">{result.disclaimer}</p>}
             </div> : <div className="empty" aria-live="polite">
               <div className="wave" aria-hidden="true">{Array.from({length: 19}, (_, i) => <i key={i} style={{height: (16 + Math.abs(Math.sin(i * 1.3)) * 74) + '%'}}/>)}</div>
-              <h3>{busy ? (jobStatus === 'queued' ? 'Waiting for the renderer…' : 'Creating your sound…') : 'Your next sound starts here.'}</h3>
+              <h3>{busy ? activityLabel : 'Your next sound starts here.'}</h3>
               <p>{busy ? 'Queued jobs are processed one at a time on this device.' : 'Describe a sound, generate, listen and download your WAV.'}</p>
             </div>}
           </section>

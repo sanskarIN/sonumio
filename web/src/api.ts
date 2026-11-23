@@ -187,11 +187,17 @@ export function serializeScenePlan(scene: SceneInput): string {
 
 /** Bounded, development-only background audio tasks. */
 export type JobStatus = 'queued' | 'running' | 'cancelling' | 'succeeded' | 'failed' | 'cancelled';
+// An optional journal restores the audio reference without renderer metadata.
+export type JobAudio = Pick<GeneratedAudio, 'id' | 'audio_url'> & Partial<GeneratedAudio>;
 export type AudioJob = {
   id: string; kind: 'generation' | 'scene'; status: JobStatus;
   status_url: string; cancel_url: string;
-  result: GeneratedAudio | null; error: string | null;
+  result: JobAudio | null; error: string | null;
 };
+
+export function isClientJobId(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(value);
+}
 
 function jobPath(jobId: string): string {
   if (!/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/.test(jobId)) {
@@ -199,30 +205,78 @@ function jobPath(jobId: string): string {
   }
   return '/v1/jobs/' + jobId;
 }
-function validateJob(job: AudioJob): AudioJob {
-  if (job.status_url !== jobPath(job.id) || job.cancel_url !== jobPath(job.id)) {
+function validateJob(job: AudioJob, expectedId?: string): AudioJob {
+  const path = jobPath(job.id);
+  if (job.status_url !== path || job.cancel_url !== path) {
     throw new Error('API returned an invalid local job URL');
   }
+  if (expectedId !== undefined && job.id !== expectedId)
+    throw new Error('API returned a different local job');
   if (!['queued', 'running', 'cancelling', 'succeeded', 'failed', 'cancelled'].includes(job.status)) {
     throw new Error('API returned an unknown job status');
   }
   return job;
 }
-export async function submitGenerationJob(input: GenerationInput, signal?: AbortSignal): Promise<AudioJob> {
-  return validateJob(await request<AudioJob>('/v1/jobs/generations', {
-    method: 'POST', body: JSON.stringify(input), signal,
-  }));
+
+export const JOB_ACTION_TIMEOUT_MS = 10_000;
+
+async function withJobDeadline<T>(
+  signal: AbortSignal | undefined, action: (signal: AbortSignal) => Promise<T>,
+): Promise<T> {
+  signal?.throwIfAborted();
+  const pending = new AbortController();
+  const scoped = signal ? AbortSignal.any([signal, pending.signal]) : pending.signal;
+  const timer = setTimeout(() => pending.abort(new Error('Local job request timed out.')), JOB_ACTION_TIMEOUT_MS);
+  try {
+    const result = await action(scoped);
+    scoped.throwIfAborted();
+    return result;
+  } finally {
+    clearTimeout(timer);
+  }
 }
-export async function submitSceneJob(input: SceneInput, signal?: AbortSignal): Promise<AudioJob> {
-  return validateJob(await request<AudioJob>('/v1/jobs/scenes', {
-    method: 'POST', body: JSON.stringify(input), signal,
-  }));
+
+type JobSubmissionOptions = { id?: string; signal?: AbortSignal };
+
+export function isRejectedJobSubmission(error: unknown): error is ApiError {
+  return error instanceof ApiError && error.status >= 400 && error.status < 500 && error.status !== 408;
 }
+
+async function submitJob(
+  kind: 'generations' | 'scenes', input: GenerationInput | SceneInput,
+  { id, signal }: JobSubmissionOptions,
+): Promise<AudioJob> {
+  if (id !== undefined && !isClientJobId(id)) throw new Error('Invalid client job identifier');
+  try {
+    const task = await withJobDeadline(signal, pending => request<AudioJob>('/v1/jobs/' + kind, {
+      method: 'POST', body: JSON.stringify(input), signal: pending,
+      redirect: 'error',
+      headers: id === undefined ? undefined : { 'X-Sonumio-Job-Id': id },
+    }));
+    return validateJob(task, id);
+  } catch (error) {
+    if (id === undefined || signal?.aborted || isRejectedJobSubmission(error))
+      throw error;
+    throw new Error('Submission could not be confirmed. Use Check last job to look up the same render.', { cause: error });
+  }
+}
+
+export function submitGenerationJob(input: GenerationInput, options: JobSubmissionOptions = {}): Promise<AudioJob> {
+  return submitJob('generations', input, options);
+}
+export function submitSceneJob(input: SceneInput, options: JobSubmissionOptions = {}): Promise<AudioJob> {
+  return submitJob('scenes', input, options);
+}
+
 export async function getJob(jobId: string, signal?: AbortSignal): Promise<AudioJob> {
-  return validateJob(await request<AudioJob>(jobPath(jobId), { signal, cache: 'no-store' }));
+  return validateJob(await request<AudioJob>(jobPath(jobId), { signal, cache: 'no-store', redirect: 'error' }), jobId);
 }
-export async function cancelJob(jobId: string): Promise<AudioJob> {
-  return validateJob(await request<AudioJob>(jobPath(jobId), { method: 'DELETE' }));
+export async function cancelJob(jobId: string, signal?: AbortSignal): Promise<AudioJob> {
+  const path = jobPath(jobId);
+  const task = await withJobDeadline(signal, pending => request<AudioJob>(
+    path, { method: 'DELETE', signal: pending, redirect: 'error' },
+  ));
+  return validateJob(task, jobId);
 }
 function pause(ms: number, signal: AbortSignal): Promise<void> {
   return new Promise<void>((resolve, reject) => {
@@ -250,7 +304,7 @@ const JOB_POLL_TIMEOUT_MESSAGE =
  * one timer and one derived abort signal, both cleaned up on every exit path.
  */
 export async function awaitJob(jobId: string, signal: AbortSignal,
-                               onUpdate?: (status: JobStatus) => void): Promise<GeneratedAudio> {
+                               onUpdate?: (status: JobStatus) => void): Promise<JobAudio> {
   if (signal.aborted) throw new DOMException('Cancelled', 'AbortError');
   const pending = new AbortController();
   let timedOut = false;
@@ -272,6 +326,8 @@ export async function awaitJob(jobId: string, signal: AbortSignal,
       if (job.status === 'succeeded') {
         if (!job.result) throw new Error('Completed job has no audio result');
         validateAudioPath(job.result.audio_url);
+        if (job.result.audio_url !== '/v1/generations/' + job.result.id + '/audio')
+          throw new Error('Completed job returned a different local audio URL');
         return job.result;
       }
       if (job.status === 'failed') throw new Error(job.error || 'Audio generation failed.');

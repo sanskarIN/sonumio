@@ -9,7 +9,7 @@ The envelope measures source PCM peak amplitude in fixed temporal buckets.
 It is NOT a loudness (LUFS), perceptual-quality, or speech/music score.
 */
 
-import { validateAudioPath } from './api';
+import { ApiError, validateAudioPath } from './api';
 
 export const MAX_PREVIEW_BYTES = 8 * 1024 * 1024;
 export const WAVEFORM_BINS = 32;
@@ -144,8 +144,10 @@ export async function loadLocalWaveform(
     signal,
     credentials: 'omit',
     cache: 'no-store',
+    redirect: 'error',
     headers: { Accept: 'audio/wav' },
   });
-  if (!response.ok) throw new Error('Local audio waveform unavailable (HTTP ' + response.status + ')');
+  if (!response.ok)
+    throw new ApiError('Local audio waveform unavailable (HTTP ' + response.status + ')', response.status);
   return inspectPcm16Wav(await readBoundedWav(response, signal));
 }
