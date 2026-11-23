@@ -302,7 +302,7 @@ def _generation_probes(
             "sample_aligned_error_not_a_perceptual_score": True,
             "audible_quality_or_semantic_coherence_assessed": False,
         }
-        if any(not math.isfinite(row[key]) or row[key] < 0 for key in (
+        if any(not math.isfinite(rows[key]) or rows[key] < 0 for key in (
             "reference_first_future_sample_jump",
             "generated_first_future_sample_jump",
             "future_sample_aligned_mae",
