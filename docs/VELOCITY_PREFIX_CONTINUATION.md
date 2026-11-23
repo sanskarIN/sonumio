@@ -88,6 +88,10 @@ the tail of the caller's clip, and each later clip retains the preceding
 tail exactly. The method appends only new frames; unlike crossfading,
 it does not blend or overwrite the original source.
 
+When supplying captions, provide either **one shared future caption**
+or exactly `segments - 1` future captions. No caption is accepted for
+the caller-supplied lead clip because this sampler does not generate it.
+
 The final buffer has
 
 ```text
