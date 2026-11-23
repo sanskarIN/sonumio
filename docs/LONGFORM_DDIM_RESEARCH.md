@@ -21,9 +21,16 @@ output_frames = 8192 + (segments - 1) * (8192 - overlap_frames)
 
 Complementary (rather than equal-power) weights preserve identical
 constant-amplitude signals without artificial 3-dB overlap gain.
-The transition smooths abrupt wave splices but does NOT train a
-continuation-conditioned neural model. Its sound category, speaker,
-melody, and rhythm may still jump between clips.
+The overlap can smooth a simple step between constant-amplitude
+signals, but it is NOT guaranteed to reduce numerical sample-to-sample
+jumps between unrelated waveforms. In a separate local stress check of
+1,000 independent Gaussian-noise clip pairs (fixed seed, 1024-frame
+overlap), mean hard-concatenation sample jump was approximately 0.2266
+versus 0.2251 at the two blend boundaries combined: nearly unchanged.
+The crossfade's discontinuity was actually larger for some individual
+pairs. These are algorithmic probes, NOT evidence of perceptual sound
+quality. The sound category, speaker, melody and rhythm may still jump,
+because the model has no continuation conditioning.
 
 The returned waveform is **unclipped and unnormalized**. Input clips
 must be finite, detached CPU float32, exactly 8192 frames, and
