@@ -152,10 +152,11 @@ def test_heldout_noise_is_paired_across_models_and_wrong_history(study):
 
 def test_heldout_generation_is_sample_aligned_not_claimed_perceptual(study):
     rows = study["generation_diagnostics"]
-    assert len(rows) == 4
-    assert [item["heldout_caption_index"] for item in rows] == [0, 6, 28, 54][:4] or [
-        item["heldout_caption_index"] for item in rows
-    ] == [0, 6, 28]
+    expected = [
+        index for index in (0, 6, 28, 54)
+        if index < study["split"]["heldout_caption_examples"]
+    ]
+    assert [item["heldout_caption_index"] for item in rows] == expected
     for record in rows:
         assert record["heldout_caption_index"] in (0, 6, 28, 54)
         assert record["language"] in ("en", "hi")
