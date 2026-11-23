@@ -26,6 +26,9 @@ from torch import nn
 import torch.nn.functional as F
 
 from research.checkpoint_archive import validate_numeric_archive
+from research.checkpoint_snapshot import (
+    read_checkpoint_manifest, read_verified_weights, verified_npz_bytes,
+)
 from sonumio.audio import encode_wav
 from sonumio.engines.procedural import generate as dsp_generate
 
@@ -222,7 +225,8 @@ def save_checkpoint(path: Path, model: TinyWaveDenoiser, schedule: DiffusionSche
 
 
 def load_checkpoint(path: Path) -> tuple[TinyWaveDenoiser, DiffusionSchedule, dict]:
-    manifest = json.loads((path / "manifest.json").read_text(encoding="utf-8"))
+    path = Path(path)
+    manifest = read_checkpoint_manifest(path / "manifest.json")
     if manifest.get("format") != "sonumio-synthetic-diffusion-experiment-1" or manifest.get("classes") != list(CATEGORIES):
         raise ValueError("Unsupported checkpoint manifest or mismatched prompt categories")
     if manifest.get("sample_rate") != SAMPLE_RATE or manifest.get("clip_frames") != CLIP_FRAMES:
@@ -232,16 +236,12 @@ def load_checkpoint(path: Path) -> tuple[TinyWaveDenoiser, DiffusionSchedule, di
             or type(steps) is not int or not 8 <= steps <= 1000):
         raise ValueError("Unsupported waveform diffusion checkpoint configuration")
     weight_file = path / "weights.npz"
-    if weight_file.stat().st_size > 64 * 1024 * 1024:
-        raise ValueError("Checkpoint exceeds research size limit")
-    checkpoint = weight_file.read_bytes()
-    if hashlib.sha256(checkpoint).hexdigest() != manifest["weights_sha256"]:
-        raise ValueError("Checkpoint SHA256 mismatch")
+    checkpoint = read_verified_weights(weight_file, manifest.get("weights_sha256"))
     model = TinyWaveDenoiser(channels=channels)
     schedule = DiffusionSchedule(steps)
     expected = model.state_dict()
-    validate_numeric_archive(weight_file, expected)
-    with np.load(weight_file, allow_pickle=False) as weights:
+    validate_numeric_archive(checkpoint, expected)
+    with np.load(verified_npz_bytes(checkpoint), allow_pickle=False) as weights:
         if set(weights.files) != set(expected):
             raise ValueError("Unexpected checkpoint tensor names")
         safe = {}
