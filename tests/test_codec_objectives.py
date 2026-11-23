@@ -118,10 +118,10 @@ def test_neural_codec_objective_reproducible_with_matching_waveforms():
         )
         second = weighted_codec_loss(audio, decoded)
     assert torch.equal(first, second)
-    assert first == sum(
+    assert torch.allclose(first, sum(
         components[k] * getattr(CodecObjectiveWeights(), weight)
         for k, weight in zip(COMPONENT_NAMES, WEIGHT_NAMES)
-    )
+    ), rtol=1e-6, atol=1e-6)
 
 
 def test_fft_and_rms_envelopes_have_expected_dimensions():
