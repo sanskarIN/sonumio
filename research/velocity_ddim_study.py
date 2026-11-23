@@ -147,24 +147,35 @@ def _train_models(*, seed: int, train_steps: int, codec_steps: int,
             optimizers[arm].step()
             losses[arm].append(float(loss.detach()))
 
-    # Held-out v-loss is a numerical diagnostic, NOT an acoustic score.
-    # Uses fresh randomness independent from optimization and no gradients.
+    # Complete validation split (42 source recordings x 2 bilingual captions):
+    # do NOT infer independent examples from duplicated underlying waveforms.
+    # Uses fresh RNG independent of optimization and per-arm minibatch bounds.
+    # This v-objective MSE is a noise-prediction diagnostic, NOT audio quality.
     heldout_losses: dict[str, float] = {}
     eval_rng = torch.Generator(device="cpu").manual_seed(seed + 171)
     for arm in ("raw", "latent"):
         models[arm].eval()
-        clean = validation.waves[:4] if arm == "raw" else heldout_latents[:4]
-        timestep = torch.randint(schedule.steps, (4,), generator=eval_rng)
-        noise = torch.randn(clean.shape, generator=eval_rng)
+        source = validation.waves if arm == "raw" else heldout_latents
+        error_sum, element_count = 0.0, 0
         with torch.no_grad():
-            prediction = models[arm](
-                schedule.corrupt(clean, timestep, noise),
-                timestep, validation.tokens[:4],
-            )
-            value = F.mse_loss(
-                prediction, velocity_target(clean, noise, timestep, schedule),
-            )
-        heldout_losses[arm] = float(value)
+            for offset in range(0, len(source), 4):
+                clean = source[offset:offset + 4]
+                tokens = validation.tokens[offset:offset + len(clean)]
+                timestep = torch.randint(
+                    schedule.steps, (len(clean),), generator=eval_rng,
+                )
+                noise = torch.randn(clean.shape, generator=eval_rng)
+                prediction = models[arm](
+                    schedule.corrupt(clean, timestep, noise), timestep, tokens,
+                )
+                target = velocity_target(clean, noise, timestep, schedule)
+                error_sum += float(F.mse_loss(
+                    prediction, target, reduction="sum",
+                ))
+                element_count += target.numel()
+        if element_count < 1:
+            raise ValueError("Empty held-out velocity evaluation")
+        heldout_losses[arm] = error_sum / element_count
         if not math.isfinite(heldout_losses[arm]):
             raise ValueError("Nonfinite held-out objective diagnostic")
     report = {
@@ -172,7 +183,11 @@ def _train_models(*, seed: int, train_steps: int, codec_steps: int,
         "validation_fingerprint": validation.fingerprint,
         "unique_training_waveforms": len(training_hashes),
         "unique_heldout_waveforms": len(validation_hashes),
-        "paired_bilingual_captions_per_split": train.examples,
+        "bilingual_caption_examples_per_split": train.examples,
+        "independent_recordings_per_split": len(training_hashes),
+        "heldout_captions_scored_for_velocity": validation.examples,
+        "heldout_recordings_scored_for_velocity": len(validation_hashes),
+        "heldout_metric_scope": "all captions; source pairs share waveforms",
         "training_loss_initial": {arm: losses[arm][0] for arm in losses},
         "training_loss_final": {arm: losses[arm][-1] for arm in losses},
         "heldout_velocity_mse": heldout_losses,
@@ -277,6 +292,8 @@ def _summary(records: list[dict], *, budgets: tuple[int, ...]) -> dict:
                 row for row in records
                 if row["arm"] == arm and row["budget"] == budget
             ]
+            if not selected:
+                raise ValueError("Sampler study summary lacks expected cases")
             results[arm][str(budget)] = {
                 "samples": len(selected),
                 "model_evaluations_per_sample": selected[0]["sampler_nfe"],
