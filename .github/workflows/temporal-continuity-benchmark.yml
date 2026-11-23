@@ -1,0 +1,65 @@
+name: Grounded temporal continuation benchmark (CPU)
+
+on:
+  pull_request:
+    paths:
+      - 'research/temporal_continuity_benchmark.py'
+      - 'tests/test_temporal_continuity_benchmark.py'
+      - '.github/workflows/temporal-continuity-benchmark.yml'
+      - 'research/adjacent_audio.py'
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  temporal-continuity:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      OMP_NUM_THREADS: '2'
+      MKL_NUM_THREADS: '2'
+      PYTHONHASHSEED: '0'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install original first-party DSP and research tests
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e '.[test]' 'scipy>=1.12,<2'
+          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+      - name: Check exact source oracle and unrelated-source negative controls
+        run: |
+          python -m pytest -q tests/test_temporal_continuity_benchmark.py
+      - name: Validate complete unique-acoustic-group temporal score protocol
+        run: |
+          python - <<'PY'
+          from research.adjacent_audio import adjacent_bilingual_dataset
+          from research.temporal_continuity_benchmark import (
+              ARMS, ERROR_METRICS, PROTOCOL, SeamEvaluationConfig,
+              benchmark_adjacent_dataset,
+          )
+
+          sources = adjacent_bilingual_dataset((101,), prefix_frames=512)
+          report = benchmark_adjacent_dataset(
+              sources, config=SeamEvaluationConfig(prefix_frames=512),
+          )
+          assert report['protocol'] == PROTOCOL
+          assert report['source']['independent_recordings'] == 21
+          assert report['source']['bilingual_caption_examples'] == 42
+          assert len(report['per_recording']) == 21
+          assert report['ground_truth_oracle_zero_error_verified'] is True
+          assert report['deliberately_mismatched_future_negative_control_verified'] is True
+          assert report['zero_future_negative_control_verified'] is True
+          assert report['same_prefix_for_all_three_arms'] is True
+          assert report['no_model_weights_or_wav_written'] is True
+          assert report['model_publication_authorized'] is False
+          for metric in ERROR_METRICS:
+              assert report['group_descriptive_error']['true_adjacent_future'][metric]['mean'] == 0
+          for condition in ('silence_after_prefix', 'unrelated_future'):
+              assert report['group_descriptive_error'][condition]['future_sample_mae']['mean'] > 0
+          print('Exact adjacent-source oracle and 2 false-future baseline controls passed')
+          PY
