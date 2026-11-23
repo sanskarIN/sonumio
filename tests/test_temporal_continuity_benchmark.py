@@ -253,7 +253,7 @@ def test_candidate_cannot_forge_known_prefix_even_when_suffix_is_right(dataset):
     previous, true = _sample(dataset)
     changed = true.clone()
     changed[1] += 0.1
-    with pytest.raises(ValueError, match="prefix"):
+    with pytest.raises(ValueError, match="source overlap"):
         score_continuation(
             previous, true, changed,
             config=SeamEvaluationConfig(prefix_frames=512),
