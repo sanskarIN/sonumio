@@ -26,6 +26,9 @@ from torch import nn
 from torch.nn import functional as F
 
 from research.checkpoint_archive import validate_numeric_archive
+from research.checkpoint_snapshot import (
+    read_checkpoint_manifest, read_verified_weights, verified_npz_bytes,
+)
 from research.text_audio import (
     ByteTextTokenizer, TextEncoder, SYNTHETIC_COMBINATIONS, _synth_prompts,
 )
@@ -303,7 +306,7 @@ def _save_checkpoint(path: Path, model: LatentResearchModel,
 
 def load_checkpoint(path: Path) -> tuple[LatentResearchModel, DiffusionSchedule, dict]:
     path = Path(path)
-    manifest = json.loads((path / 'latent_manifest.json').read_text(encoding='utf-8'))
+    manifest = read_checkpoint_manifest(path / 'latent_manifest.json')
     channels, steps = manifest.get('channels'), manifest.get('diffusion_steps')
     if (manifest.get('format') != CHECKPOINT_FORMAT or manifest.get('sample_rate') != SAMPLE_RATE
             or manifest.get('latent_channels') != LATENT_CHANNELS
@@ -313,15 +316,14 @@ def load_checkpoint(path: Path) -> tuple[LatentResearchModel, DiffusionSchedule,
             or type(steps) is not int or not 8 <= steps <= 256):
         raise ValueError('Unsupported or unsafe latent checkpoint manifest')
     file = path / 'latent_weights.npz'
-    if file.stat().st_size > MAX_WEIGHTS_BYTES:
-        raise ValueError('Latent checkpoint is too large')
-    if hashlib.sha256(file.read_bytes()).hexdigest() != manifest.get('weights_sha256'):
-        raise ValueError('Latent checkpoint SHA256 mismatch')
+    checkpoint_snapshot = read_verified_weights(
+        file, manifest.get('weights_sha256'), max_bytes=MAX_WEIGHTS_BYTES
+    )
     model = LatentResearchModel(channels)
     schedule = DiffusionSchedule(steps)
     expected = model.state_dict()
-    validate_numeric_archive(file, expected)
-    with np.load(file, allow_pickle=False) as archive:
+    validate_numeric_archive(checkpoint_snapshot, expected)
+    with np.load(verified_npz_bytes(checkpoint_snapshot), allow_pickle=False) as archive:
         if set(archive.files) != set(expected):
             raise ValueError('Unexpected latent checkpoint parameter names')
         weights = {}
