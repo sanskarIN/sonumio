@@ -67,7 +67,11 @@ def test_real_synthetic_velocity_training_and_paired_inference_has_safe_report()
     assert report["configuration"]["frames"] == 8192
     assert report["training"]["unique_training_waveforms"] == 42
     assert report["training"]["unique_heldout_waveforms"] == 42
-    assert report["training"]["paired_bilingual_captions_per_split"] == 84
+    assert report["training"]["bilingual_caption_examples_per_split"] == 84
+    assert report["training"]["independent_recordings_per_split"] == 42
+    assert report["training"]["heldout_captions_scored_for_velocity"] == 84
+    assert report["training"]["heldout_recordings_scored_for_velocity"] == 42
+    assert report["training"]["heldout_metric_scope"] == "all captions; source pairs share waveforms"
     assert report["training"]["train_and_validation_exact_overlap"] is False
     assert report["training"]["training_fingerprint"] != report["training"]["validation_fingerprint"]
     assert report["sample_count"] == 16  # 2 arms x 2 budgets x 4 bilingual prompts
@@ -115,5 +119,5 @@ def test_real_synthetic_velocity_training_and_paired_inference_has_safe_report()
 
 
 def test_budget_summary_rejects_empty_or_forged_data():
-    with pytest.raises(IndexError):
+    with pytest.raises(ValueError, match="lacks expected cases"):
         _summary([], budgets=(2, 8))
