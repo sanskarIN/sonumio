@@ -219,7 +219,7 @@ export async function submitSceneJob(input: SceneInput, signal?: AbortSignal): P
   }));
 }
 export async function getJob(jobId: string, signal?: AbortSignal): Promise<AudioJob> {
-  return validateJob(await request<AudioJob>(jobPath(jobId), { signal }));
+  return validateJob(await request<AudioJob>(jobPath(jobId), { signal, cache: 'no-store' }));
 }
 export async function cancelJob(jobId: string): Promise<AudioJob> {
   return validateJob(await request<AudioJob>(jobPath(jobId), { method: 'DELETE' }));
@@ -227,7 +227,10 @@ export async function cancelJob(jobId: string): Promise<AudioJob> {
 function pause(ms: number, signal: AbortSignal): Promise<void> {
   return new Promise<void>((resolve, reject) => {
     if (signal.aborted) { reject(new DOMException('Cancelled', 'AbortError')); return; }
-    const onAbort = () => { clearTimeout(timer); reject(new DOMException('Cancelled', 'AbortError')); };
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(new DOMException('Cancelled', 'AbortError'));
+    };
     const timer = setTimeout(() => {
       signal.removeEventListener('abort', onAbort);
       resolve();
@@ -235,21 +238,53 @@ function pause(ms: number, signal: AbortSignal): Promise<void> {
     signal.addEventListener('abort', onAbort, { once: true });
   });
 }
-/** Poll at most five minutes, providing transparent queue status to the UI. */
+
+export const JOB_POLL_TIMEOUT_MS = 5 * 60 * 1000;
+const JOB_POLL_INTERVAL_MS = 500;
+const JOB_POLL_TIMEOUT_MESSAGE =
+  'Job status timed out after five minutes. The server may still be working.';
+
+/**
+ * Bound the entire polling operation, including a stalled fetch, to five minutes.
+ * User cancellation has precedence over deadline expiry. Each invocation owns
+ * one timer and one derived abort signal, both cleaned up on every exit path.
+ */
 export async function awaitJob(jobId: string, signal: AbortSignal,
                                onUpdate?: (status: JobStatus) => void): Promise<GeneratedAudio> {
-  for (let attempt = 0; attempt < 600; attempt++) {
-    if (signal.aborted) throw new DOMException('Cancelled', 'AbortError');
-    const job = await getJob(jobId, signal);
-    onUpdate?.(job.status);
-    if (job.status === 'succeeded') {
-      if (!job.result) throw new Error('Completed job has no audio result');
-      validateAudioPath(job.result.audio_url);
-      return job.result;
+  if (signal.aborted) throw new DOMException('Cancelled', 'AbortError');
+  const pending = new AbortController();
+  let timedOut = false;
+  const onAbort = () => pending.abort();
+  signal.addEventListener('abort', onAbort, { once: true });
+  const deadline = setTimeout(() => {
+    timedOut = true;
+    pending.abort();
+  }, JOB_POLL_TIMEOUT_MS);
+  try {
+    while (true) {
+      if (signal.aborted) throw new DOMException('Cancelled', 'AbortError');
+      if (timedOut) throw new Error(JOB_POLL_TIMEOUT_MESSAGE);
+      const job = await getJob(jobId, pending.signal);
+      if (signal.aborted) throw new DOMException('Cancelled', 'AbortError');
+      if (timedOut) throw new Error(JOB_POLL_TIMEOUT_MESSAGE);
+      onUpdate?.(job.status);
+      if (signal.aborted) throw new DOMException('Cancelled', 'AbortError');
+      if (job.status === 'succeeded') {
+        if (!job.result) throw new Error('Completed job has no audio result');
+        validateAudioPath(job.result.audio_url);
+        return job.result;
+      }
+      if (job.status === 'failed') throw new Error(job.error || 'Audio generation failed.');
+      if (job.status === 'cancelled') throw new Error('Audio generation was cancelled.');
+      await pause(JOB_POLL_INTERVAL_MS, pending.signal);
     }
-    if (job.status === 'failed') throw new Error(job.error || 'Audio generation failed.');
-    if (job.status === 'cancelled') throw new Error('Audio generation was cancelled.');
-    await pause(500, signal);
+  } catch (error) {
+    if (signal.aborted) throw new DOMException('Cancelled', 'AbortError');
+    if (timedOut) throw new Error(JOB_POLL_TIMEOUT_MESSAGE);
+    throw error;
+  } finally {
+    clearTimeout(deadline);
+    signal.removeEventListener('abort', onAbort);
+    pending.abort();
   }
-  throw new Error('Job status timed out after five minutes. The server may still be working.');
 }
