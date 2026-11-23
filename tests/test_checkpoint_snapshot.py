@@ -221,3 +221,38 @@ def test_research_checkpoint_rejects_forged_publication_claim(
     manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
     with pytest.raises(ValueError):
         module.load_checkpoint(tmp_path)
+
+
+@pytest.mark.parametrize("mutation", ["not_zip", "extra", "object_dtype", "wrong_shape"])
+def test_archive_preflight_on_verified_bytes_rejects_unsafe_layout(
+    tmp_path, mutation,
+):
+    from zipfile import ZipFile
+    from research.checkpoint_archive import validate_numeric_archive
+
+    class ExpectedTensor:
+        shape = (3,)
+
+        def numel(self):
+            return 3
+
+        def element_size(self):
+            return 4
+
+    path = tmp_path / "weights.npz"
+    expected = {"tensor": ExpectedTensor()}
+    if mutation == "not_zip":
+        payload = b"not a zip archive"
+    else:
+        value = np.array([1, 2, 3], dtype=np.float32)
+        if mutation == "object_dtype":
+            value = np.array([object()], dtype=object)
+        elif mutation == "wrong_shape":
+            value = value[:2]
+        np.savez_compressed(path, tensor=value)
+        if mutation == "extra":
+            with ZipFile(path, "a") as archive:
+                archive.writestr("unexpected.npy", b"unused")
+        payload = path.read_bytes()
+    with pytest.raises(ValueError, match="Malformed|Unexpected|Invalid"):
+        validate_numeric_archive(payload, expected)
