@@ -133,7 +133,11 @@ def test_raw_neural_prefix_and_multiclip_continuation_are_deterministic():
         prefix.numpy().tobytes()).hexdigest()
     assert 0 <= one["fraction_above_unit_range"] <= 1
     assert one["no_model_weights_or_audio_saved"] is True
+    initial_clip = (0.03 * torch.cos(
+        torch.arange(FRAMES) * (2 * math.pi / 300)
+    )).float()
     config = dict(
+        initial_clip=initial_clip,
         segments=3, prefix_frames=512,
         evaluations=2, seed=33, guidance=1,
     )
@@ -147,6 +151,10 @@ def test_raw_neural_prefix_and_multiclip_continuation_are_deterministic():
     assert report == same_report
     assert continuous.shape == (FRAMES + 2 * (FRAMES - 512),)
     assert report["output_frames"] == continuous.numel()
+    assert torch.equal(continuous[:FRAMES], initial_clip)
+    assert report["source_initial_clip_supplied_by_caller"] is True
+    assert report["initial_clip_sha256"] == hashlib.sha256(
+        initial_clip.numpy().tobytes()).hexdigest()
     assert report["protocol"] == SEQUENCE_PROTOCOL
     assert report["trained_long_context_model"] is False
     assert len(report["joins"]) == 2
@@ -209,6 +217,7 @@ def test_sequence_bad_settings_rejected(config):
     opts = dict(
         denoiser=model, schedule=DiffusionSchedule(8),
         captions=("rain", "wind"), segments=2,
+        initial_clip=torch.zeros(FRAMES),
         prefix_frames=512, evaluations=2, seed=1,
     )
     with pytest.raises(ValueError):
@@ -245,3 +254,19 @@ def test_nonfinite_model_output_rejected_without_rng_leakage():
             evaluations=2, seed=17,
         )
     assert torch.equal(rng_before, torch.random.get_rng_state())
+
+
+@pytest.mark.parametrize("initial", [
+    torch.zeros(FRAMES - 1),
+    torch.zeros(FRAMES, dtype=torch.float64),
+    torch.full((FRAMES,), float("nan")),
+    torch.full((FRAMES,), 1e13),
+])
+def test_continuation_rejects_invalid_lead_clip(initial):
+    model = TextWaveDenoiser(16)
+    with pytest.raises(ValueError):
+        sample_continuation_sequence(
+            model, DiffusionSchedule(8), "wind",
+            initial_clip=initial, segments=2,
+            prefix_frames=512, evaluations=2,
+        )
