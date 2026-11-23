@@ -1,0 +1,72 @@
+name: Cached global-history v-DDIM numerical parity (CPU)
+
+on:
+  pull_request:
+    paths:
+      - 'research/cached_global_history.py'
+      - 'research/global_history_denoiser.py'
+      - 'tests/test_cached_global_history.py'
+      - '.github/workflows/cached-history-ci.yml'
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  cached-neural-history:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      OMP_NUM_THREADS: '2'
+      MKL_NUM_THREADS: '2'
+      PYTHONHASHSEED: '0'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install original CPU research model dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e '.[test]' 'scipy>=1.12,<2'
+          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+      - name: Demand byte-exact cached-vs-uncached waveform identity and hash gates
+        run: |
+          python -m pytest -q tests/test_cached_global_history.py
+      - name: Compare all model outputs and real encoder invocation counts
+        run: |
+          python - <<'PY'
+          import torch
+          from research.cached_global_history import (
+              PROTOCOL, prepare_history, sample_cached_global_history_ddim,
+              parity_check,
+          )
+          from research.global_history_denoiser import GlobalHistoryVelocityDenoiser
+          from research.wave_diffusion import DiffusionSchedule
+          torch.manual_seed(17)
+          model = GlobalHistoryVelocityDenoiser(16)
+          source = 0.08 * torch.sin(torch.arange(8192).float() / 19)
+          schedule = DiffusionSchedule(8, profile='cosine_zero_terminal_v1')
+          observed = parity_check(
+              model, schedule, 'बारिश', source,
+              prefix_frames=512, evaluations=4, seed=31,
+              guidance=1.5,
+          )
+          assert observed['exact_bitwise_sampler_parity'] is True
+          assert observed['history_encoder_calls_avoided'] == 7
+          cache = prepare_history(model, source)
+          wave, report = sample_cached_global_history_ddim(
+              model, schedule, 'wind', source,
+              prefix_frames=512, evaluations=4, seed=32,
+              guidance=1.5, prepared_history=cache,
+          )
+          assert wave.shape == (8192,)
+          assert torch.equal(wave[:512], source[-512:])
+          assert report['history_encoder_evaluations_for_this_call'] == 0
+          assert report['expected_uncached_history_encoder_evaluations'] == 8
+          assert report['history_encoder_calls_avoided'] == 8
+          assert report['audio_embeddings_or_model_weights_written'] is False
+          assert report['model_publication_authorized'] is False
+          print('Original history DDIM byte parity and zero duplicate history encoding passed')
+          PY
