@@ -27,6 +27,9 @@ from torch import nn
 import torch.nn.functional as F
 
 from research.checkpoint_archive import validate_numeric_archive
+from research.checkpoint_snapshot import (
+    read_checkpoint_manifest, read_verified_weights, verified_npz_bytes,
+)
 from research.wave_diffusion import (
     CATEGORIES, CLIP_FRAMES, DEFAULT_DIFFUSION_STEPS, SAMPLE_RATE,
     ConditionedResidual, DiffusionSchedule, _downsample_24k_to_8k,
@@ -334,24 +337,23 @@ def save_checkpoint(output: Path, model: TextWaveDenoiser,
 
 def load_checkpoint(path: Path) -> tuple[TextWaveDenoiser, DiffusionSchedule, dict]:
     path = Path(path)
-    info = json.loads((path / 'text_manifest.json').read_text(encoding='utf-8'))
+    info = read_checkpoint_manifest(path / 'text_manifest.json')
     if (info.get('format') != CHECKPOINT_FORMAT or info.get('sample_rate') != SAMPLE_RATE
         or info.get('clip_frames') != CLIP_FRAMES or info.get('max_prompt_bytes') != MAX_BYTES
         or info.get('text_vocab') != BYTE_VOCAB or info.get('model_generation') is not None):
         raise ValueError('Incompatible text diffusion checkpoint manifest')
     weight_file = path / 'text_weights.npz'
-    if weight_file.stat().st_size > 64 * 1024 * 1024:
-        raise ValueError('Checkpoint exceeds research size limit')
-    if hashlib.sha256(weight_file.read_bytes()).hexdigest() != info['weights_sha256']:
-        raise ValueError('Checkpoint SHA256 mismatch')
+    checkpoint_snapshot = read_verified_weights(
+        weight_file, info.get('weights_sha256')
+    )
     channels, steps = info.get('channels'), info.get('diffusion_steps')
     if channels not in (8, 16, 24, 32, 40, 48, 56, 64) or not isinstance(steps, int) or not 8 <= steps <= 1000:
         raise ValueError('Unsupported text diffusion model configuration')
     model = TextWaveDenoiser(channels=channels)
     schedule = DiffusionSchedule(steps=steps)
     state = model.state_dict()
-    validate_numeric_archive(weight_file, state)
-    with np.load(weight_file, allow_pickle=False) as checkpoint:
+    validate_numeric_archive(checkpoint_snapshot, state)
+    with np.load(verified_npz_bytes(checkpoint_snapshot), allow_pickle=False) as checkpoint:
         if set(checkpoint.files) != set(state):
             raise ValueError('Unexpected text checkpoint tensor names')
         arrays = {}
