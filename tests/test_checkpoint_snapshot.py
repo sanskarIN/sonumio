@@ -137,7 +137,16 @@ def test_numeric_snapshot_is_independent_from_subsequent_file_changes(tmp_path):
     from research.checkpoint_archive import validate_numeric_archive
     path = tmp_path / "weight.npz"
     np.savez_compressed(path, test=np.array([1, 2, 3], dtype=np.float32))
-    expected = {"test": np.ones(3, dtype=np.float32)}
+    class ExpectedTensor:
+        shape = (3,)
+
+        def numel(self):
+            return 3
+
+        def element_size(self):
+            return 4
+
+    expected = {"test": ExpectedTensor()}
     snapshot = snapshots.read_verified_weights(path, hashlib.sha256(path.read_bytes()).hexdigest())
     np.savez_compressed(path, test=np.array([9, 9, 9], dtype=np.float32))
     validate_numeric_archive(snapshot, expected)
