@@ -29,6 +29,7 @@ LOG = logging.getLogger(__name__)
 TERMINAL = frozenset({"succeeded", "failed", "cancelled"})
 ACTIVE = frozenset({"queued", "running", "cancelling"})
 ID_PATTERN = re.compile(r"^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$")
+CLIENT_ID_PATTERN = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}")
 
 
 class QueueFullError(RuntimeError):
@@ -44,7 +45,7 @@ class JobNotFoundError(KeyError):
 
 
 class JobConflictError(RuntimeError):
-    """An already completed job cannot be cancelled."""
+    """The requested action conflicts with an existing job."""
 
 
 def _utc() -> str:
@@ -66,6 +67,7 @@ class _Job:
     result: dict | None = None
     error: str | None = None
     cancel_requested: bool = False
+    request_fingerprint: bytes | None = None
 
     def public(self) -> dict:
         return {
@@ -216,25 +218,34 @@ class LocalJobQueue:
         if changed:
             self._save_journal()
 
-    def submit(self, kind: str, produce: Callable[[], dict], cleanup: Callable[[dict], None]) -> dict:
+    def submit(
+        self, kind: str, produce: Callable[[], dict], cleanup: Callable[[dict], None],
+        *, job_id: str | None = None, request_fingerprint: bytes | None = None,
+    ) -> dict:
         if kind not in {"generation", "scene"}:
             raise ValueError("unsupported job kind")
+        if job_id is not None:
+            if (not isinstance(job_id, str)
+                    or CLIENT_ID_PATTERN.fullmatch(job_id) is None
+                    or not isinstance(request_fingerprint, bytes)
+                    or len(request_fingerprint) != 32):
+                raise ValueError("client job ID requires a UUIDv4 and SHA-256 fingerprint")
+        elif request_fingerprint is not None:
+            raise ValueError("request fingerprint requires a client job ID")
+
         with self._cv:
             if self._closing:
                 raise QueueUnavailableError("Local generation queue is shutting down")
             self._prune()
+            if job_id is not None and (existing := self._jobs.get(job_id)) is not None:
+                if existing.kind == kind and existing.request_fingerprint == request_fingerprint:
+                    return existing.public()
+                raise JobConflictError("Job ID already in use; check its status")
+
             if sum(job.status in ACTIVE for job in self._jobs.values()) >= self.max_active:
                 raise QueueFullError("Local generation queue is full; retry after another job finishes")
-            # Reserve an unused ID before modifying terminal history. A UUID
-            # collision must never overwrite a still-visible or queued job.
-            job_id = None
-            for _ in range(8):
-                candidate = str(uuid4())
-                if candidate not in self._jobs:
-                    job_id = candidate
-                    break
             if job_id is None:
-                raise QueueUnavailableError("Could not allocate a unique local job ID")
+                job_id = self._allocate_id()
 
             # Defer cleaning any evicted history until both the new record
             # and worker admission succeed. If a journal write or worker
@@ -247,7 +258,10 @@ class LocalJobQueue:
                 if oldest_finished is None:
                     raise QueueFullError("Job history is full; retry later")
                 evicted = self._jobs.pop(oldest_finished)
-            task = _Job(id=job_id, kind=kind, produce=produce, cleanup=cleanup)
+            task = _Job(
+                id=job_id, kind=kind, produce=produce, cleanup=cleanup,
+                request_fingerprint=request_fingerprint,
+            )
             self._jobs[job_id] = task
             self._pending.append(job_id)
             try:
@@ -282,6 +296,14 @@ class LocalJobQueue:
                 self._cleanup(evicted)
             self._cv.notify_all()
             return task.public()
+
+    def _allocate_id(self) -> str:
+        """Reserve an unused server-generated ID under the queue lock."""
+        for _ in range(8):
+            candidate = str(uuid4())
+            if candidate not in self._jobs:
+                return candidate
+        raise QueueUnavailableError("Could not allocate a unique local job ID")
 
     def _find(self, job_id: str) -> _Job:
         if not isinstance(job_id, str) or not ID_PATTERN.fullmatch(job_id):

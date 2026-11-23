@@ -27,6 +27,37 @@ Response contains `id`, `status` (`queued` initially), `status_url`,
 existing `/v1/generations/{uuid}/audio` endpoint. State may briefly be
 `running` or `cancelling`.
 
+## Recover a submitted job by ID
+
+Either queued POST accepts an optional `X-Sonumio-Job-Id` header with one
+client-generated lowercase UUIDv4. Save the ID **before** sending the request.
+If the acknowledgement is lost, look up `GET /v1/jobs/{uuid}` with that ID to
+check admission and follow the render. A missing record can mean the request
+has yet to arrive, was rejected, or the record has expired or been evicted.
+Clients that omit the header still receive a server-generated ID.
+
+```sh
+job_id=$(python -c 'import uuid; print(uuid.uuid4())')
+curl -s http://127.0.0.1:8000/v1/jobs/generations \
+  -H 'Content-Type: application/json' -H "X-Sonumio-Job-Id: $job_id" \
+  -d '{"prompt":"rain","duration_seconds":1,"seed":7}'
+curl -s "http://127.0.0.1:8000/v1/jobs/$job_id"
+```
+
+While the original job is retained in the current process, submitting the
+same route, ID and validated request returns HTTP `202` with its current
+state, even when the active queue is full. This never refreshes its retention.
+Explicit JSON defaults and omitted defaults compare the same. Reusing an ID
+for a different route or validated request returns `409`. A malformed or
+repeated ID header returns `422`.
+
+After a restart with the optional journal, retained IDs are still readable by
+GET. A duplicate POST for a recovered ID returns `409` since the journal
+stores neither the request nor its fingerprint. If the record is gone, a
+POST with that ID can start a new render, so use GET for recovery and a fresh
+ID for each intentionally new render. Job IDs identify records in the local
+queue. This protocol is scoped to the existing single-user API.
+
 ## Guarantees and limitations
 
 - By default, jobs remain in memory and restarting the application loses
@@ -77,8 +108,7 @@ existing `/v1/generations/{uuid}/audio` endpoint. State may briefly be
   leave orphan WAVs if audio was committed immediately before a metadata
   update; the output store's own separate retention cleanup remains necessary.
 - Existing synchronous endpoints remain available for development callers.
-  They do **not** use job retention or cleanup, so their files persist until
-  manually deleted.
+  Their WAV files follow the API audio store's separate retention policy.
 - This service has **no user authentication, per-user quotas, abuse prevention,
   multi-process coordination, encrypted storage, or production security audit**.
   Do not expose the API to a public network or deploy this as a shared service.
