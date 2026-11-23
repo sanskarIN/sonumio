@@ -33,7 +33,28 @@ jobs:
           python -m pip install -e '.[test]' 'scipy>=1.12,<2'
           python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
       - name: Execute PyTorch research tests
-        run: python -m pytest -q tests/test_checkpoint_snapshot.py tests/test_checkpoint_archive.py tests/test_research.py tests/test_wave_diffusion.py tests/test_audio_dataset.py tests/test_multi_condition.py tests/test_text_audio.py tests/test_latent_audio.py tests/test_latent_alignment.py tests/test_latent_quality.py tests/test_architecture_compare.py tests/test_multi_seed_study.py tests/test_generation_audit.py tests/test_schedule_ablation.py tests/test_velocity_prediction.py tests/test_data_reproducibility.py tests/test_dsp_pipeline_trace.py tests/test_dsp_convolution_probe.py tests/test_stable_convolution_candidate.py tests/test_full_convolution_candidate.py tests/test_complete_dsp_candidate.py tests/test_dsp_benchmark.py tests/test_candidate_reference.py tests/test_vectorized_convolution_candidate.py tests/test_fast_dsp_candidate.py tests/test_dsp_three_way.py tests/test_heldout_dsp_probe.py tests/test_numpy_stage_probe.py tests/test_numpy_ambient_probe.py tests/test_ambient_sine_candidate.py tests/test_portable_dsp_candidate.py tests/test_portable_seed_stage_probe.py tests/test_forest_sine_probe.py tests/test_portable_forest_candidate.py tests/test_portable_forest_reference.py tests/test_dsp_resource_profile.py tests/test_portable_dsp_reference.py
+        run: python -m pytest -q tests/test_checkpoint_snapshot.py tests/test_checkpoint_archive.py tests/test_research.py tests/test_wave_diffusion.py tests/test_audio_dataset.py tests/test_multi_condition.py tests/test_text_audio.py tests/test_latent_audio.py tests/test_latent_alignment.py tests/test_latent_quality.py tests/test_architecture_compare.py tests/test_multi_seed_study.py tests/test_generation_audit.py tests/test_schedule_ablation.py tests/test_velocity_prediction.py tests/test_velocity_ddim.py tests/test_velocity_ddim_study.py tests/test_data_reproducibility.py tests/test_dsp_pipeline_trace.py tests/test_dsp_convolution_probe.py tests/test_stable_convolution_candidate.py tests/test_full_convolution_candidate.py tests/test_complete_dsp_candidate.py tests/test_dsp_benchmark.py tests/test_candidate_reference.py tests/test_vectorized_convolution_candidate.py tests/test_fast_dsp_candidate.py tests/test_dsp_three_way.py tests/test_heldout_dsp_probe.py tests/test_numpy_stage_probe.py tests/test_numpy_ambient_probe.py tests/test_ambient_sine_candidate.py tests/test_portable_dsp_candidate.py tests/test_portable_seed_stage_probe.py tests/test_forest_sine_probe.py tests/test_portable_forest_candidate.py tests/test_portable_forest_reference.py tests/test_dsp_resource_profile.py tests/test_portable_dsp_reference.py
+      - name: One-step paired velocity-DDIM research smoke (numeric JSON only)
+        run: |
+          python -m research.velocity_ddim_study \
+            --seed 19 --train-steps 1 --codec-steps 1 \
+            --schedule-steps 8 --budgets 2,8 --sample-seeds 43 \
+            > /tmp/sonumio-ddim-metrics.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          report = json.loads(Path('/tmp/sonumio-ddim-metrics.json').read_text(encoding='utf-8'))
+          assert report['protocol'] == 'sonumio-velocity-sampler-budget-study-v1'
+          assert report['sample_count'] == 16
+          assert report['weights_written'] is False
+          assert report['audio_files_written'] is False
+          assert report['release_authorized'] is False
+          assert all(
+              report['by_arm_budget'][arm]['8']['mean_mae_to_full_step'] == 0
+              for arm in ('raw', 'latent')
+          )
+          print('DDIM synthetic paired budget smoke: passed; no WAV/weights exported')
+          PY
       - name: Compare independently regenerated DSP recordings across Python processes
         run: |
           mkdir -p /tmp/sonumio-repro
