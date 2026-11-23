@@ -111,17 +111,14 @@ def test_reject_integer_or_bool_decay_and_nonfinite_source():
         WeightEMA(source)
 
 
-def test_atomic_rejection_on_candidate_overflow():
+def test_extreme_opposite_sign_finite_ema_values_use_stable_blend():
     source = SimpleNet()
     with torch.no_grad():
         source.weight.fill_(-3.0e38)
     ema = WeightEMA(source, decay=0.5)
     with torch.no_grad():
         source.weight.fill_(3.0e38)
-    # Both inputs are finite, but the float32 intermediate can overflow.
-    # The EMA must reject the update BEFORE modifying any shadow parameter.
-    prior = ema.state_sha256()
-    with pytest.raises(ValueError, match="nonfinite"):
-        ema.update(source)
-    assert ema.state_sha256() == prior
-    assert ema.updates == 0
+    assert ema.update(source) == 0.5
+    assert torch.isfinite(ema.snapshot().weight).all()
+    assert torch.max(torch.abs(ema.snapshot().weight)).item() == 0
+    assert ema.updates == 1
