@@ -35,10 +35,15 @@ def _validated_run(run: dict, *, seed: int, common: dict,
     if (type(settings) is not dict or type(training) is not dict
             or type(stats) is not dict):
         raise ValueError("Incomplete sampler study fields")
-    if settings.get("seed") != seed or any(
-        settings.get(key) != value for key, value in common.items()
-    ):
+    if (type(settings.get("seed")) is not int or settings["seed"] != seed
+            or any(settings.get(key) != value for key, value in common.items())):
         raise ValueError("Model training or sampler configuration drifted")
+    actual_digest = hashlib.sha256(
+        json.dumps(settings, sort_keys=True, separators=(",", ":"),
+                   ensure_ascii=False, allow_nan=False).encode("utf-8")
+    ).hexdigest()
+    if actual_digest != run.get("configuration_sha256"):
+        raise ValueError("Sampler configuration digest was changed")
     if (settings.get("budgets") != list(budgets)
             or settings.get("sample_seeds") != list(sample_seeds)
             or settings.get("objective") != "velocity"
@@ -70,7 +75,9 @@ def _validated_run(run: dict, *, seed: int, common: dict,
         training.get("unique_training_waveforms"),
         training.get("unique_heldout_waveforms"),
     )
-    if (any(type(x) is not str or len(x) != 64 for x in hashes[:2])
+    if (any(type(x) is not str or len(x) != 64
+            or any(char not in "0123456789abcdef" for char in x)
+            for x in hashes[:2])
             or hashes[0] == hashes[1]
             or (previous_data is not None and hashes != previous_data)):
         raise ValueError("Synthetic dataset fingerprint drift across seeds")
