@@ -231,6 +231,9 @@ def load_checkpoint(path: Path) -> tuple[TinyWaveDenoiser, DiffusionSchedule, di
         raise ValueError("Unsupported checkpoint manifest or mismatched prompt categories")
     if manifest.get("sample_rate") != SAMPLE_RATE or manifest.get("clip_frames") != CLIP_FRAMES:
         raise ValueError("Incompatible waveform layout")
+    if (manifest.get("not_original_sonumio_1") is not True
+            or manifest.get("weights_publication_authorized") is not False):
+        raise ValueError("Unsafe waveform research checkpoint provenance claims")
     channels, steps = manifest.get("channels"), manifest.get("diffusion_steps")
     if (type(channels) is not int or channels not in range(8, 65, 8)
             or type(steps) is not int or not 8 <= steps <= 1000):
