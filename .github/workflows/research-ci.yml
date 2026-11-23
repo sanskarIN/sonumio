@@ -33,7 +33,7 @@ jobs:
           python -m pip install -e '.[test]' 'scipy>=1.12,<2'
           python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
       - name: Execute PyTorch research tests
-        run: python -m pytest -q tests/test_checkpoint_snapshot.py tests/test_checkpoint_archive.py tests/test_research.py tests/test_wave_diffusion.py tests/test_audio_dataset.py tests/test_multi_condition.py tests/test_text_audio.py tests/test_latent_audio.py tests/test_latent_alignment.py tests/test_latent_quality.py tests/test_architecture_compare.py tests/test_multi_seed_study.py tests/test_generation_audit.py tests/test_schedule_ablation.py tests/test_velocity_prediction.py tests/test_velocity_ddim.py tests/test_velocity_ddim_study.py tests/test_velocity_ddim_replicates.py tests/test_weight_ema.py tests/test_velocity_ema_study.py tests/test_velocity_ema_decay_ablation.py tests/test_longform_ddim.py tests/test_velocity_prefix_continuation.py tests/test_velocity_prefix_study.py tests/test_data_reproducibility.py tests/test_dsp_pipeline_trace.py tests/test_dsp_convolution_probe.py tests/test_stable_convolution_candidate.py tests/test_full_convolution_candidate.py tests/test_complete_dsp_candidate.py tests/test_dsp_benchmark.py tests/test_candidate_reference.py tests/test_vectorized_convolution_candidate.py tests/test_fast_dsp_candidate.py tests/test_dsp_three_way.py tests/test_heldout_dsp_probe.py tests/test_numpy_stage_probe.py tests/test_numpy_ambient_probe.py tests/test_ambient_sine_candidate.py tests/test_portable_dsp_candidate.py tests/test_portable_seed_stage_probe.py tests/test_forest_sine_probe.py tests/test_portable_forest_candidate.py tests/test_portable_forest_reference.py tests/test_dsp_resource_profile.py tests/test_portable_dsp_reference.py
+        run: python -m pytest -q tests/test_checkpoint_snapshot.py tests/test_checkpoint_archive.py tests/test_research.py tests/test_wave_diffusion.py tests/test_audio_dataset.py tests/test_multi_condition.py tests/test_text_audio.py tests/test_latent_audio.py tests/test_latent_alignment.py tests/test_latent_quality.py tests/test_architecture_compare.py tests/test_multi_seed_study.py tests/test_generation_audit.py tests/test_schedule_ablation.py tests/test_velocity_prediction.py tests/test_velocity_ddim.py tests/test_velocity_ddim_study.py tests/test_velocity_ddim_replicates.py tests/test_weight_ema.py tests/test_velocity_ema_study.py tests/test_velocity_ema_decay_ablation.py tests/test_longform_ddim.py tests/test_velocity_prefix_continuation.py tests/test_velocity_prefix_study.py tests/test_adjacent_audio.py tests/test_adjacent_prefix_study.py tests/test_data_reproducibility.py tests/test_dsp_pipeline_trace.py tests/test_dsp_convolution_probe.py tests/test_stable_convolution_candidate.py tests/test_full_convolution_candidate.py tests/test_complete_dsp_candidate.py tests/test_dsp_benchmark.py tests/test_candidate_reference.py tests/test_vectorized_convolution_candidate.py tests/test_fast_dsp_candidate.py tests/test_dsp_three_way.py tests/test_heldout_dsp_probe.py tests/test_numpy_stage_probe.py tests/test_numpy_ambient_probe.py tests/test_ambient_sine_candidate.py tests/test_portable_dsp_candidate.py tests/test_portable_seed_stage_probe.py tests/test_forest_sine_probe.py tests/test_portable_forest_candidate.py tests/test_portable_forest_reference.py tests/test_dsp_resource_profile.py tests/test_portable_dsp_reference.py
       - name: One-step paired velocity-DDIM research smoke (numeric JSON only)
         run: |
           python -m research.velocity_ddim_study \
@@ -173,6 +173,34 @@ jobs:
           assert report['no_audio_or_weights_saved'] is True
           assert report['model_release_authorized'] is False
           print('Controlled original clean-prefix future-only v-training passed')
+          PY
+      - name: Original genuinely adjacent synthetic continuation paired-training smoke
+        run: |
+          python -m research.adjacent_prefix_study \
+            --model-seed 17 --updates 2 --prefix-frames 512 \
+            --diffusion-steps 8 --evaluations 2 --generation-seed 301 \
+            --batch-size 2 --training-seeds 0 --heldout-seeds 101 \
+            > /tmp/sonumio-adjacent-condition.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          r = json.loads(Path('/tmp/sonumio-adjacent-condition.json').read_text(encoding='utf8'))
+          assert r['protocol'] == 'sonumio-adjacent-conditional-velocity-v1'
+          assert r['split']['train_independent_recordings'] == 21
+          assert r['split']['heldout_independent_recordings'] == 21
+          assert r['split']['train_caption_examples'] == 42
+          assert r['split']['heldout_caption_examples'] == 42
+          assert r['split']['exact_sample_overlap_between_neighbors'] is True
+          assert r['model_states']['distinct_trained_states'] is True
+          assert r['model_states']['unchanged_through_evaluation'] is True
+          assert r['heldout_future_objective']['independent_recordings_scored'] == 21
+          assert r['heldout_future_objective']['bilingual_caption_examples_scored'] == 42
+          assert r['controls']['only_history_observability_differs'] is True
+          assert r['controls']['same_heldout_corruption_for_all_conditions'] is True
+          assert r['global_torch_rng_isolated'] is True
+          assert r['no_audio_or_weights_saved'] is True
+          assert r['model_release_authorized'] is False
+          print('First-party real-adjacency controlled training diagnostic passed')
           PY
       - name: Compare independently regenerated DSP recordings across Python processes
         run: |
