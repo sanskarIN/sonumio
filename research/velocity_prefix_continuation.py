@@ -25,7 +25,7 @@ from research.longform_ddim import (
 )
 from research.text_audio import ByteTextTokenizer
 from research.velocity_ddim import (
-    ddim_plan, sample_velocity_ddim, velocity_ddim_transition,
+    ddim_plan, velocity_ddim_transition,
 )
 from research.velocity_prediction import velocity_target
 from research.wave_diffusion import DiffusionSchedule, SAMPLE_RATE
@@ -222,11 +222,17 @@ def sample_prefix_velocity_ddim(
 def sample_continuation_sequence(
     denoiser: nn.Module, schedule: DiffusionSchedule,
     captions: str | tuple[str, ...], *,
+    initial_clip: torch.Tensor,
     segments: int, prefix_frames: int, evaluations: int,
     seed: int = 0, guidance: float = 1.0,
 ) -> tuple[torch.Tensor, dict]:
-    """One independent lead clip, then exactly anchored raw future samples."""
+    """Extend a caller-provided lead clip with prefix-anchored future samples.
+
+    The continuation model is not asked to invent an unconditioned first clip
+    it was never trained to create. The caller owns the source and its rights.
+    """
     _validate_overlaps(segments, prefix_frames)
+    _validate_wave(initial_clip)
     plan = ddim_plan(schedule, evaluations=evaluations)
     _model_args(denoiser, schedule, guidance=guidance)
     prompts = _captions(captions, segments)
@@ -236,12 +242,7 @@ def sample_continuation_sequence(
     model_hash = model_state_sha256(denoiser)
     mode = denoiser.training
     try:
-        first = sample_velocity_ddim(
-            denoiser, schedule, prompts[0], evaluations=evaluations,
-            seed=seed, guidance=guidance,
-        )
-        _validate_wave(first)
-        output = first.clone()
+        output = initial_clip.clone()
         joins = []
         for i, caption in enumerate(prompts[1:], start=1):
             prefix = output[-prefix_frames:].clone()
@@ -280,7 +281,11 @@ def sample_continuation_sequence(
             "sample_rate": SAMPLE_RATE,
             "output_frames": output.numel(),
             "duration_seconds": output.numel() / SAMPLE_RATE,
-            "lead_seed": seed, "joins": joins,
+            "continuation_seed_base": seed,
+            "source_initial_clip_supplied_by_caller": True,
+            "initial_clip_sha256": hashlib.sha256(
+                initial_clip.numpy().tobytes()).hexdigest(),
+            "joins": joins,
             "output_sha256": hashlib.sha256(
                 output.numpy().tobytes()).hexdigest(),
             "model_state_preserved": True, "global_rng_preserved": True,
@@ -291,7 +296,8 @@ def sample_continuation_sequence(
                 "Prefix-anchored diffusion constrains a clean history, "
                 "but does not prove smooth future onset, scene coherence, "
                 "speech, music, naturalness, or longer learned context. "
-                "Requires separately trained masked-future v-model weights."
+                "Requires separately trained masked-future v-model weights "
+                "and a caller-provided first clip."
             ),
         }
     finally:
