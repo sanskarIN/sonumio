@@ -60,6 +60,7 @@ def fake_run(seed: int, *, train_steps: int, codec_steps: int,
         "by_arm_budget": parts,
         "sample_count": 2 * len(budgets) * len(sample_seeds) * 4,
         "configuration_sha256": digest,
+        "trained_model_state_sha256": f"{seed:064x}",
         "same_starting_gaussian_for_equal_seeds": True,
         "same_trained_parameters_across_budgets": True,
         "heldout_audio_used_for_training": False,
@@ -112,6 +113,7 @@ def test_validated_two_seed_replicates_report_descriptive_effect_not_quality():
     ("by_arm_budget.raw.8.mean_mae_to_full_step", 0.3),
     ("by_arm_budget.latent.8.model_evaluations_per_sample", 10),
     ("sample_count", 4),
+    ("trained_model_state_sha256", "not-a-sha"),
 ])
 def test_replicates_fail_closed_on_forged_or_incomparable_reports(corruption):
     key, value = corruption
@@ -156,3 +158,4 @@ def test_real_two_initializations_train_with_same_data_and_preserve_global_rng()
     assert report["configuration"]["training_fingerprint"] != report[
         "configuration"]["validation_fingerprint"]
     assert report["weight_or_audio_files_saved"] is False
+    assert len({row["trained_model_state_sha256"] for row in report["per_seed"]}) == 2
