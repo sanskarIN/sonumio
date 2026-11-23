@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { awaitJob, cancelJob, getJob, submitGenerationJob, submitSceneJob } from './api';
+import { awaitJob, cancelJob, getJob, submitGenerationJob, submitSceneJob, JOB_POLL_TIMEOUT_MS } from './api';
 
 const id = '3415208b-a921-4fcc-8f33-aef223eab207';
 const path = '/v1/jobs/' + id;
@@ -11,7 +11,7 @@ const job = (status: string, result: unknown = null, error: unknown = null) =>
   ({ id, kind: 'generation', status, status_url: path, cancel_url: path, result, error });
 const input = { prompt: 'rain', duration_seconds: 1, seed: 0, model_id: 'procedural-sfx-v0' } as const;
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
 
 describe('development audio jobs', () => {
   it('creates jobs via fixed same-origin routes and no credentials', async () => {
@@ -59,5 +59,53 @@ describe('development audio jobs', () => {
     const mock = vi.fn(); vi.stubGlobal('fetch', mock);
     await expect(awaitJob(id, controller.signal)).rejects.toThrow('Cancelled');
     expect(mock).not.toHaveBeenCalled();
+  });
+  it('requests fresh job status rather than a possibly cached queue snapshot', async () => {
+    const mock = vi.fn().mockResolvedValue(fake(200, job('running')));
+    vi.stubGlobal('fetch', mock);
+    expect((await getJob(id)).status).toBe('running');
+    expect(mock.mock.calls[0][1].cache).toBe('no-store');
+    expect(mock.mock.calls[0][1].credentials).toBe('omit');
+  });
+
+  it('enforces the overall five-minute deadline even when HTTP polling hangs', async () => {
+    vi.useFakeTimers();
+    const fetcher = vi.fn((_url: string, options: RequestInit) =>
+      new Promise<Response>((_resolve, reject) => {
+        options.signal?.addEventListener('abort', () => {
+          reject(new DOMException('Cancelled', 'AbortError'));
+        }, { once: true });
+      }));
+    vi.stubGlobal('fetch', fetcher);
+    const pending = awaitJob(id, new AbortController().signal);
+    const assertion = expect(pending).rejects.toThrow('timed out after five minutes');
+    await vi.advanceTimersByTimeAsync(JOB_POLL_TIMEOUT_MS);
+    await assertion;
+    expect(fetcher).toHaveBeenCalledOnce();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('immediately interrupts an in-flight status request when the user cancels', async () => {
+    vi.useFakeTimers();
+    const controller = new AbortController();
+    const fetcher = vi.fn((_url: string, options: RequestInit) =>
+      new Promise<Response>((_resolve, reject) => {
+        options.signal?.addEventListener('abort', () => {
+          reject(new DOMException('Cancelled', 'AbortError'));
+        }, { once: true });
+      }));
+    vi.stubGlobal('fetch', fetcher);
+    const pending = awaitJob(id, controller.signal);
+    controller.abort();
+    await expect(pending).rejects.toMatchObject({ name: 'AbortError' });
+    expect(fetcher).toHaveBeenCalledOnce();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('cleans up the timeout after a successful job without waiting five minutes', async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(fake(200, job('succeeded', audio))));
+    await expect(awaitJob(id, new AbortController().signal)).resolves.toEqual(audio);
+    expect(vi.getTimerCount()).toBe(0);
   });
 });
