@@ -199,6 +199,26 @@ def _train_models(*, seed: int, train_steps: int, codec_steps: int,
     return models, codec, report
 
 
+def _model_state_sha256(models: dict, codec: nn.Module) -> str:
+    """Fingerprint research parameters/buffers without exposing their values."""
+    digest = hashlib.sha256(b"sonumio-v-ddim-model-state-v1\\0")
+    for component, module in (
+        ("raw", models["raw"]),
+        ("latent", models["latent"]),
+        ("codec", codec),
+    ):
+        for name, tensor in sorted(module.state_dict().items()):
+            if (tensor.device.type != "cpu" or tensor.dtype != torch.float32
+                    or not torch.isfinite(tensor).all()):
+                raise ValueError("Research model contains nonfinite/nonfloat parameters")
+            values = tensor.detach().contiguous().numpy()
+            digest.update(component.encode("ascii") + b"\\0")
+            digest.update(name.encode("utf-8") + b"\\0")
+            digest.update(str(tuple(values.shape)).encode("ascii") + b"\\0")
+            digest.update(values.tobytes(order="C"))
+    return digest.hexdigest()
+
+
 def _evaluate(models: dict, codec: nn.Module,
               schedule: DiffusionSchedule, *,
               budgets: tuple[int, ...], sample_seeds: tuple[int, ...],
@@ -335,10 +355,14 @@ def run_study(*, seed: int = 17, train_steps: int = 4,
             seed=seed, train_steps=train_steps, codec_steps=codec_steps,
             schedule=schedule, channels=channels,
         )
+        initial_model_sha = _model_state_sha256(models, codec)
         records, contrasts = _evaluate(
             models, codec, schedule, budgets=budgets,
             sample_seeds=sample_seeds, guidance=guidance,
         )
+        final_model_sha = _model_state_sha256(models, codec)
+        if final_model_sha != initial_model_sha:
+            raise ValueError("DDIM inference mutated frozen research model parameters")
     report = {
         "protocol": PROTOCOL,
         "configuration": {
@@ -365,7 +389,8 @@ def run_study(*, seed: int = 17, train_steps: int = 4,
             perf_counter() - started, 3,
         ),
         "same_starting_gaussian_for_equal_seeds": True,
-        "same_trained_parameters_across_budgets": True,
+        "same_trained_parameters_across_budgets": initial_model_sha == final_model_sha,
+        "trained_model_state_sha256": initial_model_sha,
         "heldout_audio_used_for_training": False,
         "weights_written": False,
         "audio_files_written": False,
