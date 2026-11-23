@@ -43,7 +43,7 @@ def _settings(*, seed: int, updates: int, prefix_frames: int,
             or type(diffusion_steps) is not int or not 8 <= diffusion_steps <= 16
             or type(evaluations) is not int
             or not 2 <= evaluations <= diffusion_steps
-            or type(sample_seed) is not int or not 0 <= sample_seed < 2**32 - 2):
+            or type(sample_seed) is not int or not 0 <= sample_seed <= 2**32 - 7):
         raise ValueError("Invalid bounded clean-prefix training study settings")
 
 
