@@ -107,7 +107,12 @@ def test_real_synthetic_velocity_training_and_paired_inference_has_safe_report()
                 continue
             assert len(record["postclamp_sha256"]) == 64
             assert math.isfinite(record["postclamp_rms"])
-            assert math.isfinite(record["peak_before_external_limiter"])
+            assert math.isfinite(record["prelimiter_peak"])
+            assert math.isfinite(record["prelimiter_rms"])
+            assert record["prelimiter_signal_source"] == (
+                "latent_codec_decoder_before_tanh" if arm == "latent"
+                else "raw_ddpm_before_final_clamp"
+            )
             assert math.isfinite(record["mae_to_full_step_ddim"])
             assert 0 <= record["postclamp_clipping_fraction"] <= 1
             assert 0 <= record["out_of_range_fraction"] <= 1
