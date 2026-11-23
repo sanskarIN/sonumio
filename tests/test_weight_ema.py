@@ -118,7 +118,10 @@ def test_atomic_rejection_on_candidate_overflow():
     ema = WeightEMA(source, decay=0.5)
     with torch.no_grad():
         source.weight.fill_(3.0e38)
-    # Both finite inputs: float32 convex interpolation must not overflow;
-    # update should produce finite values, never a half-updated state.
-    ema.update(source)
-    assert torch.isfinite(ema.snapshot().weight).all()
+    # Both inputs are finite, but the float32 intermediate can overflow.
+    # The EMA must reject the update BEFORE modifying any shadow parameter.
+    prior = ema.state_sha256()
+    with pytest.raises(ValueError, match="nonfinite"):
+        ema.update(source)
+    assert ema.state_sha256() == prior
+    assert ema.updates == 0
