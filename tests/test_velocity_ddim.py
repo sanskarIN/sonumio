@@ -196,9 +196,9 @@ def test_latent_decoder_preactivations_are_reportable_without_clipping():
 def test_sampler_rejects_invalid_input_before_running_model(bad):
     model = CountingDenoiser()
     schedule = DiffusionSchedule(8)
+    options = {"evaluations": 3, **bad}
     with pytest.raises(ValueError):
-        sample_velocity_ddim(model, schedule, "rain", evaluations=3,
-                             **({k: v for k, v in bad.items()} if "evaluations" not in bad else bad))
+        sample_velocity_ddim(model, schedule, "rain", **options)
     assert model.calls == []
 
 
