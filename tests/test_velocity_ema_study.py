@@ -126,3 +126,19 @@ def test_online_and_ema_share_same_noise_not_only_same_random_seed():
     )
     assert result["online"] == result["ema"]
     assert result["ema_minus_online"] == 0
+
+
+def test_decay_zero_control_matches_online_model_and_generated_waveforms_exactly():
+    """A null hypothesis control: EMA with decay=0 must equal online weights."""
+    report = run_study(**(_tiny() | {"decay": 0.0}))
+    for arm in ("raw", "latent"):
+        states = report["model_state_integrity"][arm]
+        assert states["online_model_sha256"] == states["ema_model_sha256"]
+        metrics = report["heldout_velocity_objective"][arm]
+        assert metrics["online"] == metrics["ema"]
+        assert metrics["ema_minus_online"] == 0.0
+        for row in report["in_memory_generated_numerical_comparisons"][arm]:
+            assert row["online"]["postclip"]["sha256"] == row["ema"]["postclip"]["sha256"]
+            delta = row["online_ema_waveform_difference"]
+            assert delta["exact_same_waveform"] is True
+            assert delta["mean_absolute_difference"] == 0.0
