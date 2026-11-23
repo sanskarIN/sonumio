@@ -6,6 +6,7 @@ before NumPy's array loader sees the expected tensor shapes.
 """
 from __future__ import annotations
 
+from io import BytesIO
 from pathlib import Path
 from zipfile import BadZipFile, ZIP_DEFLATED, ZIP_STORED, ZipFile
 
@@ -15,18 +16,26 @@ MAX_COMPRESSED_BYTES = 64 * 1024 * 1024
 MAX_ARRAY_HEADER_BYTES = 4096
 
 
-def validate_numeric_archive(path: Path, expected: dict) -> None:
+def validate_numeric_archive(path: Path | bytes, expected: dict) -> None:
     """Reject extra, oversized, encrypted or shape-spoofed arrays before loading.
 
     ``expected`` maps state-dict names to torch tensors. No arrays are loaded
     by this validator and it does not execute code from the checkpoint.
     """
-    path = Path(path)
-    if path.stat().st_size > MAX_COMPRESSED_BYTES:
-        raise ValueError('Checkpoint exceeds research size limit')
+    # A caller can pass an immutable verified byte snapshot. The preflight
+    # and the subsequent NumPy loader then inspect exactly the same bytes,
+    # not two opens of a replaceable local pathname.
+    if type(path) is bytes:
+        if not 0 < len(path) <= MAX_COMPRESSED_BYTES:
+            raise ValueError('Checkpoint exceeds research size limit')
+        source = BytesIO(path)
+    else:
+        source = Path(path)
+        if source.stat().st_size > MAX_COMPRESSED_BYTES:
+            raise ValueError('Checkpoint exceeds research size limit')
     wanted = {name + '.npy': tensor for name, tensor in expected.items()}
     try:
-        with ZipFile(path, 'r') as archive:
+        with ZipFile(source, 'r') as archive:
             infos = archive.infolist()
             names = [entry.filename for entry in infos]
             if len(names) != len(wanted) or set(names) != set(wanted):
