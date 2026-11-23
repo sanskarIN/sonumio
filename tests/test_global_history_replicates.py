@@ -203,7 +203,7 @@ def test_real_two_initialization_replicated_training_and_heldout(replication):
 
 
 @pytest.mark.parametrize("change", [
-    {"updates": 0}, {"updates": 65},
+    {"updates": 0}, {"updates": 129},
     {"prefix_frames": 0}, {"prefix_frames": 512.0},
     {"diffusion_steps": 7}, {"evaluations": 1},
     {"batch_size": 0}, {"batch_size": 9},
