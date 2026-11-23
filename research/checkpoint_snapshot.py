@@ -9,7 +9,6 @@ substitute for trusted model provenance, audited audio rights, or sandboxing.
 """
 from __future__ import annotations
 
-import errno
 import hashlib
 import io
 import json
@@ -88,7 +87,7 @@ def read_checkpoint_manifest(path: str | Path) -> dict:
             blob.decode("utf-8"), object_pairs_hook=_no_duplicate_keys,
             parse_constant=_no_nonfinite_constant,
         )
-    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+    except (UnicodeDecodeError, json.JSONDecodeError, RecursionError) as exc:
         raise ValueError("Malformed checkpoint JSON manifest") from exc
     if type(manifest) is not dict:
         raise ValueError("Checkpoint manifest must be a JSON object")
