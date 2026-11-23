@@ -1,8 +1,10 @@
 """Local-only initial REST API. Do not expose publicly without auth/rate limits."""
 from functools import lru_cache
+from hashlib import sha256
 from pathlib import Path
 import os
-from fastapi import FastAPI, HTTPException, Request
+from typing import Annotated
+from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from . import __version__
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
@@ -129,7 +131,7 @@ def audio(generation_id: str, request: Request):
 # not expose multi-user/public inference, arbitrary model paths or voice tasks.
 # The queue owns one background worker, not a thread per request.
 # ---------------------------------------------------------------------------
-from .jobs import (LocalJobQueue, JobNotFoundError, JobConflictError,
+from .jobs import (CLIENT_ID_PATTERN, LocalJobQueue, JobNotFoundError, JobConflictError,
                    QueueFullError, QueueUnavailableError)
 from .scenes import validate_scene_plan
 from .validation import validate_request
@@ -172,14 +174,35 @@ def _queue_response(job: dict) -> dict:
     }
 
 
-def _enqueue(kind: str, callback, store: LocalAudioStore) -> dict:
+def _requested_job_id(
+    values: Annotated[list[str] | None, Header(alias="X-Sonumio-Job-Id")] = None,
+) -> str | None:
+    if values is None:
+        return None
+    if len(values) != 1 or CLIENT_ID_PATTERN.fullmatch(values[0]) is None:
+        raise HTTPException(
+            status_code=422, detail="X-Sonumio-Job-Id requires one lowercase UUIDv4",
+        )
+    return values[0]
+
+
+RequestedJobId = Annotated[str | None, Depends(_requested_job_id)]
+
+
+def _enqueue(
+    kind: str, request: BaseModel, callback, store: LocalAudioStore, job_id: str | None,
+) -> dict:
     # Capture the exact storage instance alongside the queued callback:
     # changing OUTPUT_DIR later cannot redirect the render or its cleanup.
+    fingerprint = sha256(request.model_dump_json().encode("utf-8")).digest() if job_id else None
     try:
         task = JOBS.submit(
             kind, callback,
             lambda result: _cleanup_job_audio(result, store),
+            job_id=job_id, request_fingerprint=fingerprint,
         )
+    except JobConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except QueueFullError as exc:
         raise HTTPException(status_code=429, detail=str(exc)) from exc
     except QueueUnavailableError as exc:
@@ -188,7 +211,7 @@ def _enqueue(kind: str, callback, store: LocalAudioStore) -> dict:
 
 
 @app.post("/v1/jobs/generations", status_code=202)
-def enqueue_generation(request: GenerationRequest) -> dict:
+def enqueue_generation(request: GenerationRequest, job_id: RequestedJobId = None) -> dict:
     if request.model_id != "procedural-sfx-v0":
         raise HTTPException(status_code=422, detail="The local job queue supports procedural-sfx-v0 only")
     try:
@@ -197,11 +220,11 @@ def enqueue_generation(request: GenerationRequest) -> dict:
     except GenerationError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     store = _store_for(OUTPUT_DIR)
-    return _enqueue("generation", lambda: _generate(request, store), store)
+    return _enqueue("generation", request, lambda: _generate(request, store), store, job_id)
 
 
 @app.post("/v1/jobs/scenes", status_code=202)
-def enqueue_scene(request: SceneRequest) -> dict:
+def enqueue_scene(request: SceneRequest, job_id: RequestedJobId = None) -> dict:
     layers = [SceneLayer(**layer.model_dump()) for layer in request.layers]
     try:
         validate_scene_plan(layers, request.duration_seconds)
@@ -210,7 +233,7 @@ def enqueue_scene(request: SceneRequest) -> dict:
     except GenerationError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     store = _store_for(OUTPUT_DIR)
-    return _enqueue("scene", lambda: _generate_scene(request, store), store)
+    return _enqueue("scene", request, lambda: _generate_scene(request, store), store, job_id)
 
 
 @app.get("/v1/jobs/{job_id}")
