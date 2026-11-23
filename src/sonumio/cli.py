@@ -11,6 +11,7 @@ from .scenes import SceneLayer, compose_scene
 from .audio_core.wave_pipeline import (
     WavProcessingConfig, process_wav_file,
 )
+from .atomic_cli_wav import publish_generated_wav
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="sonumio", description="Imagine it. Hear it.")
@@ -22,9 +23,17 @@ def main(argv: list[str] | None = None) -> int:
     create.add_argument("--model", default="procedural-sfx-v0")
     create.add_argument("--seed", type=int, default=0)
     create.add_argument("--output", type=Path, default=Path("sonumio.wav"))
+    create.add_argument("--overwrite", action="store_true",
+                        help="Explicitly replace an existing ordinary WAV file")
+    create.add_argument("--expected-output-sha256",
+                        help="Require the exact SHA256 before creating the output")
     scene = sub.add_parser("scene", help="Compose a timed, multi-layer procedural WAV scene from JSON")
     scene.add_argument("json_file", type=Path)
     scene.add_argument("--output", type=Path, default=Path("scene.wav"))
+    scene.add_argument("--overwrite", action="store_true",
+                       help="Explicitly replace an existing ordinary WAV file")
+    scene.add_argument("--expected-output-sha256",
+                       help="Require the exact SHA256 before creating the output")
     post = sub.add_parser(
         "wav-process",
         help="Locally postprocess a strict PCM WAV with two-pass SHA verification",
@@ -146,12 +155,20 @@ def main(argv: list[str] | None = None) -> int:
             generated = compose_scene(layers, payload["duration_seconds"])
         else:
             generated = generate_audio(args.prompt, args.seconds, args.model, args.seed)
-        args.output.parent.mkdir(parents=True, exist_ok=True)
-        args.output.write_bytes(generated.wav_bytes)
+        published = publish_generated_wav(
+            args.output, generated.wav_bytes,
+            overwrite=args.overwrite,
+            expected_sha256=args.expected_output_sha256,
+        )
     except (GenerationError, OSError, ValueError, TypeError, KeyError) as exc:
         print(f"Sonumio: {exc}", file=sys.stderr)
         return 2
-    print(f"Wrote {args.output} ({generated.result.duration_seconds:.2f}s, {generated.result.sample_rate} Hz)")
+    print(
+        f"Wrote {published.path} "
+        f"({generated.result.duration_seconds:.2f}s, "
+        f"{generated.result.sample_rate} Hz, "
+        f"SHA256 {published.wav_sha256})"
+    )
     return 0
 
 if __name__ == "__main__":
