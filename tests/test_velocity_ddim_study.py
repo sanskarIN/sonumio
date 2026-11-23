@@ -127,3 +127,32 @@ def test_real_synthetic_velocity_training_and_paired_inference_has_safe_report()
 def test_budget_summary_rejects_empty_or_forged_data():
     with pytest.raises(ValueError, match="lacks expected cases"):
         _summary([], budgets=(2, 8))
+
+
+def test_sampler_study_fails_if_inference_changes_any_neural_parameter(monkeypatch):
+    """The shared-model claim must be an actual before/after state check."""
+    from research import velocity_ddim_study as study
+
+    def tamper_during_inference(models, codec, schedule, **kwargs):
+        with torch.no_grad():
+            next(models["raw"].parameters()).add_(0.5)
+        return [], []
+
+    monkeypatch.setattr(study, "_evaluate", tamper_during_inference)
+    with pytest.raises(ValueError, match="mutated frozen research model"):
+        study.run_study(**_default())
+
+
+def test_model_fingerprint_refuses_nonfinite_parameter_state():
+    from research.velocity_ddim_study import _model_state_sha256
+    from research.latent_audio import LatentResearchModel
+    from research.text_audio import TextWaveDenoiser
+
+    raw, latent = TextWaveDenoiser(16), LatentResearchModel(16)
+    models = {"raw": raw, "latent": latent.denoiser}
+    before = _model_state_sha256(models, latent.codec)
+    assert len(before) == 64
+    with torch.no_grad():
+        next(raw.parameters()).fill_(float("nan"))
+    with pytest.raises(ValueError, match="nonfinite"):
+        _model_state_sha256(models, latent.codec)
