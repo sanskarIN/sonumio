@@ -80,6 +80,7 @@ def test_real_synthetic_velocity_training_and_paired_inference_has_safe_report()
     assert len(report["configuration_sha256"]) == 64
     assert report["same_starting_gaussian_for_equal_seeds"]
     assert report["same_trained_parameters_across_budgets"]
+    assert len(report["trained_model_state_sha256"]) == 64
     assert report["heldout_audio_used_for_training"] is False
     assert report["weights_written"] is False
     assert report["audio_files_written"] is False
