@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import copy
 import math
+import json
+import hashlib
 
 import pytest
 
@@ -30,17 +32,21 @@ def fake_run(seed: int, *, train_steps: int, codec_steps: int,
                 "mean_out_of_range_fraction": 0.2 if budget == budgets[-1] else 0.02,
                 "mean_mae_to_full_step": 0 if budget == budgets[-1] else 0.05,
             }
+    configuration = {
+        "seed": seed, "train_steps": train_steps,
+        "codec_steps": codec_steps, "schedule_steps": schedule_steps,
+        "channels": channels, "guidance": guidance,
+        "sample_rate": 8000, "frames": 8192,
+        "budgets": list(budgets), "sample_seeds": list(sample_seeds),
+        "objective": "velocity", "sampler": "deterministic_ddim_eta_zero",
+        "training_corpus": "sonumio-first-party-synthetic-dsp",
+    }
+    digest = hashlib.sha256(json.dumps(
+        configuration, sort_keys=True, ensure_ascii=False,
+        separators=(",", ":")).encode("utf-8")).hexdigest()
     return {
         "protocol": "sonumio-velocity-sampler-budget-study-v1",
-        "configuration": {
-            "seed": seed, "train_steps": train_steps,
-            "codec_steps": codec_steps, "schedule_steps": schedule_steps,
-            "channels": channels, "guidance": guidance,
-            "sample_rate": 8000, "frames": 8192,
-            "budgets": list(budgets), "sample_seeds": list(sample_seeds),
-            "objective": "velocity", "sampler": "deterministic_ddim_eta_zero",
-            "training_corpus": "sonumio-first-party-synthetic-dsp",
-        },
+        "configuration": configuration,
         "training": {
             "training_fingerprint": "a" * 64,
             "validation_fingerprint": "b" * 64,
@@ -53,7 +59,7 @@ def fake_run(seed: int, *, train_steps: int, codec_steps: int,
         },
         "by_arm_budget": parts,
         "sample_count": 2 * len(budgets) * len(sample_seeds) * 4,
-        "configuration_sha256": "f" * 64,
+        "configuration_sha256": digest,
         "same_starting_gaussian_for_equal_seeds": True,
         "same_trained_parameters_across_budgets": True,
         "heldout_audio_used_for_training": False,
