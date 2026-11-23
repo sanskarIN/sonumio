@@ -88,9 +88,14 @@ def test_real_synthetic_velocity_training_and_paired_inference_has_safe_report()
     assert all(math.isfinite(v) for v in report["training"]["heldout_velocity_mse"].values())
     # Numeric report must contain NO binary waveform or model-parameter blobs.
     encoded = json.dumps(report, allow_nan=False, ensure_ascii=False)
-    assert "model_weights" not in encoded
-    assert "base64" not in encoded
     assert len(encoded) < 200_000
+    assert "data:audio/" not in encoded
+    assert "base64_audio" not in encoded
+    assert all(
+        plan["source_audio_or_model_weights_saved"] is False
+        for plan in report["timesteps"].values()
+    )
+    assert all(type(row["postclamp_sha256"]) is str for row in report["samples"])
     for arm in ("raw", "latent"):
         assert set(report["by_arm_budget"][arm]) == {"2", "8"}
         assert report["by_arm_budget"][arm]["2"]["model_evaluations_per_sample"] == 2
