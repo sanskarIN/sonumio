@@ -87,7 +87,13 @@ class WeightEMA:
         replacements: dict[str, torch.Tensor] = {}
         for name, current in online.items():
             if current.is_floating_point():
-                candidate = torch.lerp(current.detach(), target[name], decay)
+                # Float32 lerp can overflow its intermediate difference
+                # for opposite-sign finite near-limit values. A float64
+                # convex blend avoids this false failure and rounds once.
+                candidate = (
+                    (1 - decay) * current.detach().to(torch.float64)
+                    + decay * target[name].to(torch.float64)
+                ).to(torch.float32)
                 if not torch.isfinite(candidate).all():
                     raise ValueError("EMA arithmetic produced nonfinite state")
             else:
