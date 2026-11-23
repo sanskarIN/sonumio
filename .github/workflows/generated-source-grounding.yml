@@ -1,0 +1,73 @@
+name: Generated source grounding (CPU)
+
+on:
+  pull_request:
+    paths:
+      - 'research/generated_source_grounding.py'
+      - 'research/velocity_ddim*.py'
+      - 'research/latent_audio.py'
+      - 'research/text_audio.py'
+      - 'research/wave_diffusion.py'
+      - 'research/architecture_compare.py'
+      - 'research/generation_audit.py'
+      - 'src/sonumio/engines/procedural.py'
+      - 'tests/test_generated_source_grounding.py'
+      - '.github/workflows/generated-source-grounding.yml'
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  grounding:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      OMP_NUM_THREADS: '2'
+      MKL_NUM_THREADS: '2'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install CPU research dependencies
+        run: |
+          python -m pip install -e '.[test]' 'scipy>=1.12,<2'
+          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+      - name: Test reference separation, scoring and real DDIM sampling
+        run: python -m pytest -q tests/test_generated_source_grounding.py
+      - name: Train two initializations and score their generated waveforms
+        run: |
+          for seed in 17 29; do
+            python -m research.generated_source_grounding \
+              --model-seed "$seed" --train-steps 32 --codec-steps 16 \
+              --evaluations 8 --sampling-seeds 301 302 > "$RUNNER_TEMP/grounding-$seed.json"
+          done
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          root = Path(os.environ["RUNNER_TEMP"])
+          a, b = [json.loads((root / f"grounding-{seed}.json").read_text()) for seed in (17, 29)]
+          assert a["trained_model_sha256"] != b["trained_model_sha256"]
+          assert a["training"]["training_fingerprint"] == b["training"]["training_fingerprint"]
+          assert a["reference_probe"]["splits"] == b["reference_probe"]["splits"]
+          for report in (a, b):
+              assert report["status"] == "scored"
+              assert not report["reference_probe"]["overlap_with_generator_data"]
+              assert len(report["cases"]) == 48
+              assert len(report["null_guidance_checks"]) == 4
+              assert all(case["caption_invariant"] for case in report["null_guidance_checks"])
+              assert not report["weight_or_audio_files_saved"]
+              for arm, languages in report["by_arm_and_language"].items():
+                  for language, controls in languages.items():
+                      assert all(summary["cases"] == 12 for summary in controls.values())
+                      assert controls["null_guidance"]["rank_one"] == 2
+                      print(report["configuration"]["model_seed"], arm, language, {
+                          name: (metrics["rank_one"], metrics["accepted_rank_one"],
+                                 metrics["accepted_rank_one_excluding_noise_confounds"])
+                          for name, metrics in controls.items()
+                      })
+          PY
