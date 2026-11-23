@@ -340,7 +340,8 @@ def load_checkpoint(path: Path) -> tuple[TextWaveDenoiser, DiffusionSchedule, di
     info = read_checkpoint_manifest(path / 'text_manifest.json')
     if (info.get('format') != CHECKPOINT_FORMAT or info.get('sample_rate') != SAMPLE_RATE
         or info.get('clip_frames') != CLIP_FRAMES or info.get('max_prompt_bytes') != MAX_BYTES
-        or info.get('text_vocab') != BYTE_VOCAB or info.get('model_generation') is not None):
+        or info.get('text_vocab') != BYTE_VOCAB or info.get('model_generation') is not None
+        or info.get('weights_publication_authorized') is not False):
         raise ValueError('Incompatible text diffusion checkpoint manifest')
     weight_file = path / 'text_weights.npz'
     checkpoint_snapshot = read_verified_weights(
