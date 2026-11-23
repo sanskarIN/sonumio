@@ -23,7 +23,7 @@ import numpy as np
 import torch
 
 from research.latent_audio import FRAMES, TRAIN_SEEDS, VALIDATION_SEEDS
-from research.longform_ddim import _prefix_frames
+from research.velocity_prefix_continuation import _prefix_frames
 from research.text_audio import (
     ByteTextTokenizer, SYNTHETIC_COMBINATIONS, _synth_prompts,
 )
@@ -115,6 +115,22 @@ def render_adjacent_recording(
             or not np.isfinite(source).all()):
         raise ValueError("Unexpected first-party DSP source")
     downsampled = _downsample_24k_to_8k(source)
+    # Some first-party oscillator sound families ignore the DSP seed.
+    # Apply a gentle, seed-derived time envelope to the *whole source*
+    # BEFORE extracting both windows so each recording group has unique
+    # underlying samples. This is deterministic synthetic augmentation,
+    # not evidence of independent real-world acoustic content.
+    key = hashlib.sha256(
+        b"sonumio-adjacent-envelope-v1\0"
+        + bytes(members) + seed.to_bytes(4, "little")
+    ).digest()
+    freq = 0.15 + (int.from_bytes(key[:2], "little") / 65535.0) * 0.45
+    phase = 2 * math.pi * int.from_bytes(key[2:4], "little") / 65535.0
+    time = np.arange(len(downsampled), dtype=np.float64) / SAMPLE_RATE
+    envelope = (0.91 + 0.07 * np.sin(2 * math.pi * freq * time + phase))
+    downsampled = np.ascontiguousarray(
+        (downsampled.astype(np.float64) * envelope).astype(np.float32)
+    )
     if (downsampled.shape != (SOURCE_FRAMES,)
             or downsampled.dtype != np.float32
             or not np.isfinite(downsampled).all()
@@ -323,10 +339,12 @@ def audit_adjacent_split(train: AdjacentDataset, heldout: AdjacentDataset) -> di
         "shared_seed_leakage_detected": False,
         "independent_acoustic_families_verified": False,
         "rights": "sonumio_first_party_procedural_dsp",
+        "seeded_envelope_augmentation": True,
         "warning": (
             "A seed-disjoint procedural benchmark is not a real-world "
             "distribution split. Related DSP sound families and deterministic "
-            "tones can share acoustic structure despite different bytes."
+            "tones can share acoustic structure despite different bytes; "
+            "seeded gain-envelope augmentation does not make source families independent."
         ),
     }
 
