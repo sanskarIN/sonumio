@@ -1,0 +1,80 @@
+name: Global-history velocity research (CPU)
+
+on:
+  pull_request:
+    paths:
+      - 'research/global_history_denoiser.py'
+      - 'tests/test_global_history_denoiser.py'
+      - '.github/workflows/global-history-research.yml'
+      - 'research/velocity_ddim.py'
+      - 'research/velocity_prediction.py'
+      - 'research/velocity_prefix_continuation.py'
+      - 'research/text_audio.py'
+      - 'research/wave_diffusion.py'
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  global-history-research:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      OMP_NUM_THREADS: '2'
+      MKL_NUM_THREADS: '2'
+      PYTHONHASHSEED: '0'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install local source and CPU research requirements
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e '.[test]' 'scipy>=1.12,<2'
+          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+      - name: Validate real global-history neural forward, gradients and sampling
+        run: |
+          python -m pytest -q tests/test_global_history_denoiser.py
+      - name: Run bounded no-export original global-history forward and v-loss smoke
+        run: |
+          python - <<'PY'
+          import torch
+          from research.global_history_denoiser import (
+              GlobalHistoryVelocityDenoiser,
+              masked_history_velocity_loss,
+              sample_global_history_ddim,
+          )
+          from research.text_audio import ByteTextTokenizer
+          from research.wave_diffusion import DiffusionSchedule
+
+          torch.manual_seed(17)
+          denoiser = GlobalHistoryVelocityDenoiser(16)
+          assert denoiser.history_encoder.channels == 16
+          schedule = DiffusionSchedule(8, profile='cosine_zero_terminal_v1')
+          past = (torch.arange(8192).float() / 8192).view(1, 1, 8192)
+          clean = torch.cat((past[..., -512:], torch.zeros(1, 1, 7680)), dim=-1)
+          tokens = ByteTextTokenizer().encode(['rain'])
+          loss = masked_history_velocity_loss(
+              denoiser, schedule, clean, tokens, past,
+              prefix_frames=512,
+              generator=torch.Generator(device='cpu').manual_seed(17),
+          )
+          assert torch.isfinite(loss) and loss.item() > 0
+          loss.backward()
+          assert any(p.grad is not None and p.grad.abs().sum() > 0
+                     for p in denoiser.history_encoder.parameters())
+          denoiser.eval()
+          clip, report = sample_global_history_ddim(
+              denoiser, schedule, 'बारिश', past[0, 0],
+              prefix_frames=512, evaluations=2, seed=22,
+          )
+          assert clip.shape == (8192,)
+          assert torch.equal(clip[:512], past[0, 0, -512:])
+          assert report['model_parameters_unchanged'] is True
+          assert report['audio_or_weights_saved'] is False
+          assert report['publication_authorized'] is False
+          print('New global history neural conditioning smoke passed; no assets written')
+          PY
