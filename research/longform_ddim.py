@@ -138,7 +138,7 @@ def sample_overlapped_velocity_ddim(
     _validate_overlaps(segments, overlap_frames)
     plan = ddim_plan(schedule, evaluations=evaluations)
     prompts = _captions(captions, segments)
-    if (type(seed) is not int or not 0 <= seed < 2**32 - segments
+    if (type(seed) is not int or not 0 <= seed <= 2**32 - segments
             or type(guidance) not in (int, float)
             or not math.isfinite(guidance) or not 0 <= guidance <= 4
             or type(latent) is not bool or
