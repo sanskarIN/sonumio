@@ -235,7 +235,9 @@ def sample_continuation_sequence(
     _validate_wave(initial_clip)
     plan = ddim_plan(schedule, evaluations=evaluations)
     _model_args(denoiser, schedule, guidance=guidance)
-    prompts = _captions(captions, segments)
+    # The first audio clip is caller-supplied: its caption is not regenerated.
+    # Accept exactly one caption for each FUTURE clip, or one shared string.
+    prompts = _captions(captions, segments - 1)
     if type(seed) is not int or not 0 <= seed <= 2**32 - segments:
         raise ValueError("Invalid per-segment continuation seed range")
     source_rng = torch.random.get_rng_state().clone()
@@ -244,7 +246,7 @@ def sample_continuation_sequence(
     try:
         output = initial_clip.clone()
         joins = []
-        for i, caption in enumerate(prompts[1:], start=1):
+        for i, caption in enumerate(prompts, start=1):
             prefix = output[-prefix_frames:].clone()
             current, diagnostic = sample_prefix_velocity_ddim(
                 denoiser, schedule, caption, prefix,
@@ -283,6 +285,7 @@ def sample_continuation_sequence(
             "duration_seconds": output.numel() / SAMPLE_RATE,
             "continuation_seed_base": seed,
             "source_initial_clip_supplied_by_caller": True,
+            "captions_apply_only_to_generated_future_segments": True,
             "initial_clip_sha256": hashlib.sha256(
                 initial_clip.numpy().tobytes()).hexdigest(),
             "joins": joins,
