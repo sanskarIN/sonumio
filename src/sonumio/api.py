@@ -2,7 +2,7 @@
 from functools import lru_cache
 from pathlib import Path
 import os
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from . import __version__
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
@@ -11,6 +11,7 @@ from .registry import list_models
 from .scenes import SceneLayer, compose_scene
 from .service import generate_audio
 from .output_store import LocalAudioStore, OutputStoreError
+from .http_audio import wav_http_response
 
 app = FastAPI(title="Sonumio experimental API", version=__version__, docs_url="/docs")
 OUTPUT_DIR = Path(os.environ.get("SONUMIO_OUTPUT_DIR", "outputs")).resolve()
@@ -107,17 +108,19 @@ def generate(request: GenerationRequest) -> dict:
 
 
 @app.get("/v1/generations/{generation_id}/audio")
-def audio(generation_id: str):
+@app.head("/v1/generations/{generation_id}/audio")
+def audio(generation_id: str, request: Request):
     try:
         wav_bytes = _store_for(OUTPUT_DIR).read(generation_id)
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail="Audio not found") from exc
     except (OutputStoreError, OSError) as exc:
         raise HTTPException(status_code=503, detail="Local audio storage unavailable") from exc
-    return Response(
-        content=wav_bytes, media_type="audio/wav",
-        headers={"Content-Disposition": 'attachment; filename="sonumio.wav"',
-                 "Cache-Control": "no-store"},
+    return wav_http_response(
+        wav_bytes,
+        range_header=request.headers.get("range"),
+        if_range=request.headers.get("if-range"),
+        head=(request.method == "HEAD"),
     )
 
 
