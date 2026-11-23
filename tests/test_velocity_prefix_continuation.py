@@ -142,10 +142,10 @@ def test_raw_neural_prefix_and_multiclip_continuation_are_deterministic():
         evaluations=2, seed=33, guidance=1,
     )
     continuous, report = sample_continuation_sequence(
-        model, schedule, ("rain", "बारिश", "wind"), **config,
+        model, schedule, ("बारिश", "wind"), **config,
     )
     again, same_report = sample_continuation_sequence(
-        model, schedule, ("rain", "बारिश", "wind"), **config,
+        model, schedule, ("बारिश", "wind"), **config,
     )
     assert torch.equal(continuous, again)
     assert report == same_report
@@ -153,6 +153,8 @@ def test_raw_neural_prefix_and_multiclip_continuation_are_deterministic():
     assert report["output_frames"] == continuous.numel()
     assert torch.equal(continuous[:FRAMES], initial_clip)
     assert report["source_initial_clip_supplied_by_caller"] is True
+    assert report["captions_apply_only_to_generated_future_segments"] is True
+    assert [x["caption"] for x in report["joins"]] == ["बारिश", "wind"]
     assert report["initial_clip_sha256"] == hashlib.sha256(
         initial_clip.numpy().tobytes()).hexdigest()
     assert report["protocol"] == SEQUENCE_PROTOCOL
@@ -210,7 +212,8 @@ def test_sampler_bad_settings_rejected(config):
     {"segments": True}, {"prefix_frames": 127},
     {"prefix_frames": 513}, {"seed": -1},
     {"seed": 2**32 - 1},
-    {"captions": ("rain",)}, {"captions": ("rain", "")},
+    {"captions": ()}, {"captions": ("rain", "wind")},
+    {"captions": ("",)},
 ])
 def test_sequence_bad_settings_rejected(config):
     model = TextWaveDenoiser(16)
