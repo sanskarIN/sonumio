@@ -106,7 +106,8 @@ def test_file_mutation_after_first_fstat_is_rejected(tmp_path, monkeypatch):
         nonlocal count
         count += 1
         if count == 2:
-            path.write_bytes(b"different content same length")
+            original = path.read_bytes()
+            path.write_bytes(b"Z" * len(original))  # preserve file size
         return original_fstat(fd)
 
     monkeypatch.setattr(snapshots.os, "fstat", mutate_on_second_fstat)
@@ -120,7 +121,8 @@ def test_manifest_strict_json_and_duplicate_keys(tmp_path):
     assert snapshots.read_checkpoint_manifest(path)["report"]["steps"] == 2
     for bad in ('{"a":1,"a":2}', '{"a":{"x":1,"x":2}}',
                 '{"loss":NaN}', '{"loss":Infinity}',
-                '["not an object"]', 'not json', '{'):
+                '["not an object"]', 'not json', '{',
+                "[" * 2000 + "0" + "]" * 2000):
         path.write_text(bad, encoding="utf-8")
         with pytest.raises(ValueError):
             snapshots.read_checkpoint_manifest(path)
