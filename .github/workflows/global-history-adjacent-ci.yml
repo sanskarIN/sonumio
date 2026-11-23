@@ -1,0 +1,66 @@
+name: Global-history adjacent neural training and replication
+
+on:
+  pull_request:
+    paths:
+      - 'research/global_history_study.py'
+      - 'research/global_history_replicates.py'
+      - 'tests/test_global_history_study.py'
+      - 'tests/test_global_history_replicates.py'
+      - '.github/workflows/global-history-adjacent-ci.yml'
+      - 'research/adjacent_audio.py'
+      - 'research/global_history_denoiser.py'
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  global-history-adjacent:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      OMP_NUM_THREADS: '2'
+      MKL_NUM_THREADS: '2'
+      PYTHONHASHSEED: '0'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install first-party CPU model research dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e '.[test]' 'scipy>=1.12,<2'
+          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+      - name: Train original neural full-history variants and reject forged evidence
+        run: |
+          python -m pytest -q tests/test_global_history_study.py tests/test_global_history_replicates.py
+      - name: Reproduce two-seed matched-history original neural training
+        run: |
+          python -m research.global_history_replicates \
+            --model-seeds 17,29 --updates 2 \
+            --prefix-frames 512 --diffusion-steps 8 \
+            --evaluations 2 --batch-size 2 \
+            --training-seeds 0 --heldout-seeds 101 \
+            > /tmp/sonumio-global-history-replicates.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          r = json.loads(Path('/tmp/sonumio-global-history-replicates.json').read_text(encoding='utf8'))
+          assert r['protocol'] == 'sonumio-replicated-global-history-adjacent-study-v1'
+          assert r['model_seeds_counted_as_independent_replicates'] == 2
+          assert r['source_recordings_bitwise_matched_within_runner'] is True
+          assert r['distinct_model_initialization_fingerprints_verified'] is True
+          assert r['trained_model_weights_distinct_across_seeds'] is True
+          assert r['same_training_and_evaluation_configuration_across_runs'] is True
+          assert r['bilingual_captions_and_noise_seeds_not_independent_replicates'] is True
+          assert r['statistical_significance_or_sound_quality_winner_declared'] is False
+          assert r['audio_or_model_weights_saved'] is False
+          assert r['model_publication_authorized'] is False
+          for row in r['replicated_model_runs']:
+              assert row['paired_heldout_mse']['full_history'] >= 0
+              assert row['paired_heldout_mse']['hidden_history'] >= 0
+          print('Original full-history 2-seed matched neural pilot passed without weights')
+          PY
