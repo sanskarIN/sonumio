@@ -42,11 +42,13 @@ def _prefix_frames(value: int) -> None:
 
 
 def _finite_raw(audio: torch.Tensor, *, batch: bool) -> None:
+    if not isinstance(audio, torch.Tensor):
+        raise ValueError("Requires a real raw waveform tensor")
     shape_ok = (audio.ndim == 3 and audio.shape[1:] == (1, FRAMES)
                 and 1 <= len(audio) <= 8) if batch else (
                 audio.ndim == 1 and audio.shape == (FRAMES,)
             )
-    if (not isinstance(audio, torch.Tensor) or not shape_ok
+    if (not shape_ok
             or audio.device.type != "cpu" or audio.dtype != torch.float32
             or not torch.isfinite(audio).all()
             or audio.detach().abs().max().item() > MAX_SIGNAL):
