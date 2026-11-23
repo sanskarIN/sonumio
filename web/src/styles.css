@@ -57,6 +57,8 @@ textarea:hover,input:hover{border-color:#6879a3}
 .empty p{font-size:12px;line-height:1.7;color:#8b97b0;max-width:260px;margin:auto}
 .wave{height:110px;display:flex;align-items:center;justify-content:center;gap:4px;margin:13px 0 18px}
 .wave i{width:4px;border-radius:5px;min-height:6px;max-height:100px;background:linear-gradient(#bdb5ff,#716ce1)}
+.actual-wave i{flex:0 1 6px;max-width:6px;min-width:2px;min-height:2px;transition:none}
+.wave-placeholder{padding:12px 15px;text-align:center;font-size:11px;line-height:1.6;color:#a9b3cc;border:1px dashed #393d58;border-radius:9px}
 .ready{text-align:center}
 .ready h3{margin:10px 0 18px}
 .ready audio{width:100%;margin-bottom:15px}
