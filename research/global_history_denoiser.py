@@ -165,7 +165,8 @@ class GlobalHistoryVelocityDenoiser(nn.Module):
 
     def _condition(
         self, tokens: torch.Tensor, timestep: torch.Tensor,
-        history: torch.Tensor,
+        history: torch.Tensor, *,
+        history_embedding: torch.Tensor | None = None,
     ) -> torch.Tensor:
         half = self.channels // 2
         freqs = torch.exp(
@@ -177,7 +178,17 @@ class GlobalHistoryVelocityDenoiser(nn.Module):
             (angles.sin(), angles.cos()), dim=1
         ))
         text = self.text_encoder(tokens)
-        audio = self.history_encoder(history)
+        if history_embedding is None:
+            audio = self.history_encoder(history)
+        else:
+            if (not isinstance(history_embedding, torch.Tensor)
+                    or history_embedding.shape != (len(history), self.channels)
+                    or history_embedding.dtype != torch.float32
+                    or history_embedding.device.type != "cpu"
+                    or not torch.isfinite(history_embedding).all()
+                    or history_embedding.requires_grad):
+                raise ValueError("Cached history feature is invalid or not detached")
+            audio = history_embedding
         result = self.context_fusion(
             torch.cat((text + time, audio), dim=1)
         )
@@ -189,6 +200,7 @@ class GlobalHistoryVelocityDenoiser(nn.Module):
         self, noisy: torch.Tensor, timestep: torch.Tensor,
         tokens: torch.Tensor, history: torch.Tensor, *,
         prefix_frames: int = 1024,
+        history_embedding: torch.Tensor | None = None,
     ) -> torch.Tensor:
         _context_inputs(
             noisy, timestep, tokens, history,
@@ -196,7 +208,10 @@ class GlobalHistoryVelocityDenoiser(nn.Module):
         )
         if (not torch.all((timestep >= 0) & (timestep < 256))):
             raise ValueError("Invalid raw denoising timestep")
-        condition = self._condition(tokens, timestep, history)
+        condition = self._condition(
+            tokens, timestep, history,
+            history_embedding=history_embedding,
+        )
         hidden = self.input(noisy)
         for block in self.residual:
             hidden = block(hidden, condition)
