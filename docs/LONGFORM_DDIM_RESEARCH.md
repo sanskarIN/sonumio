@@ -68,7 +68,7 @@ python -m pytest -q tests/test_longform_ddim.py
 
 The tests include constant-amplitude preservation, join-boundary
 diagnostics, signed/NaN/oversized rejection, shape bounds, exact seed
-reproducibility, RGB-independent English/Hindi UTF-8 captions,
+reproducibility, English/Hindi UTF-8 captions,
 unclipped raw waveform provenance, pre-Tanh latent saturation,
 global RNG/model-mode/model-parameter preservation, and absence of
 filesystem or network output.
