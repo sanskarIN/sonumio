@@ -94,10 +94,22 @@ JSON file only if desired. No `--model-path`, `--output-wav`, or external
 dataset flag is part of this experiment. This is **not a demonstration of
 trained model quality**; a one-step smoke deliberately cannot converge.
 
+A separate multi-initialization control repeats the paired study across
+independent model-initialization seeds while enforcing identical data
+fingerprints, sample counts, sampler budgets, and source-group coverage.
+This provides descriptive observed ranges, **not significance or a
+confidence interval**:
+
+```bash
+python -m research.velocity_ddim_replicates \
+  --seeds 17,29,41 --train-steps 8 --codec-steps 4 \
+  --schedule-steps 8 --budgets 2,4,8 --sample-seeds 201,202
+```
+
 For tests:
 
 ```bash
-python -m pytest -q tests/test_velocity_ddim.py tests/test_velocity_ddim_study.py
+python -m pytest -q tests/test_velocity_ddim.py tests/test_velocity_ddim_study.py tests/test_velocity_ddim_replicates.py
 ```
 
 ## Verification and interpretation
