@@ -5,6 +5,7 @@ import {
   type JobStatus,
   type GeneratedAudio, type ModelEntry, type SceneLayer,
 } from './api';
+import { loadLocalWaveform, type WaveformPreview } from './waveform';
 
 const presets = [
   'Gentle rain in a peaceful forest',
@@ -33,6 +34,8 @@ export function App() {
   const [jobStatus, setJobStatus] = useState<JobStatus>('queued');
   const [error, setError] = useState('');
   const [result, setResult] = useState<GeneratedAudio | null>(null);
+  const [waveform, setWaveform] = useState<WaveformPreview | null>(null);
+  const [waveformStatus, setWaveformStatus] = useState<'idle' | 'loading' | 'unavailable'>('idle');
   const controller = useRef<AbortController | null>(null);
   const jobId = useRef<string | null>(null);
 
@@ -43,6 +46,31 @@ export function App() {
       .catch(() => { if (!pending.signal.aborted) setConnected(false); });
     return () => { pending.abort(); controller.current?.abort(); };
   }, []);
+
+  // Always dispose of the previous fetch when the rendered audio changes,
+  // is cancelled, or the studio unmounts. Never retain raw PCM waveform bytes.
+  const previewUrl = result?.audio_url ?? null;
+  useEffect(() => {
+    if (!previewUrl) {
+      setWaveform(null);
+      setWaveformStatus('idle');
+      return;
+    }
+    const pending = new AbortController();
+    setWaveform(null);
+    setWaveformStatus('loading');
+    void loadLocalWaveform(previewUrl, pending.signal)
+      .then(preview => {
+        if (!pending.signal.aborted) {
+          setWaveform(preview);
+          setWaveformStatus('idle');
+        }
+      })
+      .catch(() => {
+        if (!pending.signal.aborted) setWaveformStatus('unavailable');
+      });
+    return () => pending.abort();
+  }, [previewUrl]);
 
   const activeModel = models.find(model => model.id === 'procedural-sfx-v0');
   const sceneError = validateScene({ duration_seconds: sceneDuration, layers });
@@ -187,11 +215,20 @@ export function App() {
             <span className="overline">OUTPUT / 02</span><h2 id="preview-heading">Listen & export</h2>
             {error && <div role="alert" className="warning">{error}</div>}
             {result ? <div className="ready" aria-live="polite">
-              <div className="wave" aria-hidden="true">{Array.from({length: 32}, (_, i) => <i key={i} style={{height: (13 + Math.abs(Math.sin(i * 1.7) * Math.cos(i / 6)) * 73) + '%'}}/>)}</div>
+              {waveform ? <div className="wave actual-wave" role="img"
+                aria-label={'Actual PCM waveform with ' + waveform.peaks.length + ' peak-amplitude bars'}>
+                {waveform.peaks.map((amplitude, i) => <i key={i}
+                  style={{ height: Math.max(2, amplitude * 100) + '%' }} />)}
+              </div> : <div className="wave wave-placeholder" role="status">
+                {waveformStatus === 'loading'
+                  ? 'Reading the generated WAV waveform…'
+                  : 'Waveform unavailable; the audio player and download are still available.'}
+              </div>}
               <span className="overline mint">AUDIO READY</span><h3>Your sound is ready.</h3>
               <audio controls preload="none" src={result.audio_url} aria-label="Generated WAV audio preview">Your browser cannot play WAV files.</audio>
               <a className="download" download="sonumio.wav" href={result.audio_url}>↓ Download WAV</a>
               <p className="hint">{result.duration_seconds.toFixed(2)}s · {(result.sample_rate / 1000).toFixed(0)} kHz {result.channels === 2 ? 'stereo' : 'mono'} WAV</p>
+              {waveform && <p className="hint">Waveform: measured PCM sample peaks, not a loudness or quality rating.</p>}
               <p className="hint">{result.disclaimer}</p>
             </div> : <div className="empty" aria-live="polite">
               <div className="wave" aria-hidden="true">{Array.from({length: 19}, (_, i) => <i key={i} style={{height: (16 + Math.abs(Math.sin(i * 1.3)) * 74) + '%'}}/>)}</div>
