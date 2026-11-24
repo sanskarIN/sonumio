@@ -207,6 +207,11 @@ the maximum by channel and the number of frame-to-frame transitions.
 0–2 (decoded PCM is bounded to roughly [-1,1]); it automatically enables
 continuity measurement. The report then includes the number/fraction of
 channel-sample transitions **strictly above** the specified maximum.
+The `max_step_at_frame` field identifies the **later** frame of the
+largest adjacent pair, using zero-based original-source frame numbering;
+`max_step_channel` identifies its zero-based channel. Equal-magnitude
+ties choose the earliest frame and then the lowest channel, independent
+of packet size. For single-frame sources, both positions are `null`.
 The top-level `inspection_policy_passed` combines this optional criterion
 with the existing signal-health and exact integer-rail criteria. No
 continuity work or extra `frame_continuity` output is added by default.

@@ -57,6 +57,8 @@ def test_single_frame_and_duplicate_finalization_are_well_defined():
     assert result.transitions_per_channel == 0
     assert result.max_adjacent_step == 0
     assert result.channel_max_steps == (0.0, 0.0)
+    assert result.max_step_at_frame is None
+    assert result.max_step_channel is None
     assert result.over_limit_samples == 0
     assert result.as_dict()["over_limit_fraction"] == 0.0
     assert result.passed
@@ -196,3 +198,61 @@ def test_cli_step_policy_is_explicit_and_preserves_observation_mode(tmp_path, ca
     out = capsys.readouterr()
     assert out.out == ""
     assert "max_adjacent_step" in out.err
+
+
+
+@pytest.mark.parametrize("chunk", [1, 2, 3, 8])
+@pytest.mark.parametrize("channels,raw,frame,channel", [
+    (2, [[0, 0, 1, 1, 0, 0], [0, 1, 1, 0, 0, 0]], 1, 1),
+    (2, [[0, 1, 1, 0], [0, 1, 0, 0]], 1, 0),
+    (3, [[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]], 1, 0),
+])
+def test_largest_frame_transition_location_has_stable_earliest_tie_break(
+    chunk, channels, raw, frame, channel,
+):
+    data = np.asarray(raw, dtype=np.float32)
+    acc = StreamingFrameTransitionAccumulator(
+        8000, channels, expected_frames=data.shape[1],
+    )
+    for start in range(0, data.shape[1], chunk):
+        acc.update(FramePacket(8000, start, data[:, start:start + chunk]))
+    report = acc.finalize()
+    assert report.max_step_at_frame == frame
+    assert report.max_step_channel == channel
+    assert report.as_dict()["max_step_at_frame"] == frame
+    assert report.as_dict()["max_step_channel"] == channel
+    assert report.max_adjacent_step == float(np.max(np.abs(
+        np.diff(data.astype(np.float64), axis=1)
+    )))
+
+
+def test_randomized_frame_step_locations_match_numpy_reference():
+    generator = np.random.default_rng(153)
+    cases = 0
+    for channels in (1, 2, 4):
+        for frames in (2, 3, 7, 19, 101):
+            for packet_size in (1, 2, 7, 32):
+                source = generator.choice(
+                    np.array([-1, -.5, 0, .5, 1], dtype=np.float32),
+                    size=(channels, frames),
+                )
+                acc = StreamingFrameTransitionAccumulator(
+                    8000, channels, expected_frames=frames,
+                    max_allowed_step=.75,
+                )
+                for start in range(0, frames, packet_size):
+                    acc.update(FramePacket(
+                        8000, start, source[:, start:start + packet_size],
+                    ))
+                report = acc.finalize()
+                steps = np.abs(np.diff(source.astype(np.float64), axis=1))
+                first = int(np.argmax(np.max(steps, axis=0)))
+                channel = int(np.argmax(steps[:, first]))
+                assert report.max_step_at_frame == first + 1
+                assert report.max_step_channel == channel
+                assert report.max_adjacent_step == np.max(steps)
+                assert report.over_limit_samples == int(np.count_nonzero(
+                    steps > .75
+                ))
+                cases += 1
+    assert cases == 60
