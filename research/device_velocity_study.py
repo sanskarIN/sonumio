@@ -20,6 +20,7 @@ from torch.nn import functional as F
 from research.architecture_compare import _audio_hashes
 from research.device_velocity_training import TrainConfig, resolve_device, train_model
 from research.velocity_loss_weights import POLICIES
+from research.semantic_training import synthetic_source_targets
 from research.generated_source_grounding import LANGUAGES, _summary
 from research.latent_audio import TRAIN_SEEDS, VALIDATION_SEEDS, synthetic_bilingual_waves
 from research.open_set_source_probe import evaluate_probe, fit_probe, reference_panels
@@ -107,7 +108,7 @@ def compare_parameters(left, right):
 
 
 def run_study(*, config=TrainConfig(), alternative_microbatch=1, sampling_seed=301, evaluations=4,
-              compare_objectives=False):
+              compare_objectives=False, compare_semantics=False):
     if not isinstance(config, TrainConfig):
         raise ValueError("Expected validated training configuration")
     # A smaller fixed experiment budget than the underlying training runner.
@@ -119,6 +120,8 @@ def run_study(*, config=TrainConfig(), alternative_microbatch=1, sampling_seed=3
         raise ValueError("Invalid bounded device study settings")
     if type(compare_objectives) is not bool or (compare_objectives and config.loss_policy != 'uniform'):
         raise ValueError('Objective comparison requires uniform reference policy')
+    if type(compare_semantics) is not bool or (compare_semantics and config.semantic_weight != 0):
+        raise ValueError('Semantic comparison requires unsupervised reference')
     resolve_device(config.device)
     train = synthetic_bilingual_waves(TRAIN_SEEDS)
     validation = synthetic_bilingual_waves(VALIDATION_SEEDS)
@@ -140,6 +143,10 @@ def run_study(*, config=TrainConfig(), alternative_microbatch=1, sampling_seed=3
     if compare_objectives:
         for policy in ("min_snr", "clean_mse"):
             variants[policy + "_cpu"] = replace(config, device="cpu", loss_policy=policy)
+    if compare_semantics:
+        variants["semantic_cpu"] = replace(config, device="cpu", semantic_weight=0.5)
+    training_targets = synthetic_source_targets(train.tokens, TRAIN_SEEDS) if any(v.semantic_weight for v in variants.values()) else None
+    validation_targets = synthetic_source_targets(validation.tokens, VALIDATION_SEEDS) if training_targets is not None else None
     models, reports = {}, {}
     with torch.random.fork_rng(devices=[]):
         for name, variant in variants.items():
@@ -147,7 +154,9 @@ def run_study(*, config=TrainConfig(), alternative_microbatch=1, sampling_seed=3
             torch.random.default_generator.manual_seed(config.seed)
             model = TextWaveDenoiser(16)
             started = perf_counter()
-            report = train_model(model, train.waves, train.tokens, variant)
+            kwargs = ({"semantic_targets": training_targets, "semantic_validation": (validation.tokens, validation_targets)}
+                      if variant.semantic_weight else {})
+            report = train_model(model, train.waves, train.tokens, variant, **kwargs)
             report["training_wall_seconds"] = perf_counter() - started
             # Includes transfers, hashing and synchronization, not just kernels.
             models[name] = model
@@ -166,7 +175,7 @@ def run_study(*, config=TrainConfig(), alternative_microbatch=1, sampling_seed=3
         "protocol": PROTOCOL,
         "configuration": {**vars(config), "alternative_microbatch": alternative_microbatch,
                           "sampling_seed": sampling_seed, "evaluations": evaluations,
-                          "compare_objectives": compare_objectives},
+                          "compare_objectives": compare_objectives, "compare_semantics": compare_semantics},
         "training_fingerprint": train.fingerprint, "validation_fingerprint": validation.fingerprint,
         "unique_training_recordings": len(train_hashes), "unique_validation_recordings": len(val_hashes),
         "exact_split_overlap": False, "paired_initialization_and_inputs": True,
@@ -196,6 +205,8 @@ def main():
     parser.add_argument("--loss-policy", choices=POLICIES, default="uniform")
     parser.add_argument("--min-snr-gamma", type=float, default=5.0)
     parser.add_argument("--compare-objectives", action="store_true")
+    parser.add_argument("--compare-semantics", action="store_true")
+    parser.add_argument("--semantic-weight", type=float, default=0.0)
     parser.add_argument("--timestep-sampling", choices=("uniform", "stratified"), default="uniform")
     parser.add_argument("--caption-sampling", choices=("independent", "bilingual_pair"), default="independent")
     args = parser.parse_args()
@@ -203,9 +214,11 @@ def main():
                          microbatch_size=args.microbatch_size, device=args.device,
                          seed=args.seed, schedule_steps=args.schedule_steps,
                          loss_policy=args.loss_policy, min_snr_gamma=args.min_snr_gamma,
-                         timestep_sampling=args.timestep_sampling, caption_sampling=args.caption_sampling)
+                         timestep_sampling=args.timestep_sampling, caption_sampling=args.caption_sampling,
+                         semantic_weight=args.semantic_weight)
     print(json.dumps(run_study(config=config, alternative_microbatch=args.alternative_microbatch,
-                               evaluations=args.evaluations, compare_objectives=args.compare_objectives), allow_nan=False, indent=2))
+                               evaluations=args.evaluations, compare_objectives=args.compare_objectives,
+                               compare_semantics=args.compare_semantics), allow_nan=False, indent=2))
 
 
 if __name__ == "__main__":
