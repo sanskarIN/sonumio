@@ -37,6 +37,9 @@ from .stream_quality import StreamingQualityAccumulator, VerifiedWavQuality, ins
 from .quality_timeline import QualityWindow, QualityTimeline, StreamingQualityTimeline
 from .frame_transitions import FrameTransitionReport, StreamingFrameTransitionAccumulator
 from .quiet_intervals import QuietIntervalReport, StreamingQuietIntervalAccumulator
+from .channel_relationships import (
+    ChannelPairReport, ChannelRelationshipReport, StreamingChannelRelationshipAccumulator,
+)
 
 from .streaming import (
     FramePacket, FramerConfig, PacketCollector, StreamingFramer,
@@ -61,6 +64,7 @@ __all__ = [
     "QualityWindow", "QualityTimeline", "StreamingQualityTimeline",
     "FrameTransitionReport", "StreamingFrameTransitionAccumulator",
     "QuietIntervalReport", "StreamingQuietIntervalAccumulator",
+    "ChannelPairReport", "ChannelRelationshipReport", "StreamingChannelRelationshipAccumulator",
     "FramePacket",
     "FramerConfig",
     "PacketCollector",
