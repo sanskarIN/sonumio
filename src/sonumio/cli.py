@@ -12,6 +12,8 @@ from .audio_core.wave_pipeline import (
     WavProcessingConfig, process_wav_file,
 )
 from .atomic_cli_wav import publish_generated_wav
+from .audio_core.quality import QualityLimits
+from .audio_core.stream_quality import inspect_wav_quality
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="sonumio", description="Imagine it. Hear it.")
@@ -73,6 +75,23 @@ def main(argv: list[str] | None = None) -> int:
                       help="Require full output WAV digest before publication")
     post.add_argument("--overwrite", action="store_true")
     post.add_argument("--create-parent", action="store_true")
+    inspect = sub.add_parser(
+        "wav-inspect",
+        help="Verify a canonical local PCM WAV and inspect signal health with bounded memory",
+    )
+    inspect.add_argument("input", type=Path)
+    inspect.add_argument("--packet-frames", type=int, default=8192)
+    inspect.add_argument("--expected-sha256",
+                         help="Require an exact lowercase digest of the whole input WAV")
+    inspect.add_argument("--fail-on-warnings", action="store_true",
+                         help="Return 1 after verified JSON if any quality limit fails")
+    inspect.add_argument("--max-peak", type=float, default=1.0)
+    inspect.add_argument("--max-clipping-fraction", type=float, default=0.0)
+    inspect.add_argument("--max-dc-absolute", type=float, default=0.05)
+    inspect.add_argument("--max-boundary-jump", type=float, default=0.25)
+    inspect.add_argument("--max-channel-imbalance-db", type=float, default=24.0)
+    inspect.add_argument("--min-active-fraction", type=float, default=0.001)
+    inspect.add_argument("--activity-floor-dbfs", type=float, default=-70.0)
     sub.add_parser("models", help="Inspect provenance and weights licenses")
     serve = sub.add_parser("serve", help="Start a local REST API")
     serve.add_argument("--port", type=int, default=8000)
@@ -85,6 +104,26 @@ def main(argv: list[str] | None = None) -> int:
         import uvicorn
         uvicorn.run("sonumio.api:app", host="127.0.0.1", port=args.port)
         return 0
+    if args.command == "wav-inspect":
+        try:
+            limits = QualityLimits(
+                max_peak=args.max_peak,
+                max_clipping_fraction=args.max_clipping_fraction,
+                max_dc_absolute=args.max_dc_absolute,
+                max_boundary_jump=args.max_boundary_jump,
+                max_channel_imbalance_db=args.max_channel_imbalance_db,
+                min_active_fraction=args.min_active_fraction,
+                activity_floor_dbfs=args.activity_floor_dbfs,
+            )
+            report = inspect_wav_quality(
+                args.input, packet_frames=args.packet_frames,
+                expected_sha256=args.expected_sha256, limits=limits,
+            )
+        except (OSError, ValueError, TypeError, RuntimeError) as exc:
+            print(f"Sonumio WAV inspection: {exc}", file=sys.stderr)
+            return 2
+        print(json.dumps(report.as_dict(), sort_keys=True))
+        return 1 if args.fail_on_warnings and not report.signal_health.passed else 0
     if args.command == "wav-process":
         try:
             config = WavProcessingConfig(
