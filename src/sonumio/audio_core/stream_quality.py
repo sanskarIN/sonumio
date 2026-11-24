@@ -26,6 +26,9 @@ from .quiet_intervals import (
     QuietIntervalReport, StreamingQuietIntervalAccumulator,
     validate_internal_quiet_budget,
 )
+from .channel_relationships import (
+    ChannelRelationshipReport, StreamingChannelRelationshipAccumulator,
+)
 from .streaming import FramePacket
 from .wave_reader import WavPacketInfo, WavPacketReader
 from .wave_stream import MAX_STREAM_PACKET_FRAMES, MAX_STREAM_SECONDS
@@ -183,6 +186,7 @@ class VerifiedWavQuality:
     max_pcm_rail_fraction: float | None = None
     frame_continuity: FrameTransitionReport | None = None
     quiet_intervals: QuietIntervalReport | None = None
+    channel_relationships: ChannelRelationshipReport | None = None
 
     @property
     def inspection_policy_passed(self) -> bool:
@@ -210,6 +214,7 @@ class VerifiedWavQuality:
                 "packet_frames": self.packet_frames,
                 "expected_sha256_required": self.expected_sha256_required,
                 "timeline_enabled": self.timeline is not None,
+                "channel_relationships_enabled": self.channel_relationships is not None,
                 "quiet_intervals_enabled": self.quiet_intervals is not None,
                 "max_internal_quiet_frames": (
                     self.quiet_intervals.max_internal_quiet_frames
@@ -235,6 +240,8 @@ class VerifiedWavQuality:
             result["frame_continuity"] = self.frame_continuity.as_dict()
         if self.quiet_intervals is not None:
             result["quiet_intervals"] = self.quiet_intervals.as_dict()
+        if self.channel_relationships is not None:
+            result["channel_relationships"] = self.channel_relationships.as_dict()
         return result
 
 
@@ -248,6 +255,7 @@ def inspect_wav_quality(
     max_adjacent_step: float | None = None,
     include_quiet_intervals: bool = False,
     max_internal_quiet_frames: int | None = None,
+    include_channel_relationships: bool = False,
 ) -> VerifiedWavQuality:
     """Inspect canonical local integer PCM with complete-file verification.
 
@@ -266,6 +274,8 @@ def inspect_wav_quality(
         raise AudioContractError("include_continuity must be boolean")
     if type(include_quiet_intervals) is not bool:
         raise AudioContractError("include_quiet_intervals must be boolean")
+    if type(include_channel_relationships) is not bool:
+        raise AudioContractError("include_channel_relationships must be boolean")
     validate_internal_quiet_budget(max_internal_quiet_frames)
     if max_adjacent_step is not None:
         max_adjacent_step = finite_float(
@@ -309,6 +319,12 @@ def inspect_wav_quality(
             )
             if include_quiet_intervals or max_internal_quiet_frames is not None else None
         )
+        channel_meter = (
+            StreamingChannelRelationshipAccumulator(
+                reader.info.sample_rate, reader.info.channels,
+                expected_frames=reader.info.frames,
+            ) if include_channel_relationships else None
+        )
         for packet in reader:
             accumulator.update(packet)
             if timeline is not None:
@@ -317,6 +333,8 @@ def inspect_wav_quality(
                 transition_meter.update(packet)
             if quiet_meter is not None:
                 quiet_meter.update(packet)
+            if channel_meter is not None:
+                channel_meter.update(packet)
         if reader.state != "verified" or reader.verified_sha256 is None:
             raise AudioIntegrityError("Incomplete verified WAV inspection")
         health = accumulator.finalize()
@@ -345,4 +363,7 @@ def inspect_wav_quality(
             max_pcm_rail_fraction=max_pcm_rail_fraction,
             frame_continuity=continuity,
             quiet_intervals=quiet_meter.finalize() if quiet_meter is not None else None,
+            channel_relationships=(
+                channel_meter.finalize() if channel_meter is not None else None
+            ),
         )
