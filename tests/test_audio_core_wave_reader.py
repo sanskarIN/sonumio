@@ -313,3 +313,21 @@ def test_reader_closes_unverified_descriptor_on_packet_read_os_error(tmp_path):
     assert reader.state == "closed"
     assert reader.verified_sha256 is None
     assert faulty.closed is True
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX descriptor metadata mutation semantics")
+def test_reader_inplace_metadata_change_keeps_precise_error_class(tmp_path):
+    """A stable pathname with altered mtime is a changed source, not a rename."""
+    path, exported = _write(tmp_path, frames=500)
+    with WavPacketReader(
+        path, packet_frames=100, expected_sha256=exported.wav_sha256,
+    ) as reader:
+        assert next(reader).frames == 100
+        snapshot = path.stat()
+        os.utime(path, ns=(
+            snapshot.st_atime_ns, snapshot.st_mtime_ns + 2_000_000_000,
+        ))
+        with pytest.raises(AudioIntegrityError, match="source changed during packet reading"):
+            list(reader)
+        assert reader.state == "closed"
+        assert reader.verified_sha256 is None
