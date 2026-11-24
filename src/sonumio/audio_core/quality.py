@@ -78,6 +78,45 @@ class QualityReport:
         return value
 
 
+def _quality_report_from_metrics(
+    *, sample_rate: int, frames: int, channels: int,
+    peak: float, rms: float, dc: float, clipping: float,
+    active: float, jump: float, imbalance: float,
+    limits: QualityLimits,
+) -> QualityReport:
+    """Shared acceptance logic for in-memory and verified packet metrics.
+
+    This is deliberately an internal function. Keeping findings here ensures
+    a new signal warning cannot silently diverge between the two readers.
+    """
+    checks = (
+        ("peak", peak, limits.max_peak,
+         "Measured sample amplitude exceeds selected peak budget"),
+        ("clip_fraction", clipping, limits.max_clipping_fraction,
+         "At least one sample clipped or explicit clip budget was exceeded"),
+        ("dc_offset", dc, limits.max_dc_absolute,
+         "Mean PCM bias exceeds explicit DC-offset limit"),
+        ("boundary_jump", jump, limits.max_boundary_jump,
+         "PCM boundary does not fade toward zero"),
+        ("channel_imbalance", imbalance, limits.max_channel_imbalance_db,
+         "Per-channel RMS imbalance exceeds selected budget"),
+    )
+    findings = [
+        QualityFinding(code, "warning", value, cap, note)
+        for code, value, cap, note in checks if value > cap
+    ]
+    if active < limits.min_active_fraction:
+        findings.append(QualityFinding(
+            "activity", "warning", active, limits.min_active_fraction,
+            "Almost all frames are below the declared activity floor",
+        ))
+    return QualityReport(
+        sample_rate, frames, channels,
+        peak, rms, dc, clipping, active, jump, imbalance,
+        tuple(findings),
+    )
+
+
 def measure_quality(audio: AudioBuffer, *,
                     limits: QualityLimits = QualityLimits()) -> QualityReport:
     if not isinstance(audio, AudioBuffer) or not isinstance(limits, QualityLimits):
@@ -103,31 +142,10 @@ def measure_quality(audio: AudioBuffer, *,
             float(np.max(rms_by_channel))
             / max(float(np.min(rms_by_channel)), 1e-12)
         )
-    checks = (
-        ("peak", peak, limits.max_peak,
-         "Measured sample amplitude exceeds selected peak budget"),
-        ("clip_fraction", clipping, limits.max_clipping_fraction,
-         "At least one sample clipped or explicit clip budget was exceeded"),
-        ("dc_offset", dc, limits.max_dc_absolute,
-         "Mean PCM bias exceeds explicit DC-offset limit"),
-        ("boundary_jump", jump, limits.max_boundary_jump,
-         "PCM boundary does not fade toward zero"),
-        ("channel_imbalance", imbalance, limits.max_channel_imbalance_db,
-         "Per-channel RMS imbalance exceeds selected budget"),
-    )
-    findings = [
-        QualityFinding(code, "warning", value, cap, note)
-        for code, value, cap, note in checks if value > cap
-    ]
-    if active < limits.min_active_fraction:
-        findings.append(QualityFinding(
-            "activity", "warning", active, limits.min_active_fraction,
-            "Almost all frames are below the declared activity floor",
-        ))
-    return QualityReport(
-        audio.sample_rate, audio.frames, audio.channels,
-        peak, rms, dc, clipping, active, jump, imbalance,
-        tuple(findings),
+    return _quality_report_from_metrics(
+        sample_rate=audio.sample_rate, frames=audio.frames, channels=audio.channels,
+        peak=peak, rms=rms, dc=dc, clipping=clipping, active=active,
+        jump=jump, imbalance=imbalance, limits=limits,
     )
 
 
