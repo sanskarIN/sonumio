@@ -5,6 +5,8 @@ import io
 import json
 from pathlib import Path
 import tarfile
+import stat
+import zipfile
 import tomllib
 
 import pytest
@@ -130,3 +132,84 @@ def test_archive_rejects_duplicate_directory_entries(tmp_path):
             writer.addfile(directory)
     with pytest.raises(RuntimeError, match="case-colliding"):
         gate._audit_archive(archive, candidate)
+
+
+def test_zip_and_tar_sources_match_same_pinned_tree(tmp_path):
+    candidate = gate.resolve_candidate()
+    tar = tmp_path / "source.tar.gz"
+    zipped = tmp_path / "source.zip"
+    gate._make_archive(tar, candidate)
+    gate._make_archive(zipped, candidate, format="zip")
+    a = gate._audit_archive(tar, candidate)
+    b = gate._audit_archive(zipped, candidate, format="zip")
+    for key in ("commit_candidate", "source_files", "source_bytes", "software_version"):
+        assert a[key] == b[key]
+    assert b["archive_format"] == "zip"
+    assert b["canonical_blob_hashes_verified"]
+    assert a["archive_sha256"] != b["archive_sha256"]
+
+
+def test_zip_same_size_tampering_detected(tmp_path):
+    candidate = gate.resolve_candidate()
+    original = tmp_path / "original.zip"
+    modified = tmp_path / "modified.zip"
+    gate._make_archive(original, candidate, format="zip")
+    with zipfile.ZipFile(original) as reader, zipfile.ZipFile(modified, "w") as writer:
+        for member in reader.infolist():
+            data = reader.read(member)
+            if member.filename == candidate.prefix + ".gitignore":
+                data = bytes([data[0] ^ 1]) + data[1:]
+            writer.writestr(member, data)
+    with pytest.raises(RuntimeError, match="Git blob checksum mismatch: .gitignore"):
+        gate._audit_archive(modified, candidate, format="zip")
+
+
+@pytest.mark.parametrize("filename", ["../escape", "a//b", "a/./b", "x:stream", "bad."])
+def test_zip_unsafe_noncanonical_paths(tmp_path, filename):
+    candidate = gate.resolve_candidate()
+    archive = tmp_path / "unsafe.zip"
+    with zipfile.ZipFile(archive, "w") as writer:
+        writer.writestr(candidate.prefix + filename, b"x")
+    with pytest.raises(RuntimeError, match="Unsafe archive path|Noncanonical source path"):
+        gate._audit_archive(archive, candidate, format="zip")
+
+
+def test_zip_rejects_symlink(tmp_path):
+    candidate = gate.resolve_candidate()
+    archive = tmp_path / "symlink.zip"
+    entry = zipfile.ZipInfo(candidate.prefix + "link")
+    entry.create_system = 3
+    entry.external_attr = (stat.S_IFLNK | 0o777) << 16
+    with zipfile.ZipFile(archive, "w") as writer:
+        writer.writestr(entry, b"target")
+    with pytest.raises(RuntimeError, match="non-regular ZIP"):
+        gate._audit_archive(archive, candidate, format="zip")
+
+
+def test_zip_case_collision_and_duplicate_root(tmp_path):
+    candidate = gate.resolve_candidate()
+    for paths, pattern in (
+        (("docs/A", "docs/a"), "case-colliding"),
+        (("", ""), "duplicate archive root"),
+    ):
+        archive = tmp_path / "duplicate.zip"
+        with zipfile.ZipFile(archive, "w") as writer:
+            writer.writestr(candidate.prefix + paths[0], b"")
+            if paths[0] == paths[1]:
+                with pytest.warns(UserWarning, match="Duplicate name"):
+                    writer.writestr(candidate.prefix + paths[1], b"")
+            else:
+                writer.writestr(candidate.prefix + paths[1], b"")
+        with pytest.raises(RuntimeError, match=pattern):
+            gate._audit_archive(archive, candidate, format="zip")
+
+
+def test_entry_count_bound(monkeypatch, tmp_path):
+    candidate = gate.resolve_candidate()
+    archive = tmp_path / "bounded.zip"
+    monkeypatch.setattr(gate, "MAX_ENTRIES", 2)
+    with zipfile.ZipFile(archive, "w") as writer:
+        for i in range(3):
+            writer.writestr(candidate.prefix + f"dir{i}/", b"")
+    with pytest.raises(RuntimeError, match="entry review limits"):
+        gate._audit_archive(archive, candidate, format="zip")
