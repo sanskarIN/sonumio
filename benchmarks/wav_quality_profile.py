@@ -50,6 +50,10 @@ def _validate(seconds: int, sizes: tuple[int, ...], timeline: bool) -> None:
         raise ValueError("Supply 1..5 distinct packet sizes in [1,65536]")
     if type(timeline) is not bool:
         raise ValueError("timeline must be boolean")
+    # A caller-selected one-frame packet on a ten-minute source could
+    # otherwise spawn millions of high-overhead Python/NumPy iterations.
+    if any((seconds * SAMPLE_RATE + n - 1) // n > 200_000 for n in sizes):
+        raise ValueError("Benchmarked packet count exceeds 200000 per variant")
 
 
 def _make_source(path: Path, seconds: int) -> str:
