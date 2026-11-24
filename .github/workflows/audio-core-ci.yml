@@ -10,6 +10,12 @@ on:
       - '.github/workflows/audio-core-ci.yml'
   workflow_dispatch:
 
+# Superseded PR runs provide no useful signal and consume CI capacity.
+# Keep main-branch and manually dispatched runs; cancel only older PR heads.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 permissions:
   contents: read
 
