@@ -89,6 +89,8 @@ def main(argv: list[str] | None = None) -> int:
                          help="Return 1 after verified JSON if any quality limit fails")
     inspect.add_argument("--max-peak", type=float, default=1.0)
     inspect.add_argument("--max-clipping-fraction", type=float, default=0.0)
+    inspect.add_argument("--max-pcm-rail-fraction", type=float,
+                         help="Optional exact integer PCM endpoint occupancy budget [0,1]")
     inspect.add_argument("--max-dc-absolute", type=float, default=0.05)
     inspect.add_argument("--max-boundary-jump", type=float, default=0.25)
     inspect.add_argument("--max-channel-imbalance-db", type=float, default=24.0)
@@ -121,12 +123,17 @@ def main(argv: list[str] | None = None) -> int:
                 args.input, packet_frames=args.packet_frames,
                 expected_sha256=args.expected_sha256, limits=limits,
                 include_timeline=args.timeline,
+                max_pcm_rail_fraction=args.max_pcm_rail_fraction,
             )
         except (OSError, ValueError, TypeError, RuntimeError) as exc:
             print(f"Sonumio WAV inspection: {exc}", file=sys.stderr)
             return 2
         print(json.dumps(report.as_dict(), sort_keys=True))
-        return 1 if args.fail_on_warnings and not report.signal_health.passed else 0
+        failed_policy = (
+            not report.signal_health.passed
+            or report.pcm_rails is not None and not report.pcm_rails.passed
+        )
+        return 1 if args.fail_on_warnings and failed_policy else 0
     if args.command == "wav-process":
         try:
             config = WavProcessingConfig(
