@@ -196,11 +196,14 @@ def main():
     parser.add_argument("--loss-policy", choices=POLICIES, default="uniform")
     parser.add_argument("--min-snr-gamma", type=float, default=5.0)
     parser.add_argument("--compare-objectives", action="store_true")
+    parser.add_argument("--timestep-sampling", choices=("uniform", "stratified"), default="uniform")
+    parser.add_argument("--caption-sampling", choices=("independent", "bilingual_pair"), default="independent")
     args = parser.parse_args()
     config = TrainConfig(steps=args.steps, batch_size=args.batch_size,
                          microbatch_size=args.microbatch_size, device=args.device,
                          seed=args.seed, schedule_steps=args.schedule_steps,
-                         loss_policy=args.loss_policy, min_snr_gamma=args.min_snr_gamma)
+                         loss_policy=args.loss_policy, min_snr_gamma=args.min_snr_gamma,
+                         timestep_sampling=args.timestep_sampling, caption_sampling=args.caption_sampling)
     print(json.dumps(run_study(config=config, alternative_microbatch=args.alternative_microbatch,
                                evaluations=args.evaluations, compare_objectives=args.compare_objectives), allow_nan=False, indent=2))
 
