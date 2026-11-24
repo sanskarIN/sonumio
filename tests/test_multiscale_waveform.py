@@ -5,6 +5,7 @@ import pytest
 
 torch = pytest.importorskip("torch")
 
+from research import heldout_caption_panel as lexical
 from research import multiscale_waveform as ms
 from research import multiscale_waveform_study as study
 from research.latent_audio import FRAMES
@@ -103,6 +104,11 @@ def test_invalid_study_configuration(kwargs):
         study.run_study(**kwargs)
 
 
+def test_heldout_caption_tokens_are_distinct_from_training():
+    lexical.validate_caption_panel()
+    assert all(len(values) == 6 for values in lexical.PARAPHRASES.values())
+
+
 def test_actual_paired_training_and_generation():
     original_rng = torch.random.get_rng_state().clone()
     report = study.run_study(train_steps=1, evaluations=2)
@@ -126,6 +132,15 @@ def test_actual_paired_training_and_generation():
         if report["reference_probe"]["gate"]["passed"]:
             assert len(arm["generated"]["cases"]) == 12
             assert arm["generated"]["null_checks"] == [{"seed": 301, "caption_invariant": True}]
+            panel = arm["heldout_caption_panel"]
+            assert panel["zero_guidance_caption_invariant"]
+            assert panel["alternative_templates_token_disjoint_from_training"]
+            assert not panel["general_open_vocabulary_quality_established"]
+            for group in panel["by_language"].values():
+                assert len(group["cases"]) == 6
+                assert group["summary"]["reference_assignment"]["permutations"] == 720
+                assert group["summary"]["alternative_assignment"]["permutations"] == 720
         else:
             assert arm["generated"] is None
+            assert arm["heldout_caption_panel"] is None
     json.dumps(report, allow_nan=False)
