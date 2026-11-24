@@ -216,3 +216,22 @@ def test_wrong_digest_and_truncated_source_rejected(tmp_path):
     path.write_bytes(path.read_bytes()[:-1])
     with pytest.raises(AudioFormatError):
         inspect_wav_spectrum(path)
+
+
+def test_spectrum_cli_success_and_fail_closed(tmp_path, capsys):
+    from sonumio.audio_core.spectrum_cli import main
+
+    path, digest, _ = make_wave(tmp_path)
+    args = [str(path), "--fft-frames", "64", "--packet-frames", "7"]
+    assert main(args + ["--expected-sha256", digest, "--include-bins"]) == 0
+    report = json.loads(capsys.readouterr().out)
+    assert report["source_sha256"] == digest
+    assert len(report["spectrum"]["channel_spectra"][0]["bin_mean_square"]) == 33
+    assert main(args + ["--expected-sha256", "0" * 64]) == 2
+    output = capsys.readouterr()
+    assert not output.out
+    assert "SHA256" in output.err
+    assert main([str(path), "--fft-frames", "100"]) == 2
+    output = capsys.readouterr()
+    assert not output.out
+    assert "power of two" in output.err
