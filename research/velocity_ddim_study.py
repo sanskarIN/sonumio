@@ -22,6 +22,9 @@ from torch import nn
 from torch.nn import functional as F
 
 from research.architecture_compare import _audio_hashes
+from research.counterfactual_conditioning import (
+    CaptionInterventions, training_penalty, validate_weight,
+)
 from research.generation_audit import _compare_waveforms, PAIRS
 from research.latent_audio import (
     FRAMES, TRAIN_SEEDS, VALIDATION_SEEDS, LatentResearchModel,
@@ -70,8 +73,9 @@ def _settings(*, seed: int, train_steps: int, codec_steps: int,
 
 
 def _train_models(*, seed: int, train_steps: int, codec_steps: int,
-                  schedule: DiffusionSchedule, channels: int):
+                  schedule: DiffusionSchedule, channels: int, conditioning_weight: float = 0.0):
     """Train two v-objective arms without exposing weights or persistent data."""
+    validate_weight(conditioning_weight)
     train = synthetic_bilingual_waves(TRAIN_SEEDS)
     validation = synthetic_bilingual_waves(VALIDATION_SEEDS)
     training_hashes, validation_hashes = (
@@ -80,6 +84,9 @@ def _train_models(*, seed: int, train_steps: int, codec_steps: int,
     if (training_hashes & validation_hashes
             or train.fingerprint == validation.fingerprint):
         raise ValueError("Synthetic train/held-out waveform leakage")
+    interventions = (CaptionInterventions.build(train.tokens, TRAIN_SEEDS)
+                     if conditioning_weight else None)
+    trace = hashlib.sha256(b"sonumio-v-ddim-training-inputs-v1\0")
     raw = TextWaveDenoiser(channels)
     latent = LatentResearchModel(channels)
     codec = latent.codec
@@ -90,6 +97,7 @@ def _train_models(*, seed: int, train_steps: int, codec_steps: int,
     codec_losses = []
     for _ in range(codec_steps):
         index = torch.randint(len(unique), (2,), generator=index_rng)
+        trace.update(index.numpy().tobytes())
         codec_optim.zero_grad(set_to_none=True)
         loss = reconstruction_loss(unique[index], codec(unique[index]))
         if not torch.isfinite(loss):
@@ -122,7 +130,8 @@ def _train_models(*, seed: int, train_steps: int, codec_steps: int,
     }
     models = {"raw": raw, "latent": latent.denoiser}
     losses = {"raw": [], "latent": []}
-    for _ in range(train_steps):
+    auxiliary = {"raw": [], "latent": []}
+    for step in range(train_steps):
         indices = torch.randint(len(train.waves), (2,), generator=index_rng)
         timestep = torch.randint(
             schedule.steps, (len(indices),), generator=index_rng,
@@ -132,20 +141,29 @@ def _train_models(*, seed: int, train_steps: int, codec_steps: int,
             keep[:, None], train.tokens[indices],
             torch.zeros_like(train.tokens[indices]),
         )
+        for value in (indices, timestep, keep):
+            trace.update(value.numpy().tobytes())
+        wrong_tokens = (train.tokens[interventions.wrong_indices(indices, round_index=step)]
+                        if interventions is not None else None)
         for arm in ("raw", "latent"):
             clean = train.waves[indices] if arm == "raw" else latents[indices]
             noise = torch.randn(clean.shape, generator=index_rng)
+            trace.update(noise.numpy().tobytes())
             xt = schedule.corrupt(clean, timestep, noise)
             target = velocity_target(clean, noise, timestep, schedule)
             optimizers[arm].zero_grad(set_to_none=True)
             estimate = models[arm](xt, timestep, tokens)
-            loss = F.mse_loss(estimate, target)
+            base_loss = F.mse_loss(estimate, target)
+            penalty = (training_penalty(models[arm], xt, timestep, estimate, target, keep, wrong_tokens)
+                       if wrong_tokens is not None else base_loss.new_zeros(()))
+            loss = base_loss + conditioning_weight * penalty if conditioning_weight else base_loss
             if not torch.isfinite(loss):
                 raise ValueError("Nonfinite velocity denoising loss")
             loss.backward()
             nn.utils.clip_grad_norm_(models[arm].parameters(), 1)
             optimizers[arm].step()
-            losses[arm].append(float(loss.detach()))
+            losses[arm].append(float(base_loss.detach()))
+            auxiliary[arm].append(float(penalty.detach()))
 
     # Complete validation split (42 source recordings x 2 bilingual captions):
     # do NOT infer independent examples from duplicated underlying waveforms.
@@ -180,6 +198,9 @@ def _train_models(*, seed: int, train_steps: int, codec_steps: int,
             raise ValueError("Nonfinite held-out objective diagnostic")
     report = {
         "training_fingerprint": train.fingerprint,
+        "training_input_trace_sha256": trace.hexdigest(),
+        "conditioning_weight": conditioning_weight,
+        "mean_auxiliary_caption_penalty": {arm: mean(values) for arm, values in auxiliary.items()},
         "validation_fingerprint": validation.fingerprint,
         "unique_training_waveforms": len(training_hashes),
         "unique_heldout_waveforms": len(validation_hashes),
