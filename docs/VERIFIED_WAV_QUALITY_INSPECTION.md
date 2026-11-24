@@ -212,6 +212,17 @@ largest adjacent pair, using zero-based original-source frame numbering;
 `max_step_channel` identifies its zero-based channel. Equal-magnitude
 ties choose the earliest frame and then the lowest channel, independent
 of packet size. For single-frame sources, both positions are `null`.
+With an explicit threshold, `over_limit_by_channel` reports a count for
+each channel, while `first_over_limit_frame` and
+`first_over_limit_channel` locate the earliest threshold breach. Frame
+numbers identify the **later** sample of an adjacent pair, use zero-based
+source coordinates, and stay invariant when PCM packets are re-partitioned.
+A simultaneous first breach on multiple channels selects the lowest channel
+index. A zero-breach result has null first-breach coordinates and per-channel
+zeros; without any configured threshold the counts and coordinates are null.
+The sum of per-channel violations equals `over_limit_samples`. These
+statistics use per-packet scratch arrays and O(channels) persistent state.
+
 The top-level `inspection_policy_passed` combines this optional criterion
 with the existing signal-health and exact integer-rail criteria. No
 continuity work or extra `frame_continuity` output is added by default.
