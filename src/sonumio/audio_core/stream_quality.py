@@ -51,6 +51,7 @@ class StreamingQualityAccumulator:
         self.channels = channels
         self.expected_frames = expected_frames
         self.limits = limits
+        self._activity_floor = 10 ** (limits.activity_floor_dbfs / 20.0)
         self.frames = 0
         self._channel_sums = np.zeros(channels, dtype=np.float64)
         self._channel_squared_sums = np.zeros(channels, dtype=np.float64)
@@ -82,8 +83,9 @@ class StreamingQualityAccumulator:
         self._channel_squared_sums += np.sum(data * data, axis=1, dtype=np.float64)
         self._peak = max(self._peak, float(np.max(absolute)))
         self._clipped += int(np.count_nonzero(absolute >= 1.0))
-        floor = 10 ** (self.limits.activity_floor_dbfs / 20.0)
-        self._active += int(np.count_nonzero(np.max(absolute, axis=0) > floor))
+        self._active += int(np.count_nonzero(
+            np.max(absolute, axis=0) > self._activity_floor
+        ))
         if self._initial_boundary is None:
             self._initial_boundary = float(np.max(absolute[:, 0]))
         self._final_boundary = float(np.max(absolute[:, -1]))
