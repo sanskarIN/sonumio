@@ -186,3 +186,35 @@ number. Timings exclude subprocess startup and synthetic-source creation,
 and observed throughput is hardware-, OS- and load-dependent. This is
 an engineering resource diagnostic, not a model-inference benchmark or proof
 of perceptual quality, memory safety or a universal resource ceiling.
+
+
+## Optional adjacent-frame continuity inspection
+
+The legacy `signal_health.boundary_jump` measures the magnitude of the first
+and last frames of the file; it is **not** a check for internal transitions.
+To measure changes *between consecutive decoded frames* anywhere in the
+source, opt in to:
+
+```bash
+sonumio wav-inspect source.wav --continuity --expected-sha256 <64-lowercase-hex>
+sonumio wav-inspect source.wav --max-adjacent-step 1.1 --fail-on-warnings
+```
+
+`--continuity` adds `frame_continuity`: the maximum absolute difference
+between adjacent decoded samples (including across PCM packet boundaries),
+the maximum by channel and the number of frame-to-frame transitions.
+`--max-adjacent-step` is an optional inclusive policy in the interval
+0–2 (decoded PCM is bounded to roughly [-1,1]); it automatically enables
+continuity measurement. The report then includes the number/fraction of
+channel-sample transitions **strictly above** the specified maximum.
+The top-level `inspection_policy_passed` combines this optional criterion
+with the existing signal-health and exact integer-rail criteria. No
+continuity work or extra `frame_continuity` output is added by default.
+
+This is a *sample continuity* metric, **not an audible-click detector**:
+percussive sounds, sharp attacks and other intended transients can have
+large adjacent steps, and some audible defects can produce modest steps.
+No perceptual claims should be inferred. The accumulator retains only
+the last frame per channel and bounded scratch arrays. The verified file
+report remains inaccessible until the whole canonical source is authenticated.
+Single-frame recordings have zero adjacent transitions and zero measured step.
