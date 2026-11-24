@@ -112,6 +112,25 @@ float32. The existing `signal_health.clipping_fraction` remains an
 independent *decoded-sample* criterion (absolute float >= 1.0), preserving
 the first-party quality-report protocol. Do not confuse the two metrics.
 
+The verified file inspector accepts an optional rail-occupancy budget:
+
+```bash
+sonumio wav-inspect source.wav --max-pcm-rail-fraction 0.001 --fail-on-warnings
+```
+
+This checks the fraction of decoded integer PCM samples at the exact
+positive or negative quantization endpoint. The limit is inclusive and
+must be finite and within [0, 1]. Its effective value appears in both
+`inspection_controls.max_pcm_rail_fraction` and
+`pcm_rails.max_rail_fraction`; `pcm_rails.passed` records whether it
+was respected. Without this explicitly supplied limit, the exact rail
+counts are observational and `pcm_rails.passed` is true. With a budget
+breach and `--fail-on-warnings`, the verified CLI report is still
+emitted and exit code is **1**. Invalid budgets fail with **2** and
+no JSON. The rail fraction does *not* automatically modify the legacy
+`signal_health.clipping_fraction`, because exact quantization endpoints
+and decoded float full-scale samples measure different things.
+
 The rail counts stay **unverified until the entire file is authenticated**,
 just like the source SHA256. Their calculation uses constant-sized packet
 storage and two integer counters, regardless of recording duration.
