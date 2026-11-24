@@ -1,0 +1,77 @@
+name: Multiscale waveform research (CPU)
+
+on:
+  pull_request:
+    paths:
+      - 'research/multiscale_waveform*.py'
+      - 'research/open_set_source*.py'
+      - 'research/velocity*.py'
+      - 'research/latent_audio.py'
+      - 'research/text_audio.py'
+      - 'research/wave_diffusion.py'
+      - 'src/sonumio/engines/procedural.py'
+      - 'tests/test_multiscale_waveform.py'
+      - '.github/workflows/multiscale-waveform.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'research/**'
+      - 'src/sonumio/**'
+      - 'tests/test_multiscale_waveform.py'
+      - '.github/workflows/multiscale-waveform.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  waveform:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      OMP_NUM_THREADS: '2'
+      MKL_NUM_THREADS: '2'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install CPU research dependencies
+        run: |
+          python -m pip install -e '.[test]' 'scipy>=1.12,<2'
+          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+      - name: Test waveform architecture and paired generation
+        run: python -m pytest -q tests/test_multiscale_waveform.py
+      - name: Run two independent paired initialization studies
+        run: |
+          for seed in 17 29; do
+            python -m research.multiscale_waveform_study --seed "$seed" --train-steps 96 \
+              --evaluations 8 --sampling-seeds 301 302 --spectral-weight 0.2 \
+              > "$RUNNER_TEMP/multiscale-$seed.json"
+          done
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          root = Path(os.environ["RUNNER_TEMP"])
+          reports = [json.loads((root / f"multiscale-{s}.json").read_text()) for s in (17, 29)]
+          for report in reports:
+              assert report["same_training_input_trace"]
+              assert report["same_multiscale_initialization"]
+              assert not report["model_readiness_established"]
+              assert not report["weights_or_audio_saved"]
+              arms = report["arms"]
+              assert len({arm["training"]["input_trace_sha256"] for arm in arms.values()}) == 1
+              assert arms["multiscale_velocity"]["training"]["initial_state_sha256"] == arms["multiscale_spectral"]["training"]["initial_state_sha256"]
+              for name, arm in arms.items():
+                  print("training", report["configuration"]["seed"], name, json.dumps(arm["training"], sort_keys=True))
+                  print("heldout", name, json.dumps(arm["heldout"], sort_keys=True))
+                  if report["reference_probe"]["gate"]["passed"]:
+                      assert len(arm["generated"]["cases"]) == 24
+                      assert len(arm["generated"]["null_checks"]) == 2
+                      print("generated", name, json.dumps(arm["generated"]["by_language"], sort_keys=True))
+                  else:
+                      assert arm["generated"] is None
+          assert reports[0]["training_fingerprint"] == reports[1]["training_fingerprint"]
+          assert reports[0]["validation_fingerprint"] == reports[1]["validation_fingerprint"]
+          PY
