@@ -1,0 +1,83 @@
+name: Reversible waveform coordinates (CPU)
+
+on:
+  pull_request:
+    paths:
+      - 'research/reversible*.py'
+      - 'research/multiscale_waveform*.py'
+      - 'research/heldout_caption_panel.py'
+      - 'research/open_set_source_probe.py'
+      - 'research/counterfactual_conditioning.py'
+      - 'research/paired_grounding_audit.py'
+      - 'research/velocity_ddim.py'
+      - 'research/text_audio.py'
+      - 'tests/test_reversible_waveform_bases.py'
+      - '.github/workflows/reversible-waveform-bases.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'research/reversible*.py'
+      - 'tests/test_reversible_waveform_bases.py'
+      - '.github/workflows/reversible-waveform-bases.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  basis:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      OMP_NUM_THREADS: '2'
+      MKL_NUM_THREADS: '2'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install research dependencies
+        run: |
+          python -m pip install -e '.[test]' 'scipy>=1.12,<2'
+          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+      - name: Test reversible transforms and aligned network initialization
+        run: python -m pytest -q tests/test_reversible_waveform_bases.py
+      - name: Compare equal-information waveform bases under two initializations
+        run: |
+          for seed in 17 29; do
+            python -m research.reversible_basis_study --seed "$seed" \
+              --train-steps 96 --evaluations 8 --sampling-seeds 301 302 \
+              > "$RUNNER_TEMP/basis-$seed.json"
+          done
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          for seed in (17, 29):
+              report = json.loads((Path(os.environ["RUNNER_TEMP"]) / f"basis-{seed}.json").read_text())
+              for flag in ("same_initial_unrotated_state", "aligned_initial_waveform_functions",
+                           "same_training_input_trace", "equal_trainable_parameter_counts",
+                           "coefficient_count_preserved"):
+                  assert report[flag]
+              assert not report["exact_split_overlap"]
+              assert not report["weights_or_audio_saved"]
+              assert not report["model_readiness_established"]
+              arms = report["arms"]
+              assert set(arms) == {"identity", "dct", "haar"}
+              assert len({a["basis"]["basis_sha256"] for a in arms.values()}) == 3
+              for name, arm in arms.items():
+                  assert arm["initial_function_check"]["alignment_within_tolerance"]
+                  print("basis", seed, name, arm["basis"], arm["initial_function_check"])
+                  print("training", seed, name, json.dumps(arm["training"], sort_keys=True))
+                  print("heldout", seed, name, json.dumps(arm["heldout"], sort_keys=True))
+                  print("interventions", seed, name, json.dumps(arm["heldout_interventions"], sort_keys=True))
+                  if report["reference_probe"]["gate"]["passed"]:
+                      assert len(arm["generated"]["cases"]) == 24
+                      assert len(arm["generated"]["balanced_assignment"]) == 4
+                      assert all(p["accepted"]["permutations"] == 720 for p in arm["generated"]["balanced_assignment"])
+                      print("generated", seed, name, json.dumps(arm["generated"]["by_language"], sort_keys=True))
+                      print("assignments", seed, name, json.dumps(arm["generated"]["balanced_assignment"], sort_keys=True))
+                  else:
+                      assert arm["generated"] is None
+                      assert arm["heldout_caption_panel"] is None
+          PY
