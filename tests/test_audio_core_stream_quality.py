@@ -479,3 +479,45 @@ def test_cli_pcm_rail_policy_is_opt_in_and_has_distinct_exit_codes(tmp_path, cap
     failed = capsys.readouterr()
     assert failed.out == ""
     assert "max_pcm_rail_fraction" in failed.err
+
+
+@pytest.mark.parametrize("bits", [8, 16, 24, 32])
+@pytest.mark.parametrize("packet_frames", [1, 3, 7])
+def test_integer_pcm_rails_count_each_channel_once_across_packet_boundaries(
+    tmp_path, bits, packet_frames,
+):
+    from sonumio.audio_core.dither import pack_pcm
+
+    maximum = 1 << (bits - 1)
+    pcm = np.zeros((4, 7), dtype=np.int64)
+    pcm[0, 0] = maximum - 1
+    pcm[1, 1] = -maximum
+    pcm[2, 2] = maximum - 1
+    pcm[3, 3] = -maximum
+    pcm[0, 6] = maximum - 1
+    path = tmp_path / f"four-channel-{bits}.wav"
+    with wave.open(str(path), "wb") as writer:
+        writer.setframerate(24000)
+        writer.setnchannels(4)
+        writer.setsampwidth(bits // 8)
+        writer.writeframes(pack_pcm(pcm, bits=bits))
+    digest = hashlib.sha256(path.read_bytes()).hexdigest()
+    result = inspect_wav_quality(
+        path, packet_frames=packet_frames, expected_sha256=digest,
+        max_pcm_rail_fraction=5 / 28,
+    )
+    rails = result.pcm_rails
+    assert rails is not None
+    assert rails.positive_samples == 3
+    assert rails.negative_samples == 2
+    assert rails.total_samples == 28
+    assert rails.rail_fraction == 5 / 28
+    assert rails.passed is True
+    assert result.inspection_policy_passed == result.signal_health.passed
+    lower = inspect_wav_quality(
+        path, packet_frames=packet_frames,
+        max_pcm_rail_fraction=(5 / 28) - 0.001,
+    )
+    assert lower.pcm_rails is not None
+    assert lower.pcm_rails.passed is False
+    assert lower.inspection_policy_passed is False
