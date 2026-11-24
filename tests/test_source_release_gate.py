@@ -248,3 +248,55 @@ def test_archive_directory_topology_matches_committed_tree(tmp_path, format, mut
                 writer.addfile(member)
     with pytest.raises(RuntimeError, match="directories differ from the committed tree"):
         gate._audit_archive(changed, candidate, format=format)
+
+
+def test_installed_spectrum_smoke_checks_independent_pcm_energy(tmp_path):
+    import struct
+    import wave
+    destination = tmp_path / "sample.wav"
+    with wave.open(str(destination), "wb") as writer:
+        writer.setnchannels(1)
+        writer.setsampwidth(2)
+        writer.setframerate(24000)
+        writer.writeframes(struct.pack("<h", 8192) * 12000)
+    report = {
+        "source_verified": True, "source_sha256": "a" * 64,
+        "spectrum": {
+            "frames": 12000, "fft_frames": 256, "channels": 1,
+            "complete_blocks": 46, "padded_tail_frames": 224,
+            "channel_spectra": [{
+                "mean_square": 0.0625,
+                "bin_mean_square": [0.0625] + [0.0] * 128,
+            }],
+        },
+    }
+    gate._check_spectrum_smoke(report, "a" * 64, destination)
+    report["spectrum"]["channel_spectra"][0]["bin_mean_square"][0] = 0.125
+    with pytest.raises(RuntimeError, match="independent PCM energy"):
+        gate._check_spectrum_smoke(report, "a" * 64, destination)
+
+
+def test_installed_demo_smoke_rejects_false_model_provenance(tmp_path):
+    import hashlib
+    import wave
+    destination = tmp_path / "demo.wav"
+    with wave.open(str(destination), "wb") as writer:
+        writer.setnchannels(1)
+        writer.setsampwidth(2)
+        writer.setframerate(24000)
+        writer.writeframes(b"\x00\x00" * 288000)
+    digest = hashlib.sha256(destination.read_bytes()).hexdigest()
+    report = {
+        "software_version": "0.0.2", "engine_id": "procedural-sfx-v0",
+        "seed": 42, "duration_seconds": 12.0,
+        "original_model_inference": False, "third_party_recordings_used": False,
+        "wav_sha256": digest, "bytes_written": 576044,
+        "inspection": {
+            "source_sha256": digest, "source_verified": True,
+            "signal_health": {"clipping_fraction": 0},
+        },
+    }
+    gate._check_demo_smoke(report, destination, "0.0.2")
+    report["original_model_inference"] = True
+    with pytest.raises(RuntimeError, match="demo provenance"):
+        gate._check_demo_smoke(report, destination, "0.0.2")
