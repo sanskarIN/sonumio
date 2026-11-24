@@ -63,7 +63,11 @@ def test_direct_dft_parseval_and_partition_invariance(channels, frames):
             np.testing.assert_allclose(channel.bin_mean_square, reference[i],
                                        atol=1e-14, rtol=1e-11)
             assert channel.mean_square == pytest.approx(time_energy[i], rel=1e-12)
-            assert channel.dominant_bin == int(np.argmax(reference[i]))
+            # Equal-energy bins may differ at roundoff scale between FFT and DFT.
+            assert reference[i, channel.dominant_bin] == pytest.approx(
+                float(np.max(reference[i])), rel=1e-11, abs=1e-14
+            )
+            assert channel.dominant_frequency_hz == channel.dominant_bin * 125
             assert channel.centroid_hz == pytest.approx(
                 np.dot(reference[i], np.arange(33) * 125) / time_energy[i]
             )
