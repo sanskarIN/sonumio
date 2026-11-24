@@ -85,6 +85,10 @@ def main(argv: list[str] | None = None) -> int:
                          help="Require an exact lowercase digest of the whole input WAV")
     inspect.add_argument("--timeline", action="store_true",
                          help="Include exact one-second signal diagnostics (max 3600 windows)")
+    inspect.add_argument("--continuity", action="store_true",
+                         help="Report decoded frame-to-frame sample steps, including packet joins")
+    inspect.add_argument("--max-adjacent-step", type=float,
+                         help="Optional [0,2] maximum PCM frame step (not proof of clicks)")
     inspect.add_argument("--fail-on-warnings", action="store_true",
                          help="Return 1 after verified JSON if any quality limit fails")
     inspect.add_argument("--max-peak", type=float, default=1.0)
@@ -124,6 +128,8 @@ def main(argv: list[str] | None = None) -> int:
                 expected_sha256=args.expected_sha256, limits=limits,
                 include_timeline=args.timeline,
                 max_pcm_rail_fraction=args.max_pcm_rail_fraction,
+                include_continuity=args.continuity,
+                max_adjacent_step=args.max_adjacent_step,
             )
         except (OSError, ValueError, TypeError, RuntimeError) as exc:
             print(f"Sonumio WAV inspection: {exc}", file=sys.stderr)

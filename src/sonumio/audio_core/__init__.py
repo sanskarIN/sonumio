@@ -35,6 +35,7 @@ from .wave_reader import WavPacketReader, WavPacketInfo
 from .wave_pipeline import WavProcessingConfig, WavProcessingResult, process_wav_file
 from .stream_quality import StreamingQualityAccumulator, VerifiedWavQuality, inspect_wav_quality, PcmRailReport
 from .quality_timeline import QualityWindow, QualityTimeline, StreamingQualityTimeline
+from .frame_transitions import FrameTransitionReport, StreamingFrameTransitionAccumulator
 
 from .streaming import (
     FramePacket, FramerConfig, PacketCollector, StreamingFramer,
@@ -57,6 +58,7 @@ __all__ = [
     "StreamingQualityAccumulator", "VerifiedWavQuality", "inspect_wav_quality",
     "PcmRailReport",
     "QualityWindow", "QualityTimeline", "StreamingQualityTimeline",
+    "FrameTransitionReport", "StreamingFrameTransitionAccumulator",
     "FramePacket",
     "FramerConfig",
     "PacketCollector",

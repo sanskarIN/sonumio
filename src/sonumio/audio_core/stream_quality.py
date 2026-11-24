@@ -19,6 +19,9 @@ from .contracts import MAX_CHANNELS, check_rate, finite_float
 from .errors import AudioContractError, AudioIntegrityError, AudioLimitError
 from .quality import QualityLimits, QualityReport, _quality_report_from_metrics
 from .quality_timeline import QualityTimeline, StreamingQualityTimeline
+from .frame_transitions import (
+    FrameTransitionReport, StreamingFrameTransitionAccumulator,
+)
 from .streaming import FramePacket
 from .wave_reader import WavPacketInfo, WavPacketReader
 from .wave_stream import MAX_STREAM_PACKET_FRAMES, MAX_STREAM_SECONDS
@@ -174,12 +177,16 @@ class VerifiedWavQuality:
     packet_frames: int = 8192
     expected_sha256_required: bool = False
     max_pcm_rail_fraction: float | None = None
+    frame_continuity: FrameTransitionReport | None = None
 
     @property
     def inspection_policy_passed(self) -> bool:
         """Combined signal-health and optional exact PCM rail policy outcome."""
-        return (self.signal_health.passed
-                and (self.pcm_rails is None or self.pcm_rails.passed))
+        return (
+            self.signal_health.passed
+            and (self.pcm_rails is None or self.pcm_rails.passed)
+            and (self.frame_continuity is None or self.frame_continuity.passed)
+        )
 
     def as_dict(self) -> dict:
         result = {
@@ -197,6 +204,11 @@ class VerifiedWavQuality:
                 "packet_frames": self.packet_frames,
                 "expected_sha256_required": self.expected_sha256_required,
                 "timeline_enabled": self.timeline is not None,
+                "continuity_enabled": self.frame_continuity is not None,
+                "max_adjacent_step": (
+                    self.frame_continuity.max_allowed_step
+                    if self.frame_continuity is not None else None
+                ),
                 "quality_limits": asdict(self.limits),
                 "max_pcm_rail_fraction": self.max_pcm_rail_fraction,
             },
@@ -208,6 +220,8 @@ class VerifiedWavQuality:
             result["timeline"] = self.timeline.as_dict()
         if self.pcm_rails is not None:
             result["pcm_rails"] = self.pcm_rails.as_dict()
+        if self.frame_continuity is not None:
+            result["frame_continuity"] = self.frame_continuity.as_dict()
         return result
 
 
@@ -217,6 +231,8 @@ def inspect_wav_quality(
     limits: QualityLimits = QualityLimits(),
     include_timeline: bool = False,
     max_pcm_rail_fraction: float | None = None,
+    include_continuity: bool = False,
+    max_adjacent_step: float | None = None,
 ) -> VerifiedWavQuality:
     """Inspect canonical local integer PCM with complete-file verification.
 
@@ -231,6 +247,13 @@ def inspect_wav_quality(
         raise AudioContractError("Expected QualityLimits")
     if type(include_timeline) is not bool:
         raise AudioContractError("include_timeline must be boolean")
+    if type(include_continuity) is not bool:
+        raise AudioContractError("include_continuity must be boolean")
+    if max_adjacent_step is not None:
+        max_adjacent_step = finite_float(
+            max_adjacent_step, "max_adjacent_step",
+            minimum=0.0, maximum=2.0,
+        )
     if max_pcm_rail_fraction is not None:
         finite_float(
             max_pcm_rail_fraction, "max_pcm_rail_fraction",
@@ -251,14 +274,27 @@ def inspect_wav_quality(
             )
             if include_timeline else None
         )
+        transition_meter = (
+            StreamingFrameTransitionAccumulator(
+                reader.info.sample_rate, reader.info.channels,
+                expected_frames=reader.info.frames,
+                max_allowed_step=max_adjacent_step,
+            )
+            if include_continuity or max_adjacent_step is not None else None
+        )
         for packet in reader:
             accumulator.update(packet)
             if timeline is not None:
                 timeline.update(packet)
+            if transition_meter is not None:
+                transition_meter.update(packet)
         if reader.state != "verified" or reader.verified_sha256 is None:
             raise AudioIntegrityError("Incomplete verified WAV inspection")
         health = accumulator.finalize()
         timed = timeline.finalize() if timeline is not None else None
+        continuity = (
+            transition_meter.finalize() if transition_meter is not None else None
+        )
         rail_counts = reader.verified_pcm_rail_counts
         if rail_counts is None:
             raise AudioIntegrityError("Unverified WAV PCM endpoints")
@@ -278,4 +314,5 @@ def inspect_wav_quality(
             packet_frames=packet_frames,
             expected_sha256_required=expected_sha256 is not None,
             max_pcm_rail_fraction=max_pcm_rail_fraction,
+            frame_continuity=continuity,
         )
