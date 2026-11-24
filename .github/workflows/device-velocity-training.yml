@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - 'research/device_velocity*.py'
+      - 'research/velocity_loss_weights.py'
       - 'research/velocity_prediction.py'
       - 'research/velocity_ddim.py'
       - 'research/text_audio.py'
@@ -13,12 +14,15 @@ on:
       - 'research/wave_diffusion.py'
       - 'src/sonumio/engines/procedural.py'
       - 'tests/test_device_velocity_training.py'
+      - 'tests/test_velocity_loss_weights.py'
       - '.github/workflows/device-velocity-training.yml'
   push:
     branches: [main]
     paths:
       - 'research/device_velocity*.py'
+      - 'research/velocity_loss_weights.py'
       - 'tests/test_device_velocity_training.py'
+      - 'tests/test_velocity_loss_weights.py'
       - '.github/workflows/device-velocity-training.yml'
 
 permissions:
@@ -41,7 +45,7 @@ jobs:
           python -m pip install -e '.[test]' 'scipy>=1.12,<2'
           python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
       - name: Test logical batches, gradients and device selection
-        run: python -m pytest -q -rs tests/test_device_velocity_training.py
+        run: python -m pytest -q -rs tests/test_device_velocity_training.py tests/test_velocity_loss_weights.py
       - name: Compare two microbatch partitions with two independent initializations
         run: |
           for seed in 17 29; do
@@ -80,4 +84,35 @@ jobs:
                       assert arm["generated"] is None
           assert reports[0]["training_fingerprint"] == reports[1]["training_fingerprint"]
           assert reports[0]["validation_fingerprint"] == reports[1]["validation_fingerprint"]
+          PY
+      - name: Compare loss weighting under fixed logical-batch inputs
+        run: |
+          for seed in 17 29; do
+            python -m research.device_velocity_study --device cpu --seed "$seed" \
+              --steps 32 --batch-size 5 --microbatch-size 2 --alternative-microbatch 1 \
+              --schedule-steps 8 --evaluations 4 --compare-objectives > "$RUNNER_TEMP/objectives-$seed.json"
+          done
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          root = Path(os.environ["RUNNER_TEMP"])
+          for seed in (17, 29):
+              report = json.loads((root / f"objectives-{seed}.json").read_text())
+              assert report["paired_initialization_and_inputs"]
+              assert report["weighted_objectives_not_directly_comparable"]
+              assert not report["weights_or_audio_saved"]
+              arms = report["arms"]
+              assert set(arms) == {"reference_cpu", "alternative_cpu", "min_snr_cpu", "clean_mse_cpu"}
+              assert len({a["training"]["batch_plan"]["input_trace_sha256"] for a in arms.values()}) == 1
+              assert len({a["training"]["initial_state_sha256"] for a in arms.values()}) == 1
+              for name, arm in arms.items():
+                  train = arm["training"]
+                  assert train["mean_weighted_objective"] <= train["mean_velocity_mse"] + 1e-6
+                  print("objective", seed, name, train["loss_policy"], train["timestep_weights"])
+                  print("heldout unweighted", seed, name, json.dumps(arm["heldout"], sort_keys=True))
+                  if report["reference_probe"]["gate"]["passed"]:
+                      assert len(arm["generated"]["cases"]) == 12
+                      print("generated", seed, name, json.dumps(arm["generated"]["by_language"], sort_keys=True))
           PY
