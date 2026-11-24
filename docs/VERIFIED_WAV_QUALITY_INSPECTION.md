@@ -126,7 +126,9 @@ must be finite and within [0, 1]. Its effective value appears in both
 was respected. Without this explicitly supplied limit, the exact rail
 counts are observational and `pcm_rails.passed` is true. With a budget
 breach and `--fail-on-warnings`, the verified CLI report is still
-emitted and exit code is **1**. Invalid budgets fail with **2** and
+emitted and exit code is **1**. The top-level
+`inspection_policy_passed` boolean combines signal-health findings and
+the optional rail policy; it is false if either fails. Invalid budgets fail with **2** and
 no JSON. The rail fraction does *not* automatically modify the legacy
 `signal_health.clipping_fraction`, because exact quantization endpoints
 and decoded float full-scale samples measure different things.
