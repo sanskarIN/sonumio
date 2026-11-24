@@ -30,6 +30,17 @@ CATEGORY_TO_DSP = {"ocean": "water", "ambient": "drone"}
 
 
 @dataclass(frozen=True)
+class ClipProvenance:
+    """Identity from the same validated manifest snapshot as the clip bytes."""
+
+    asset_id: str
+    group_id: str
+    language: str
+    source_line: int
+    crop_index: int
+
+
+@dataclass(frozen=True)
 class LoadedSplit:
     """Decoded clips, labels and immutable provenance summary for one split."""
 
@@ -38,6 +49,8 @@ class LoadedSplit:
     asset_count: int
     fingerprint: str
     captions: tuple[str, ...]  # same order as decoded clips; taken from validated snapshot
+    provenance: tuple[ClipProvenance, ...] = ()
+    split_name: str = ""
 
 
 def caption_category(caption: str) -> int:
@@ -186,6 +199,7 @@ def load_reviewed_splits(manifest: str | Path, audio_root: str | Path, *,
     clips: dict[str, list[np.ndarray]] = {split: [] for split in ("train", "validation", "test")}
     labels: dict[str, list[int]] = {split: [] for split in clips}
     captions: dict[str, list[str]] = {split: [] for split in clips}
+    provenance: dict[str, list[ClipProvenance]] = {split: [] for split in clips}
     fingerprints = {split: sha256() for split in clips}
     counts = {split: 0 for split in clips}
     decoded_recordings: dict[str, tuple[int, str]] = {}
@@ -251,6 +265,10 @@ def load_reviewed_splits(manifest: str | Path, audio_root: str | Path, *,
                 clips[split].extend(pieces)
                 labels[split].extend([label] * len(pieces))
                 captions[split].extend([row["caption"]] * len(pieces))
+                provenance[split].extend(
+                    ClipProvenance(row["asset_id"], row["group_id"], row["language"], line_no, index)
+                    for index in range(1, len(pieces) + 1)
+                )
                 counts[split] += 1
                 # The exact validated caption, rights declarations and clip
                 # count must affect the training/evaluation provenance key.
@@ -269,7 +287,8 @@ def load_reviewed_splits(manifest: str | Path, audio_root: str | Path, *,
         split: LoadedSplit(np.stack(clips[split])[:, None].astype(np.float32)
                            if clips[split] else np.empty((0, 1, CLIP_FRAMES), dtype=np.float32),
                            np.asarray(labels[split], dtype=np.int64), counts[split],
-                           fingerprints[split].hexdigest(), tuple(captions[split]))
+                           fingerprints[split].hexdigest(), tuple(captions[split]),
+                           tuple(provenance[split]), split)
         for split in clips
     }
     report = {
