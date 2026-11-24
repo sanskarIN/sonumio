@@ -59,3 +59,22 @@ regression tests. Training and sampling are in-memory only. No model weights,
 audio files, external datasets or model releases are produced. Passing CI
 establishes correct execution and paired controls, not an improvement in
 prompt grounding or Sonumio-1 readiness.
+
+## Held-out wording diagnostic
+
+For each arm, the first sampling seed also generates all six categories
+with a fixed alternative caption per language. Token identities are checked
+against every synthetic training template (both variants, both languages,
+single and mixed categories). The alternative wording is disjoint from these
+training templates; the underlying sound vocabulary and synthetic source
+recipes are still shared. This is not an open-vocabulary or human-language
+understanding benchmark.
+
+The same Gaussian initial noise is used for template and alternative captions.
+The panel records joint correct accepted source matches, template-only and
+alternative-only matches, exact balanced-label assignment distributions,
+distinct accepted source counts, and same-category versus different-category
+waveform differences. The latter can reveal numerical sensitivity or collapse,
+but do not establish semantic fidelity. Zero-guidance generation must remain
+identical even when the prompt changes from a training template to a held-out
+alternative. No generated audio is persisted.
