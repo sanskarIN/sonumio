@@ -384,3 +384,94 @@ def test_cli_never_emits_partial_timeline_when_source_changes_midread(
     assert changed
     assert captured.out == ""
     assert "changed" in captured.err.lower()
+
+
+@pytest.mark.parametrize("bits", [8, 16, 24, 32])
+def test_pcm_rail_budget_is_explicit_and_inclusive(tmp_path, bits):
+    """Encoded PCM endpoint occupancy is not inferred from float samples."""
+    from sonumio.audio_core.dither import pack_pcm
+
+    top = 1 << (bits - 1)
+    samples = np.array([[-top, top - 1, -3, 0]], dtype=np.int64)
+    file_path = tmp_path / f"rail-budget-{bits}.wav"
+    with wave.open(str(file_path), "wb") as writer:
+        writer.setnchannels(1)
+        writer.setsampwidth(bits // 8)
+        writer.setframerate(8000)
+        writer.writeframes(pack_pcm(samples, bits=bits))
+    digest = hashlib.sha256(file_path.read_bytes()).hexdigest()
+    for permitted, expected_pass in (
+        (None, True), (1.0, True), (0.5, True),
+        (0.499, False), (0.0, False),
+    ):
+        output = inspect_wav_quality(
+            file_path, expected_sha256=digest,
+            max_pcm_rail_fraction=permitted,
+        )
+        assert output.pcm_rails is not None
+        assert output.pcm_rails.rail_fraction == 0.5
+        assert output.pcm_rails.max_rail_fraction == permitted
+        assert output.pcm_rails.passed is expected_pass
+        assert output.as_dict()["pcm_rails"]["passed"] is expected_pass
+        assert output.as_dict()["inspection_controls"]["max_pcm_rail_fraction"] == permitted
+
+
+@pytest.mark.parametrize("invalid", [-0.01, 1.001, True, float("nan"), float("inf"), "0.5"])
+def test_pcm_rail_budget_rejects_invalid_configuration_before_read(tmp_path, invalid):
+    from sonumio.audio_core.stream_quality import PcmRailReport
+    with pytest.raises(AudioContractError):
+        PcmRailReport(1, 0, 4, invalid)
+    with pytest.raises(AudioContractError):
+        inspect_wav_quality(
+            tmp_path / "missing.wav",
+            max_pcm_rail_fraction=invalid,
+        )
+
+
+def test_cli_pcm_rail_policy_is_opt_in_and_has_distinct_exit_codes(tmp_path, capsys):
+    from sonumio.audio_core.dither import pack_pcm
+
+    samples = np.array([[-32768, 32767, -3, 0]], dtype=np.int64)
+    path = tmp_path / "rail-cli.wav"
+    with wave.open(str(path), "wb") as writer:
+        writer.setnchannels(1)
+        writer.setsampwidth(2)
+        writer.setframerate(8000)
+        writer.writeframes(pack_pcm(samples, bits=16))
+    common = [
+        "wav-inspect", str(path),
+        "--max-peak", "1",
+        "--max-clipping-fraction", "1",
+        "--max-dc-absolute", "1",
+        "--max-boundary-jump", "10",
+        "--max-channel-imbalance-db", "120",
+        "--min-active-fraction", "0",
+        "--fail-on-warnings",
+    ]
+    assert main(common) == 0
+    normal = json.loads(capsys.readouterr().out)
+    assert normal["signal_health"]["passed"] is True
+    assert normal["pcm_rails"]["passed"] is True
+    assert normal["pcm_rails"]["max_rail_fraction"] is None
+
+    assert main(common + ["--max-pcm-rail-fraction", "0.5"]) == 0
+    at_budget = json.loads(capsys.readouterr().out)
+    assert at_budget["pcm_rails"]["passed"] is True
+
+    assert main(common + ["--max-pcm-rail-fraction", "0.49"]) == 1
+    over_budget = json.loads(capsys.readouterr().out)
+    assert over_budget["signal_health"]["passed"] is True
+    assert over_budget["pcm_rails"]["passed"] is False
+    assert over_budget["pcm_rails"]["rail_fraction"] == 0.5
+    assert over_budget["inspection_controls"]["max_pcm_rail_fraction"] == 0.49
+
+    # Thresholds without --fail-on-warnings are observational, not errors.
+    observation = [arg for arg in common if arg != "--fail-on-warnings"]
+    assert main(observation + ["--max-pcm-rail-fraction", "0"]) == 0
+    seen = json.loads(capsys.readouterr().out)
+    assert seen["pcm_rails"]["passed"] is False
+
+    assert main(common + ["--max-pcm-rail-fraction", "nan"]) == 2
+    failed = capsys.readouterr()
+    assert failed.out == ""
+    assert "max_pcm_rail_fraction" in failed.err
