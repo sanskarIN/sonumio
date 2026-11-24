@@ -13,11 +13,11 @@ import re
 
 import torch
 from torch import nn
-from torch.nn import functional as F
 
 from research.latent_audio import FRAMES
 from research.text_audio import MAX_TOKENS, BYTE_VOCAB
 from research.velocity_prediction import velocity_target
+from research.velocity_loss_weights import validate_policy, timestep_weights, velocity_loss, describe_weights
 from research.wave_diffusion import DiffusionSchedule
 
 MAX_BATCH = 32
@@ -48,6 +48,8 @@ class TrainConfig:
     condition_dropout: float = 0.1
     seed: int = 17
     device: str = "cpu"
+    loss_policy: str = "uniform"
+    min_snr_gamma: float = 5.0
 
     def __post_init__(self):
         checks = ((self.steps, 1, 4096), (self.batch_size, 1, MAX_BATCH),
@@ -61,6 +63,7 @@ class TrainConfig:
                               (self.condition_dropout, 0, 1)):
             if type(value) not in (float, int) or not math.isfinite(value) or not lo <= value <= hi:
                 raise ValueError("Invalid optimizer or condition dropout setting")
+        validate_policy(self.loss_policy, self.min_snr_gamma)
         if not isinstance(self.device, str):
             raise ValueError("Device must be a string")
 
@@ -149,6 +152,8 @@ def training_update(model, optimizer, schedule, waves, tokens, plan, config, dev
     model.train()
     optimizer.zero_grad(set_to_none=True)
     total = 0.0
+    weighted_total = 0.0
+    weights = timestep_weights(schedule.alpha_bars, config.loss_policy, config.min_snr_gamma)
     microbatches = 0
     try:
         for part in plan.slices(config.microbatch_size):
@@ -165,21 +170,21 @@ def training_update(model, optimizer, schedule, waves, tokens, plan, config, dev
                 raise ValueError("Denoiser output shape mismatch")
             # Weight each microbatch by its actual size, including a remainder.
             # Summing independent gradients gives the logical-batch mean.
-            loss = F.mse_loss(prediction, target) * (len(clean) / config.batch_size)
-            if not torch.isfinite(loss):
-                raise ValueError("Nonfinite microbatch loss")
+            raw, weighted = velocity_loss(prediction, target, step, weights)
+            loss = weighted.sum() / config.batch_size
             loss.backward()
-            total += float(loss.detach().cpu())
+            total += float(raw.detach().sum().cpu()) / config.batch_size
+            weighted_total += float(loss.detach().cpu())
             microbatches += 1
         norm = nn.utils.clip_grad_norm_(model.parameters(), config.max_grad_norm,
                                         error_if_nonfinite=True)
         optimizer.step()
-        if not math.isfinite(total) or not torch.isfinite(norm):
+        if not math.isfinite(total) or not math.isfinite(weighted_total) or not torch.isfinite(norm):
             raise ValueError("Nonfinite training update diagnostics")
     finally:
         # Prevent stale partial gradients after a failed or successful update.
         optimizer.zero_grad(set_to_none=True)
-    return {"velocity_mse": total, "preclip_gradient_norm": float(norm.detach().cpu()),
+    return {"velocity_mse": total, "weighted_objective": weighted_total, "preclip_gradient_norm": float(norm.detach().cpu()),
             "microbatches": microbatches}
 
 
@@ -212,6 +217,9 @@ def train_model(model: nn.Module, waves, tokens, config: TrainConfig):
         "cuda_runtime_version": torch.version.cuda if device.type == "cuda" else None,
         "cuda_device_name": torch.cuda.get_device_name(device) if device.type == "cuda" else None,
         "training_dtype": "float32", "gradient_accumulation": True,
+        "loss_policy": config.loss_policy, "min_snr_gamma": config.min_snr_gamma,
+        "timestep_weights": describe_weights(timestep_weights(schedule.alpha_bars, config.loss_policy, config.min_snr_gamma)),
+        "mean_weighted_objective": sum(row["weighted_objective"] for row in history) / len(history),
         "logical_batch_size": config.batch_size, "microbatch_size": config.microbatch_size,
         "optimizer_updates": len(history),
         "microbatch_backward_calls": sum(row["microbatches"] for row in history),
