@@ -71,3 +71,32 @@ def test_stable_audio_is_accepted_with_final_descriptor_check(tmp_path):
     audio = _wav(64)
     identifier = store.write(audio)
     assert store.read(identifier) == audio
+
+
+def test_path_replacement_after_descriptor_read_never_serves_old_bytes(
+    tmp_path, monkeypatch,
+):
+    """Path identity must still be checked after the fd has been closed."""
+    store = LocalAudioStore(tmp_path / "api")
+    expected = _wav(64)
+    identifier = store.write(expected)
+    target = store.root / f"{identifier}.wav"
+    archived = store.root / "archived-original"
+    path_type = type(target)
+    real_lstat = path_type.lstat
+    lookups = 0
+
+    def replace_on_final_path_check(self, *args, **kwargs):
+        nonlocal lookups
+        if self == target:
+            lookups += 1
+            if lookups == 2:
+                target.replace(archived)
+                target.write_bytes(expected)  # same bytes, different inode
+        return real_lstat(self, *args, **kwargs)
+
+    monkeypatch.setattr(path_type, "lstat", replace_on_final_path_check)
+    with pytest.raises(FileNotFoundError, match="Audio not found"):
+        store.read(identifier)
+    assert lookups >= 2
+    assert archived.read_bytes() == expected

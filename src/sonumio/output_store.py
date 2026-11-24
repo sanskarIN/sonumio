@@ -16,6 +16,7 @@ import tempfile
 import threading
 import time
 from typing import Callable
+from ._file_identity import same_path_descriptor, same_snapshot
 from uuid import uuid4
 
 
@@ -233,11 +234,9 @@ class LocalAudioStore:
                 # after the staging temp is removed. Refuse a hardlinked
                 # external file smuggled under a UUID-shaped filename.
                 if (not stat.S_ISREG(opened.st_mode)
-                        or opened.st_nlink != 1
-                        or (opened.st_dev, opened.st_ino, opened.st_size,
-                            opened.st_mtime_ns, opened.st_ctime_ns)
-                        != (expected.st_dev, expected.st_ino, expected.st_size,
-                            expected.st_mtime_ns, expected.st_ctime_ns)
+                        or (expected.st_nlink != 1 if os.name == "nt"
+                            else opened.st_nlink != 1)
+                        or not same_path_descriptor(expected, opened)
                         or opened.st_size > self.max_file_bytes):
                     raise FileNotFoundError("Audio not found")
                 data = handle.read(self.max_file_bytes + 1)
@@ -246,14 +245,21 @@ class LocalAudioStore:
                 # descriptor *again* before serving any collected bytes.
                 final = os.fstat(handle.fileno())
                 if (not stat.S_ISREG(final.st_mode)
-                        or final.st_nlink != 1
-                        or (final.st_dev, final.st_ino, final.st_size,
-                            final.st_mtime_ns, final.st_ctime_ns)
-                        != (opened.st_dev, opened.st_ino, opened.st_size,
-                            opened.st_mtime_ns, opened.st_ctime_ns)
+                        or (expected.st_nlink != 1 if os.name == "nt"
+                            else final.st_nlink != 1)
+                        or not same_snapshot(opened, final)
                         or len(data) != opened.st_size):
                     raise FileNotFoundError("Audio not found")
-            if len(data) > self.max_file_bytes:
+            # A descriptor can remain stable even after its path was
+            # swapped. Confirm native path metadata again before serving.
+            try:
+                current_path = path.lstat()
+            except (OSError, ValueError) as exc:
+                raise FileNotFoundError("Audio not found") from exc
+            if (not stat.S_ISREG(current_path.st_mode)
+                    or not same_snapshot(expected, current_path)
+                    or not same_path_descriptor(current_path, final)
+                    or len(data) > self.max_file_bytes):
                 raise FileNotFoundError("Audio not found")
             return data
 
