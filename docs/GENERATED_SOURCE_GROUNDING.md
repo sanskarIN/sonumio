@@ -85,3 +85,40 @@ Under this training budget and probe, matched captions did not improve on
 zero guidance in either arm. The noise false positives rule out using the
 rain matches as evidence of prompt grounding. The 48 cases per arm combine
 both model seeds, both sampling seeds, both languages and six categories.
+
+
+## Paired balanced-label audit (v1)
+
+The numeric report can now be audited independently using only Python's standard
+library. For example, redirect a study to a local JSON file and run:
+
+```bash
+python -m research.paired_grounding_audit grounding.json
+```
+
+The audit rejects incomplete or duplicate cases, mismatched rotated predictions,
+contradictory ranks, missing null invariance checks, inconsistent unconditional
+predictions and noise-confound declarations inconsistent with the raw controls.
+It does not load weights or re-score the original audio; the report is the
+input evidence, not an independently authenticated record of the experiment.
+
+Each arm, sampling seed and language forms a six-category panel. The audit
+holds the observed predictions fixed and enumerates all 720 one-to-one label
+assignments. Its upper-tail fraction includes ties and the observed assignment.
+Abstentions remain abstentions, so expected accepted correct assignments are
+coverage divided by six rather than always one. Both forced and accepted
+nonconfounded results are reported. Every category accepted for either noise
+control family is excluded from accepted evidence for all three conditions.
+
+A descriptive screen requires a tail fraction at most 0.05 and strictly more
+accepted nonconfounded matches than both rotated and zero-guidance controls.
+This is not a corrected significance test across panels, a population estimate,
+or a release gate: languages and arms share noise and reference data. Do not
+pool their tail fractions or equate passing with model readiness. Mode collapse
+predicting rain for all targets produces a forced rank-one count of one per
+panel under every permutation, regardless of whether the probe accepts rain.
+The reported earlier pilot would therefore fail the descriptive screen. This
+is a deduction from the documented pilot, not a new training run.
+
+The CPU research workflow runs unit tests and audits both fresh trained-model
+reports without saving weights or audio.
