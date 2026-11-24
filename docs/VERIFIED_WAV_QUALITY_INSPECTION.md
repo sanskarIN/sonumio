@@ -127,3 +127,29 @@ vary the last few bits of a reduction, so tests use tight numerical
 tolerances rather than incorrectly demanding identical decimal rendering.
 Real-model evaluation still requires independent source rights, holdouts,
 blind listening, and prompt-grounding checks.
+
+## Repeatable CPU scanner resource benchmark
+
+Run the optional developer benchmark from the repository root:
+
+```bash
+python -m benchmarks.wav_quality_profile --seconds 121 --timeline
+python -m benchmarks.wav_quality_profile --seconds 300 --packet-frames 1024 8192 32768
+```
+
+The benchmark generates a deterministic, rights-independent synthetic sine
+mix as a temporary canonical 8-kHz mono WAV. Three default packet sizes each
+run a full-source SHA-verified inspection in a **separate Python process**.
+The benchmark compares source hashes, PCM rail fractions, sample peaks and
+RMS across those packet sizes, and records wall time, real-time throughput
+and whole-process peak RSS where the OS supports it. When enabled, timeline
+window counts must also agree exactly. Scratch files are automatically
+removed; nothing is uploaded or released.
+
+**Interpretation:** peak RSS includes the Python interpreter, imports and
+NumPy state, and a high-water mark is not the scanner's marginal allocation.
+Windows currently reports RSS as unavailable rather than fabricating a
+number. Timings exclude subprocess startup and synthetic-source creation,
+and observed throughput is hardware-, OS- and load-dependent. This is
+an engineering resource diagnostic, not a model-inference benchmark or proof
+of perceptual quality, memory safety or a universal resource ceiling.
