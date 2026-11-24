@@ -120,10 +120,25 @@ def clip_quality(clip: np.ndarray, policy: ReadinessPolicy) -> dict:
     }
 
 
+def _eligible_fingerprint(split: LoadedSplit, indices: tuple[int, ...]) -> str:
+    """Bind sampler indices to the actual audited audio and recording identities."""
+    digest = hashlib.sha256(b"sonumio-eligible-crop-provenance-v1\0")
+    for index in indices:
+        p = split.provenance[index]
+        record = json.dumps([index, int(split.labels[index]), p.asset_id, p.group_id,
+                             p.language, p.source_line, p.crop_index, split.captions[index]],
+                            ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        digest.update(len(record).to_bytes(4, "little"))
+        digest.update(record)
+        digest.update(bytes.fromhex(_cropped_clip_digest(split.clips[index, 0])))
+    return digest.hexdigest()
+
+
 @dataclass(frozen=True)
 class ReadinessResult:
     report: dict
     eligible_indices: dict[str, tuple[int, ...]]
+    eligible_fingerprints: dict[str, str]
 
 
 def audit_loaded_splits(splits: dict[str, LoadedSplit], policy: ReadinessPolicy | None = None) -> ReadinessResult:
@@ -229,7 +244,10 @@ def audit_loaded_splits(splits: dict[str, LoadedSplit], policy: ReadinessPolicy 
         "model_quality_established": False,
         "audio_or_weights_saved": False,
     }
-    return ReadinessResult(report, eligible_by_split)
+    return ReadinessResult(report, eligible_by_split, {
+        name: _eligible_fingerprint(splits[name], indices)
+        for name, indices in eligible_by_split.items()
+    })
 
 
 class GroupBalancedSampler:
@@ -254,6 +272,8 @@ class GroupBalancedSampler:
         indices = readiness.eligible_indices["train"]
         if len(set(indices)) != len(indices) or any(type(i) is not int or not 0 <= i < len(train.labels) for i in indices):
             raise ValueError("Invalid eligible training indices")
+        if _eligible_fingerprint(train, indices) != readiness.eligible_fingerprints["train"]:
+            raise ValueError("Eligible audio or provenance changed since audit")
         for index in indices:
             p = train.provenance[index]
             tree[int(train.labels[index])][p.group_id][p.asset_id].append(index)
