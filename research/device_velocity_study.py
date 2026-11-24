@@ -19,6 +19,7 @@ from torch.nn import functional as F
 
 from research.architecture_compare import _audio_hashes
 from research.device_velocity_training import TrainConfig, resolve_device, train_model
+from research.velocity_loss_weights import POLICIES
 from research.generated_source_grounding import LANGUAGES, _summary
 from research.latent_audio import TRAIN_SEEDS, VALIDATION_SEEDS, synthetic_bilingual_waves
 from research.open_set_source_probe import evaluate_probe, fit_probe, reference_panels
@@ -105,7 +106,8 @@ def compare_parameters(left, right):
             "parameter_rmse": math.sqrt(squared_sum / count), "scalar_parameters_and_buffers": count}
 
 
-def run_study(*, config=TrainConfig(), alternative_microbatch=1, sampling_seed=301, evaluations=4):
+def run_study(*, config=TrainConfig(), alternative_microbatch=1, sampling_seed=301, evaluations=4,
+              compare_objectives=False):
     if not isinstance(config, TrainConfig):
         raise ValueError("Expected validated training configuration")
     # A smaller fixed experiment budget than the underlying training runner.
@@ -115,6 +117,8 @@ def run_study(*, config=TrainConfig(), alternative_microbatch=1, sampling_seed=3
             or type(sampling_seed) is not int or not 0 <= sampling_seed < 2**32
             or type(evaluations) is not int or not 2 <= evaluations <= config.schedule_steps):
         raise ValueError("Invalid bounded device study settings")
+    if type(compare_objectives) is not bool or (compare_objectives and config.loss_policy != 'uniform'):
+        raise ValueError('Objective comparison requires uniform reference policy')
     resolve_device(config.device)
     train = synthetic_bilingual_waves(TRAIN_SEEDS)
     validation = synthetic_bilingual_waves(VALIDATION_SEEDS)
@@ -133,6 +137,9 @@ def run_study(*, config=TrainConfig(), alternative_microbatch=1, sampling_seed=3
                 "alternative_cpu": replace(config, microbatch_size=alternative_microbatch, device="cpu")}
     if config.device != "cpu":
         variants["requested_cuda"] = config
+    if compare_objectives:
+        for policy in ("min_snr", "clean_mse"):
+            variants[policy + "_cpu"] = replace(config, device="cpu", loss_policy=policy)
     models, reports = {}, {}
     with torch.random.fork_rng(devices=[]):
         for name, variant in variants.items():
@@ -158,7 +165,8 @@ def run_study(*, config=TrainConfig(), alternative_microbatch=1, sampling_seed=3
     return {
         "protocol": PROTOCOL,
         "configuration": {**vars(config), "alternative_microbatch": alternative_microbatch,
-                          "sampling_seed": sampling_seed, "evaluations": evaluations},
+                          "sampling_seed": sampling_seed, "evaluations": evaluations,
+                          "compare_objectives": compare_objectives},
         "training_fingerprint": train.fingerprint, "validation_fingerprint": validation.fingerprint,
         "unique_training_recordings": len(train_hashes), "unique_validation_recordings": len(val_hashes),
         "exact_split_overlap": False, "paired_initialization_and_inputs": True,
@@ -168,6 +176,7 @@ def run_study(*, config=TrainConfig(), alternative_microbatch=1, sampling_seed=3
             for name, model in models.items() if name != "reference_cpu"
         },
         "cuda_training_executed": "requested_cuda" in models,
+        "weighted_objectives_not_directly_comparable": True,
         "cuda_performance_or_quality_established": False,
         "timing_includes_transfers_and_fingerprints": True,
         "weights_or_audio_saved": False, "model_readiness_established": False,
@@ -184,12 +193,16 @@ def main():
     parser.add_argument("--seed", type=int, default=17)
     parser.add_argument("--schedule-steps", type=int, default=8)
     parser.add_argument("--evaluations", type=int, default=4)
+    parser.add_argument("--loss-policy", choices=POLICIES, default="uniform")
+    parser.add_argument("--min-snr-gamma", type=float, default=5.0)
+    parser.add_argument("--compare-objectives", action="store_true")
     args = parser.parse_args()
     config = TrainConfig(steps=args.steps, batch_size=args.batch_size,
                          microbatch_size=args.microbatch_size, device=args.device,
-                         seed=args.seed, schedule_steps=args.schedule_steps)
+                         seed=args.seed, schedule_steps=args.schedule_steps,
+                         loss_policy=args.loss_policy, min_snr_gamma=args.min_snr_gamma)
     print(json.dumps(run_study(config=config, alternative_microbatch=args.alternative_microbatch,
-                               evaluations=args.evaluations), allow_nan=False, indent=2))
+                               evaluations=args.evaluations, compare_objectives=args.compare_objectives), allow_nan=False, indent=2))
 
 
 if __name__ == "__main__":
