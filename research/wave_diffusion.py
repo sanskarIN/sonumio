@@ -260,7 +260,8 @@ def load_checkpoint(path: Path) -> tuple[TinyWaveDenoiser, DiffusionSchedule, di
 def train(*, steps: int = 50, seed: int = 9, output: Path | None = None,
           diffusion_steps: int = DEFAULT_DIFFUSION_STEPS, channels: int = 32,
           manifest: Path | None = None, audio_root: Path | None = None,
-          clips_per_asset: int = 2, mixed_synthetic: bool = False) -> dict:
+          clips_per_asset: int = 2, mixed_synthetic: bool = False,
+          group_balanced: bool = False) -> dict:
     if not 1 <= steps <= 50_000:
         raise ValueError("training steps must be 1..50000")
     if not 0 <= seed < 2 ** 32:
@@ -269,9 +270,16 @@ def train(*, steps: int = 50, seed: int = 9, output: Path | None = None,
     model, schedule = TinyWaveDenoiser(channels), DiffusionSchedule(diffusion_steps)
     if (manifest is None) != (audio_root is None):
         raise ValueError("--manifest and --audio-root must be provided together")
+    if type(group_balanced) is not bool:
+        raise ValueError("group_balanced must be a boolean")
+    if group_balanced and (manifest is None or mixed_synthetic):
+        raise ValueError("Group-balanced training requires a reviewed manifest")
     if mixed_synthetic and manifest is not None:
         raise ValueError("mixed synthetic conditioning cannot be combined with real-recording manifest")
     ingestion_report = None
+    balanced_sampler = None
+    readiness = None
+    eligible_validation = None
     if mixed_synthetic:
         from research.multi_condition import mixed_dataset
         x, labels, fingerprint = mixed_dataset()
@@ -285,6 +293,13 @@ def train(*, steps: int = 50, seed: int = 9, output: Path | None = None,
         eval_labels = torch.from_numpy(loaded["validation"].labels)
         fingerprint = loaded["train"].fingerprint
         eval_fingerprint = loaded["validation"].fingerprint
+        if group_balanced:
+            from research.corpus_readiness import audit_loaded_splits, GroupBalancedSampler
+            readiness = audit_loaded_splits(loaded)
+            if not readiness.report["readiness_gate_passed"]:
+                raise ValueError("Reviewed corpus failed group-balanced training readiness")
+            balanced_sampler = GroupBalancedSampler(loaded, readiness, seed=seed)
+            eligible_validation = torch.tensor(readiness.eligible_indices["validation"], dtype=torch.long)
     else:
         x, labels, fingerprint = dataset()
         eval_x, eval_labels, eval_fingerprint = dataset((101, 102))
@@ -293,21 +308,42 @@ def train(*, steps: int = 50, seed: int = 9, output: Path | None = None,
     losses = []
     model.train()
     for _ in range(steps):
-        batch = torch.randint(0, len(x), (8,))
+        batch = (torch.from_numpy(balanced_sampler.draw(8)) if balanced_sampler is not None
+                 else torch.randint(0, len(x), (8,)))
         optimizer.zero_grad(set_to_none=True)
         loss = training_step(model, schedule, x[batch], labels[batch])
+        if not torch.isfinite(loss):
+            raise ValueError("Nonfinite waveform training loss")
         loss.backward()
-        torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+        torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0, error_if_nonfinite=True)
         optimizer.step()
         losses.append(float(loss.detach()))
     model.eval()
     torch.manual_seed(seed + 1)
     with torch.no_grad():
-        heldout = float(training_step(model, schedule, eval_x, eval_labels, drop_condition=0.0))
+        if eligible_validation is None:
+            heldout = float(training_step(model, schedule, eval_x, eval_labels, drop_condition=0.0))
+        else:
+            # Evaluate only eligible held-out rows and bound the activation
+            # footprint. Weight batch means by their actual row counts.
+            weighted_error = 0.0
+            for indices in eligible_validation.split(8):
+                weighted_error += len(indices) * float(training_step(
+                    model, schedule, eval_x[indices], eval_labels[indices], drop_condition=0.0,
+                ))
+            heldout = weighted_error / len(eligible_validation)
+    if not math.isfinite(heldout):
+        raise ValueError("Nonfinite held-out waveform loss")
     report = {
-        "purpose": "experimental conditional waveform DDPM trained exclusively on DSP samples",
+        "purpose": "experimental conditional waveform DDPM",
         "model_generation": None, "not_production_ready": True,
-        "training_examples": len(x), "heldout_examples": len(eval_x),
+        "training_examples": (len(readiness.eligible_indices["train"]) if readiness else len(x)),
+        "heldout_examples": (len(eligible_validation) if eligible_validation is not None else len(eval_x)),
+        "available_training_examples": len(x), "available_heldout_examples": len(eval_x),
+        "group_balanced_training": group_balanced,
+        "corpus_readiness": readiness.report if readiness else None,
+        "eligible_split_fingerprints": readiness.eligible_fingerprints if readiness else None,
+        "training_sampler": balanced_sampler.describe() if balanced_sampler is not None else None,
         "data_source": ("sonumio-mixed-synthetic-dsp" if mixed_synthetic else
                         "rights-declared-local-wav" if manifest is not None else "sonumio-synthetic-dsp"),
         "conditioning_mode": "multi-label" if mixed_synthetic else "single-class",
@@ -335,6 +371,7 @@ def main() -> None:
     training.add_argument("--audio-root", type=Path, help="Local directory containing manifest WAV paths")
     training.add_argument("--clips-per-asset", type=int, default=2)
     training.add_argument("--mixed-synthetic", action="store_true", help="Experimental one/two-category DSP composition training")
+    training.add_argument("--group-balanced", action="store_true", help="Require reviewed corpus readiness and sample category/group/asset/crop")
     sampling = commands.add_parser("sample")
     sampling.add_argument("--checkpoint", required=True, type=Path)
     sampling.add_argument("--prompt", required=True, help="Single-category or supported two-sound prompt")
@@ -346,7 +383,8 @@ def main() -> None:
         print(json.dumps(train(steps=args.steps, seed=args.seed, output=args.output,
                                manifest=args.manifest, audio_root=args.audio_root,
                                clips_per_asset=args.clips_per_asset,
-                               mixed_synthetic=args.mixed_synthetic), indent=2))
+                               mixed_synthetic=args.mixed_synthetic,
+                               group_balanced=args.group_balanced), indent=2))
     else:
         model, schedule, manifest = load_checkpoint(args.checkpoint)
         mode = manifest.get("training_report", {}).get("conditioning_mode", "single-class")
