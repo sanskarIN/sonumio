@@ -12,6 +12,7 @@ import hashlib
 import json
 import os
 import re
+import stat
 from pathlib import Path, PurePosixPath
 import subprocess
 import sys
@@ -20,6 +21,7 @@ import tempfile
 import tomllib
 import venv
 import wave
+import zipfile
 
 ROOT = Path(__file__).resolve().parent.parent
 REQUIRED = frozenset({
@@ -87,67 +89,121 @@ def resolve_candidate(expected_version: str | None = None) -> SourceCandidate:
     return SourceCandidate(commit, version)
 
 
-def _make_archive(archive: Path, candidate: SourceCandidate) -> None:
+def _make_archive(archive: Path, candidate: SourceCandidate, *, format: str = 'tar.gz') -> None:
+    if format not in ('tar.gz', 'zip'):
+        raise ValueError('Unsupported source archive format')
     # On Windows, core.autocrlf=true can change bytes INSIDE git archive.
     # GitHub source snapshots must preserve committed blobs exactly.
     _run(["git", "-c", "core.autocrlf=false", "-c", "core.eol=lf",
-          "archive", "--format=tar.gz", f"--prefix={candidate.prefix}",
+          "archive", f"--format={format}", f"--prefix={candidate.prefix}",
           f"--output={archive}", candidate.commit], cwd=ROOT)
     if not archive.is_file() or archive.stat().st_size == 0:
         raise RuntimeError("Git source archive was not created")
 
 
-def _audit_archive(archive: Path, candidate: SourceCandidate) -> dict[str, object]:
-    prefix = candidate.prefix
-    seen_paths: set[str] = set()
-    files: dict[str, bytes] = {}
-    total_size = 0
-    with tarfile.open(archive, mode="r:gz") as tar:
-        for member in tar:
-            name = member.name
-            # tarfile normalizes the root directory name without its final '/'.
-            if name == prefix.rstrip("/") and member.isdir():
-                continue
-            if not name.startswith(prefix):
-                raise RuntimeError("Unexpected source archive prefix")
-            relative = name[len(prefix):]
-            if not relative:
-                if not member.isdir():
-                    raise RuntimeError("Archive root is not a directory")
-                continue
-            path = PurePosixPath(relative)
-            if (path.is_absolute() or ".." in path.parts
-                    or "\\" in relative or not path.parts):
-                raise RuntimeError(f"Unsafe archive path: {relative}")
-            if path.as_posix() != relative.rstrip("/"):
-                raise RuntimeError(f"Noncanonical source path: {relative}")
-            folded = path.as_posix().casefold()
-            if folded in seen_paths:
-                raise RuntimeError(f"Duplicate or case-colliding source path: {relative}")
-            seen_paths.add(folded)
-            if any(part.casefold() in BANNED_PARTS for part in path.parts):
-                raise RuntimeError(f"Private or generated directory: {relative}")
-            if member.isdir():
-                continue
-            if not member.isfile():
-                raise RuntimeError(f"Non-regular archive entry: {relative}")
-            if (path.suffix.lower() in BANNED_SUFFIXES
-                    or path.name.lower() in {".env", ".npmrc", "id_rsa", "id_ed25519"}):
-                raise RuntimeError(f"Binary or sensitive artifact: {relative}")
-            if relative in files:
-                raise RuntimeError(f"Duplicate source entry: {relative}")
-            if member.size > MAX_FILE_BYTES:
-                raise RuntimeError(f"Unexpectedly large source entry: {relative}")
-            total_size += member.size
-            if total_size > MAX_TOTAL_BYTES or len(files) >= MAX_FILES:
-                raise RuntimeError("Source archive exceeds review limits")
-            stream = tar.extractfile(member)
-            if stream is None:
-                raise RuntimeError(f"Unreadable source entry: {relative}")
-            data = stream.read(MAX_FILE_BYTES + 1)
-            if len(data) != member.size:
-                raise RuntimeError(f"Source archive entry changed: {relative}")
-            files[relative] = data
+MAX_ARCHIVE_BYTES = 40 * 1024 * 1024
+MAX_ENTRIES = 4000
+
+
+class SourceEntries:
+    """Shared bounded archive path and content accumulator (never extracts)."""
+
+    def __init__(self, candidate):
+        self.prefix = candidate.prefix
+        self.seen_paths = set()
+        self.files = {}
+        self.total_size = 0
+        self.entries = 0
+        self.root_seen = False
+
+    def accept(self, name, *, directory, regular, size, read):
+        self.entries += 1
+        if self.entries > MAX_ENTRIES:
+            raise RuntimeError("Source archive exceeds entry review limits")
+        if name in (self.prefix, self.prefix.rstrip("/")):
+            if not directory or self.root_seen:
+                raise RuntimeError("Invalid or duplicate archive root")
+            self.root_seen = True
+            return
+        if not name.startswith(self.prefix):
+            raise RuntimeError("Unexpected source archive prefix")
+        relative = name[len(self.prefix):]
+        path = PurePosixPath(relative)
+        if (path.is_absolute() or ".." in path.parts or "\\" in relative
+                or not path.parts or any(ord(ch) < 32 or ord(ch) == 127 for ch in relative)
+                or any(":" in part or part.endswith((" ", ".")) for part in path.parts)):
+            raise RuntimeError(f"Unsafe archive path: {relative}")
+        canonical = path.as_posix()
+        if relative != canonical and not (directory and relative == canonical + "/"):
+            raise RuntimeError(f"Noncanonical source path: {relative}")
+        folded = canonical.casefold()
+        if folded in self.seen_paths:
+            raise RuntimeError(f"Duplicate or case-colliding source path: {relative}")
+        self.seen_paths.add(folded)
+        if any(part.casefold() in BANNED_PARTS for part in path.parts):
+            raise RuntimeError(f"Private or generated directory: {relative}")
+        if directory:
+            if size != 0:
+                raise RuntimeError(f"Unexpected directory payload: {relative}")
+            return
+        if not regular:
+            raise RuntimeError(f"Non-regular archive entry: {relative}")
+        if (path.suffix.lower() in BANNED_SUFFIXES
+                or path.name.lower() in {".env", ".npmrc", "id_rsa", "id_ed25519"}):
+            raise RuntimeError(f"Binary or sensitive artifact: {relative}")
+        if not 0 <= size <= MAX_FILE_BYTES:
+            raise RuntimeError(f"Unexpectedly large or invalid source entry: {relative}")
+        self.total_size += size
+        if self.total_size > MAX_TOTAL_BYTES or len(self.files) >= MAX_FILES:
+            raise RuntimeError("Source archive exceeds review limits")
+        data = read()
+        if len(data) != size:
+            raise RuntimeError(f"Source archive entry changed: {relative}")
+        self.files[canonical] = data
+
+
+def _read_archive(archive: Path, candidate: SourceCandidate, format: str) -> SourceEntries:
+    if not 0 < archive.stat().st_size <= MAX_ARCHIVE_BYTES:
+        raise RuntimeError("Compressed source archive exceeds review limits")
+    entries = SourceEntries(candidate)
+    if format == "tar.gz":
+        with tarfile.open(archive, mode="r:gz") as tar:
+            for member in tar:
+                def read():
+                    stream = tar.extractfile(member)
+                    if stream is None:
+                        raise RuntimeError(f"Unreadable source entry: {member.name}")
+                    with stream:
+                        return stream.read(MAX_FILE_BYTES + 1)
+                entries.accept(member.name, directory=member.isdir(), regular=member.isfile(),
+                               size=member.size, read=read)
+    elif format == "zip":
+        with zipfile.ZipFile(archive) as zipped:
+            for member in zipped.infolist():
+                mode = stat.S_IFMT(member.external_attr >> 16)
+                directory = member.is_dir()
+                regular = mode in (0, stat.S_IFREG)
+                if (member.flag_bits & 1 or member.compress_type not in
+                        (zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED)
+                        or (directory and mode not in (0, stat.S_IFDIR))
+                        or (not directory and not regular)):
+                    raise RuntimeError(f"Unsupported or non-regular ZIP entry: {member.filename}")
+                # zipfile truncates names at NUL; compare with original filename.
+                if member.orig_filename != member.filename:
+                    raise RuntimeError("Noncanonical ZIP entry name")
+                def read():
+                    with zipped.open(member) as stream:
+                        return stream.read(MAX_FILE_BYTES + 1)
+                entries.accept(member.filename, directory=directory, regular=regular,
+                               size=member.file_size, read=read)
+    else:
+        raise ValueError("Unsupported source archive format")
+    return entries
+
+
+def _audit_archive(archive: Path, candidate: SourceCandidate, *, format: str = "tar.gz") -> dict[str, object]:
+    entries = _read_archive(archive, candidate, format)
+    files, total_size = entries.files, entries.total_size
     # Check *content* against each canonical Git blob object, not just its
     # length. Same-size archive tampering must never pass this release gate.
     # Support Git repositories using either SHA-1 or SHA-256 object formats.
@@ -209,7 +265,7 @@ def _audit_archive(archive: Path, candidate: SourceCandidate) -> dict[str, objec
         raise RuntimeError("Source archive has no tests")
     return {
         "tag_candidate": candidate.tag, "commit_candidate": candidate.commit,
-        "software_version": candidate.version, "source_files": len(files),
+        "software_version": candidate.version, "archive_format": format, "source_files": len(files),
         "source_bytes": total_size,
         "archive_sha256": hashlib.sha256(archive.read_bytes()).hexdigest(),
         "canonical_blob_bytes_verified": True,
@@ -274,6 +330,13 @@ def main() -> int:
         archive = work / f"sonumio-{candidate.tag}-source.tar.gz"
         _make_archive(archive, candidate)
         result = _audit_archive(archive, candidate)
+        zipped = work / f"sonumio-{candidate.tag}-source.zip"
+        _make_archive(zipped, candidate, format="zip")
+        zip_result = _audit_archive(zipped, candidate, format="zip")
+        if (result['source_files'], result['source_bytes']) != (zip_result['source_files'], zip_result['source_bytes']):
+            raise RuntimeError('Source archive formats disagree')
+        result.update({'zip_archive_sha256': zip_result['archive_sha256'],
+                       'both_source_formats_verified': True})
         if args.smoke:
             result.update(_smoke_archive(archive, work, candidate))
         print(json.dumps(result, sort_keys=True))
