@@ -25,6 +25,7 @@ def test_candidate_git_archive_matches_every_source_git_blob(tmp_path: Path):
     assert report["source_files"] >= len(gate.REQUIRED)
     assert report["canonical_blob_bytes_verified"] is True
     assert report["canonical_blob_hashes_verified"] is True
+    assert report["canonical_directory_tree_verified"] is True
     assert report["binary_or_model_artifacts"] == 0
     assert report["published"] is False
 
@@ -146,6 +147,7 @@ def test_zip_and_tar_sources_match_same_pinned_tree(tmp_path):
         assert a[key] == b[key]
     assert b["archive_format"] == "zip"
     assert b["canonical_blob_hashes_verified"]
+    assert b["canonical_directory_tree_verified"]
     assert a["archive_sha256"] != b["archive_sha256"]
 
 
@@ -213,3 +215,36 @@ def test_entry_count_bound(monkeypatch, tmp_path):
             writer.writestr(candidate.prefix + f"dir{i}/", b"")
     with pytest.raises(RuntimeError, match="entry review limits"):
         gate._audit_archive(archive, candidate, format="zip")
+
+
+@pytest.mark.parametrize("format", ["tar.gz", "zip"])
+@pytest.mark.parametrize("mutation", ["extra", "file_as_parent", "missing_root", "missing_directory"])
+def test_archive_directory_topology_matches_committed_tree(tmp_path, format, mutation):
+    candidate = gate.resolve_candidate()
+    original = tmp_path / ("original." + format)
+    changed = tmp_path / ("changed." + format)
+    gate._make_archive(original, candidate, format=format)
+
+    def omit(name):
+        return ((mutation == "missing_root" and name.rstrip("/") == candidate.prefix.rstrip("/"))
+                or (mutation == "missing_directory" and name.rstrip("/") == candidate.prefix + "src"))
+
+    extra = {"extra": "untracked-empty", "file_as_parent": "README.md/child"}.get(mutation)
+    if format == "zip":
+        with zipfile.ZipFile(original) as reader, zipfile.ZipFile(changed, "w") as writer:
+            for member in reader.infolist():
+                if not omit(member.filename):
+                    writer.writestr(member, reader.read(member))
+            if extra is not None:
+                writer.writestr(candidate.prefix + extra + "/", b"")
+    else:
+        with tarfile.open(original, "r:gz") as reader, tarfile.open(changed, "w:gz") as writer:
+            for member in reader:
+                if not omit(member.name):
+                    writer.addfile(member, reader.extractfile(member) if member.isfile() else None)
+            if extra is not None:
+                member = tarfile.TarInfo(candidate.prefix + extra)
+                member.type = tarfile.DIRTYPE
+                writer.addfile(member)
+    with pytest.raises(RuntimeError, match="directories differ from the committed tree"):
+        gate._audit_archive(changed, candidate, format=format)
