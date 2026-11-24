@@ -6,6 +6,7 @@ on:
       - 'research/transform_*codec*.py'
       - 'research/transform_quantization.py'
       - 'research/quantized_transform_study.py'
+      - 'research/codec_noise_controls.py'
       - 'research/frozen_transform*.py'
       - 'research/velocity*.py'
       - 'research/text_audio.py'
@@ -16,6 +17,7 @@ on:
       - 'src/sonumio/engines/procedural.py'
       - 'tests/test_transform_audio_codec.py'
       - 'tests/test_transform_quantization.py'
+      - 'tests/test_codec_noise_controls.py'
       - 'tests/test_frozen_transform_latent.py'
       - '.github/workflows/transform-codec-ceiling.yml'
   push:
@@ -25,6 +27,7 @@ on:
       - 'src/sonumio/**'
       - 'tests/test_transform_audio_codec.py'
       - 'tests/test_transform_quantization.py'
+      - 'tests/test_codec_noise_controls.py'
       - 'tests/test_frozen_transform_latent.py'
       - '.github/workflows/transform-codec-ceiling.yml'
 
@@ -49,7 +52,7 @@ jobs:
           python -m pip install -e '.[test]' 'scipy>=1.12,<2'
           python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
       - name: Test transform reconstruction and evaluation isolation
-        run: python -m pytest -q tests/test_transform_audio_codec.py tests/test_transform_quantization.py tests/test_frozen_transform_latent.py
+        run: python -m pytest -q tests/test_transform_audio_codec.py tests/test_transform_quantization.py tests/test_frozen_transform_latent.py tests/test_codec_noise_controls.py
       - name: Run fixed twenty-configuration scalar budget study
         run: |
           python -m research.transform_codec_study > "$RUNNER_TEMP/transform-study.json"
@@ -92,6 +95,10 @@ jobs:
           assert not report["production_bitrate_established"]
           assert not report["audio_weights_or_payload_files_saved"]
           assert report["panel_fingerprints"]["confirmation"]["recordings"] == 24
+          assert report["noise_panel_fingerprints"]["validation"]["recordings"] == 21
+          assert report["noise_panel_fingerprints"]["confirmation"]["recordings"] == 28
+          assert report["selection_uses_source_scores"] == (report["reference_gate_passed"] and report["validation_original_noise_accepted"] == 0)
+          assert report["selection_uses_noise_scores"] == report["selection_uses_source_scores"]
           assert set(report["confirmation"]) == {row["candidate_id"] for row in report["selection"] if row["candidate_id"] is not None}
           candidates = {row["id"]: row for row in report["validation_candidates"]}
           for row in report["selection"]:
@@ -110,6 +117,12 @@ jobs:
                     "unquantized confirmation accepted", floating["reconstructed_correct_accepted"],
                     "confirmation relative error", quantized["numerical"]["relative_squared_error"],
                     "saturation", quantized["quantization"]["saturated_fraction"])
+              print("noise control", name, "validation accepted", validation["noise_controls"]["reconstructed_accepted"],
+                    "confirmation original", quantized["noise_controls"]["original_accepted"],
+                    "confirmation quantized", quantized["noise_controls"]["reconstructed_accepted"],
+                    "confirmation unquantized", floating["noise_controls"]["reconstructed_accepted"],
+                    "new false acceptances", quantized["noise_controls"]["new_false_acceptances"],
+                    "noise screen passed", confirmed["confirmation_noise_screen_passed"])
           PY
       - name: Gate continuous transform latent diffusion on fresh source and noise controls
         run: |
