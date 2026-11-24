@@ -60,6 +60,9 @@ def test_single_frame_and_duplicate_finalization_are_well_defined():
     assert result.max_step_at_frame is None
     assert result.max_step_channel is None
     assert result.over_limit_samples == 0
+    assert result.over_limit_by_channel == (0, 0)
+    assert result.first_over_limit_frame is None
+    assert result.first_over_limit_channel is None
     assert result.as_dict()["over_limit_fraction"] == 0.0
     assert result.passed
     with pytest.raises(AudioContractError, match="already finalized"):
@@ -256,3 +259,93 @@ def test_randomized_frame_step_locations_match_numpy_reference():
                 ))
                 cases += 1
     assert cases == 60
+
+
+@pytest.mark.parametrize("chunk", [1, 2, 3, 5, 11])
+def test_first_threshold_breach_and_channel_counts_across_packets(chunk):
+    """The first violation is a separate event from the global maximum."""
+    source = np.array([
+        [0, 0, .5, .5, -.5, 0, 0, 0],
+        [0, .75, .75, -.25, -.25, .75, .75, 0],
+    ], dtype=np.float32)
+    acc = StreamingFrameTransitionAccumulator(
+        8000, 2, expected_frames=8, max_allowed_step=.75,
+    )
+    for start in range(0, 8, chunk):
+        acc.update(FramePacket(8000, start, source[:, start:start + chunk]))
+    report = acc.finalize()
+    assert report.over_limit_samples == 3
+    assert report.over_limit_by_channel == (1, 2)
+    assert report.first_over_limit_frame == 3
+    assert report.first_over_limit_channel == 1
+    assert report.max_adjacent_step == 1.0
+    assert report.as_dict()["over_limit_by_channel"] == [1, 2]
+    assert report.as_dict()["first_over_limit_frame"] == 3
+    assert report.as_dict()["first_over_limit_channel"] == 1
+    assert report.as_dict()["over_limit_fraction"] == pytest.approx(3 / 14)
+    assert not report.passed
+
+
+@pytest.mark.parametrize("packet_frames", [1, 3, 8])
+@pytest.mark.parametrize("maximum", [None, 0., .5, 1.0, 2.0])
+def test_threshold_observability_and_strict_comparison_are_explicit(
+    packet_frames, maximum,
+):
+    """Equality to the ceiling passes; unconfigured limits emit null counts."""
+    source = np.array([
+        [0., .5, 1., 0., 0., .5],
+        [0., -.5, -.5, .5, 1., 1.],
+    ], dtype=np.float32)
+    raw = np.abs(np.diff(source.astype(np.float64), axis=1))
+    acc = StreamingFrameTransitionAccumulator(
+        8000, 2, expected_frames=source.shape[1], max_allowed_step=maximum,
+    )
+    for start in range(0, source.shape[1], packet_frames):
+        acc.update(FramePacket(
+            8000, start, source[:, start:start + packet_frames],
+        ))
+    result = acc.finalize()
+    exported = result.as_dict()
+    if maximum is None:
+        assert result.over_limit_by_channel is None
+        assert result.over_limit_samples is None
+        assert exported["first_over_limit_frame"] is None
+        assert exported["first_over_limit_channel"] is None
+        assert exported["over_limit_by_channel"] is None
+        assert result.passed is True
+    else:
+        mask = raw > maximum
+        expected_counts = tuple(int(v) for v in np.count_nonzero(mask, axis=1))
+        assert result.over_limit_by_channel == expected_counts
+        assert result.over_limit_samples == int(np.count_nonzero(mask))
+        assert sum(result.over_limit_by_channel) == result.over_limit_samples
+        assert exported["over_limit_by_channel"] == list(expected_counts)
+        if np.any(mask):
+            first = int(np.argmax(np.any(mask, axis=0)))
+            channel = int(np.argmax(mask[:, first]))
+            assert result.first_over_limit_frame == first + 1
+            assert result.first_over_limit_channel == channel
+            assert exported["first_over_limit_frame"] == first + 1
+            assert exported["first_over_limit_channel"] == channel
+            assert not result.passed
+        else:
+            assert result.first_over_limit_frame is None
+            assert result.first_over_limit_channel is None
+            assert result.passed is True
+
+
+@pytest.mark.parametrize("chunk", [1, 2, 4, 10])
+def test_simultaneous_channel_breaches_choose_lowest_channel(chunk):
+    source = np.array([[0., 1., 1., 0.], [0., -1., -1., 0.]], dtype=np.float32)
+    acc = StreamingFrameTransitionAccumulator(
+        8000, 2, expected_frames=4, max_allowed_step=.75,
+    )
+    for start in range(0, 4, chunk):
+        acc.update(FramePacket(8000, start, source[:, start:start + chunk]))
+    result = acc.finalize()
+    assert result.over_limit_samples == 4
+    assert result.over_limit_by_channel == (2, 2)
+    assert result.first_over_limit_frame == 1
+    assert result.first_over_limit_channel == 0
+    assert result.max_step_at_frame == 1
+    assert result.max_step_channel == 0

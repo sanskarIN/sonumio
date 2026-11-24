@@ -29,6 +29,9 @@ class FrameTransitionReport:
     max_step_channel: int | None
     max_allowed_step: float | None
     over_limit_samples: int | None
+    over_limit_by_channel: tuple[int, ...] | None
+    first_over_limit_frame: int | None
+    first_over_limit_channel: int | None
     protocol: str = "sonumio-pcm-adjacent-step-v1"
 
     @property
@@ -49,6 +52,12 @@ class FrameTransitionReport:
             "max_step_channel": self.max_step_channel,
             "max_allowed_step": self.max_allowed_step,
             "over_limit_samples": self.over_limit_samples,
+            "over_limit_by_channel": (
+                None if self.over_limit_by_channel is None
+                else list(self.over_limit_by_channel)
+            ),
+            "first_over_limit_frame": self.first_over_limit_frame,
+            "first_over_limit_channel": self.first_over_limit_channel,
             "over_limit_fraction": (
                 None if self.over_limit_samples is None
                 else 0.0 if samples == 0
@@ -96,6 +105,9 @@ class StreamingFrameTransitionAccumulator:
         self._max_step_at_frame: int | None = None
         self._max_step_channel: int | None = None
         self._over = 0
+        self._over_by_channel = np.zeros(channels, dtype=np.int64)
+        self._first_over_limit_frame: int | None = None
+        self._first_over_limit_channel: int | None = None
         self._finished = False
 
     def _take(self, steps: np.ndarray, first_stop_frame: int) -> None:
@@ -114,7 +126,19 @@ class StreamingFrameTransitionAccumulator:
             self._maximum, np.max(steps, axis=1),
         )
         if self.max_allowed_step is not None:
-            self._over += int(np.count_nonzero(steps > self.max_allowed_step))
+            # The mask is per-packet scratch, not a whole-source timeline.
+            # Count each channel independently; threshold is inclusive.
+            breaches = steps > self.max_allowed_step
+            self._over += int(np.count_nonzero(breaches))
+            self._over_by_channel += np.count_nonzero(breaches, axis=1)
+            if self._first_over_limit_frame is None and np.any(breaches):
+                # Earliest later-frame index wins. Ties at that frame are
+                # assigned to the lowest-numbered channel.
+                offset = int(np.argmax(np.any(breaches, axis=0)))
+                self._first_over_limit_frame = first_stop_frame + offset
+                self._first_over_limit_channel = int(
+                    np.argmax(breaches[:, offset])
+                )
 
     def update(self, packet: FramePacket) -> None:
         if self._finished:
@@ -160,4 +184,10 @@ class StreamingFrameTransitionAccumulator:
             over_limit_samples=(
                 None if self.max_allowed_step is None else self._over
             ),
+            over_limit_by_channel=(
+                None if self.max_allowed_step is None
+                else tuple(int(count) for count in self._over_by_channel)
+            ),
+            first_over_limit_frame=self._first_over_limit_frame,
+            first_over_limit_channel=self._first_over_limit_channel,
         )
