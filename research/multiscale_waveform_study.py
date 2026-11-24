@@ -19,6 +19,7 @@ from torch.nn import functional as F
 
 from research.architecture_compare import _audio_hashes
 from research.generated_source_grounding import LANGUAGES, _summary
+from research.heldout_caption_panel import evaluate_caption_panel
 from research.latent_audio import FRAMES, TRAIN_SEEDS, VALIDATION_SEEDS, synthetic_bilingual_waves
 from research.multiscale_waveform import MultiscaleWaveDenoiser, spectral_clean_loss
 from research.open_set_source_probe import evaluate_probe, fit_probe, reference_panels
@@ -180,9 +181,13 @@ def run_study(*, seed=17, train_steps=64, evaluations=8, sampling_seeds=(301,), 
             heldout = _heldout(model, validation, schedule, seed=seed + 2)
             generated = (_generate(model, schedule, probe, evaluations=evaluations, sampling_seeds=sampling_seeds)
                          if holdout["gate"]["passed"] else None)
+            lexical = (evaluate_caption_panel(model, schedule, probe, evaluations=evaluations,
+                                              seed=sampling_seeds[0])
+                       if holdout["gate"]["passed"] else None)
             if state_sha256(model) != training["trained_state_sha256"]:
                 raise ValueError("Evaluation mutated parameters")
-            arms[name] = {"training": training, "heldout": heldout, "generated": generated}
+            arms[name] = {"training": training, "heldout": heldout, "generated": generated,
+                          "heldout_caption_panel": lexical}
     if len({arm["training"]["input_trace_sha256"] for arm in arms.values()}) != 1:
         raise ValueError("Paired training inputs diverged")
     if (arms["multiscale_velocity"]["training"]["initial_state_sha256"]
