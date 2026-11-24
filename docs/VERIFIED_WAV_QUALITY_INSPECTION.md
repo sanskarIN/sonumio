@@ -87,6 +87,23 @@ is used as the regression oracle across bit depths and layouts.
 No source may be described as safe, licensed, original or perceptually good on
 the strength of these checks. Human and provenance review remain separate.
 
+## Exact integer PCM endpoint detection
+
+The report also contains `pcm_rails` with separate positive and negative
+full-scale **integer** counts, their combined fraction of all channel samples,
+and `audible_clipping_proven: false`. Rail occupancy can suggest saturation
+but is not definitive proof of distortion: intentional waveforms may contain
+endpoint values. This count is calculated **before** PCM decoding to float32.
+It is therefore accurate even for positive 8/16/24-bit maxima that decode
+below +1.0 and for 32-bit adjacent integer values that round together in
+float32. The existing `signal_health.clipping_fraction` remains an
+independent *decoded-sample* criterion (absolute float >= 1.0), preserving
+the first-party quality-report protocol. Do not confuse the two metrics.
+
+The rail counts stay **unverified until the entire file is authenticated**,
+just like the source SHA256. Their calculation uses constant-sized packet
+storage and two integer counters, regardless of recording duration.
+
 ## Reader identity and race safety
 
 The source reader preflights the exact leaf pathname without following links.
