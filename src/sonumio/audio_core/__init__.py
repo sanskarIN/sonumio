@@ -34,6 +34,7 @@ from .stream_dither import StreamDitherQuantizer, STREAM_TPDF_VERSION
 from .wave_reader import WavPacketReader, WavPacketInfo
 from .wave_pipeline import WavProcessingConfig, WavProcessingResult, process_wav_file
 from .stream_quality import StreamingQualityAccumulator, VerifiedWavQuality, inspect_wav_quality
+from .quality_timeline import QualityWindow, QualityTimeline, StreamingQualityTimeline
 
 from .streaming import (
     FramePacket, FramerConfig, PacketCollector, StreamingFramer,
@@ -54,6 +55,7 @@ __all__ = [
     "WavPacketReader", "WavPacketInfo",
     "WavProcessingConfig", "WavProcessingResult", "process_wav_file",
     "StreamingQualityAccumulator", "VerifiedWavQuality", "inspect_wav_quality",
+    "QualityWindow", "QualityTimeline", "StreamingQualityTimeline",
     "FramePacket",
     "FramerConfig",
     "PacketCollector",
