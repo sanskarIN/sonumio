@@ -182,7 +182,7 @@ def test_group_balanced_mode_trains_with_audited_eligible_indices(monkeypatch):
     splits = synthetic_splits()
     # Keep all categories covered while excluding a known silent crop.
     splits["train"].clips[0] = 0
-    splits["validation"].clips[0] = 0
+    splits["validation"].clips[0] = 1e-6
     monkeypatch.setattr(audio_dataset, "load_reviewed_splits",
                         lambda *args, **kwargs: (splits, {"wav_bytes_verified": True}))
     options = dict(steps=2, channels=8, diffusion_steps=8, seed=17,
