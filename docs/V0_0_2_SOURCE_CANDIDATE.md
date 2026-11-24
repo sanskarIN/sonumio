@@ -26,8 +26,12 @@ metadata. Keep historical release references intact.
 The reusable source gate reads the version from the committed Python
 package metadata and pins HEAD to one full Git object ID before exporting.
 It validates the same commit's file tree and every blob hash, then checks
-the Python module and private web package versions. Duplicate or
-case-colliding archive paths and nonregular entries are rejected.
+the Python module and private web package versions. Both Git tar.gz and ZIP exports are checked against the same pinned blob
+tree; their file counts and uncompressed byte counts must agree. Duplicate
+or case-colliding paths, nonregular entries, encrypted or unsupported ZIP
+members, and oversized archives are rejected. The isolated installation
+smoke uses the tar.gz export; identical canonical source content is
+verified independently in ZIP. No archive extraction is used during audit.
 The manual CI dispatch requires the intended numeric package version.
 No source archive or generated audio is uploaded by the gate.
 
