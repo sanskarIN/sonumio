@@ -64,6 +64,19 @@ copyright verification, or a claim of neural-audio quality. For safety
 limits, PCM formats, reproducibility and benchmarks, read
 [the audio-core architecture record](docs/AUDIO_CORE_DEEP_DEVELOPMENT.md).
 
+
+### Verified WAV inspection (numerical signal health)
+
+Use `sonumio wav-inspect existing.wav --expected-sha256 SHA256` to compute
+bounded-memory signal-health statistics for canonical integer PCM WAV files,
+including recordings longer than the in-memory audio-core limit. The inspection
+outputs JSON **only after complete file verification**; malformed or changing
+sources fail with no JSON. You can set explicit thresholds such as
+`--max-peak 0.95 --fail-on-warnings`. This is not a perceptual or
+prompt-adherence measurement. See
+[verified WAV inspection](docs/VERIFIED_WAV_QUALITY_INSPECTION.md).
+
+
 ## Original-model research scaffolding (development only)
 
 From the repository root, after installing the optional PyTorch research dependencies:
