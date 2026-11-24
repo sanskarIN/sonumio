@@ -200,3 +200,30 @@ def test_cli_inspect_rejects_unsupported_wav_without_partial_json(tmp_path, caps
     out = capsys.readouterr()
     assert out.out == ""
     assert out.err
+
+
+def test_single_frame_boundary_definition_matches_existing_quality():
+    one = FramePacket(8000, 0, np.array([0.8], dtype=np.float32))
+    accumulator = StreamingQualityAccumulator(8000, 1, expected_frames=1)
+    accumulator.update(one)
+    report = accumulator.finalize()
+    baseline = measure_quality(make_buffer(one.samples, 8000))
+    assert report.boundary_jump == baseline.boundary_jump == 0.0
+
+
+def test_inspection_handles_longer_than_in_memory_audio_limit(tmp_path):
+    rate = 8000
+    count = 121 * rate
+    path = tmp_path / "long-quality.wav"
+    with WavPacketWriter(path, WavPacketSpec(rate, 1, count)) as writer:
+        for start in range(0, count, 8000):
+            writer.push(FramePacket(rate, start, np.full(8000, .125, dtype=np.float32)))
+        written = writer.finish()
+    report = inspect_wav_quality(
+        path, packet_frames=17_777, expected_sha256=written.wav_sha256
+    )
+    assert report.info.frames == count
+    assert report.signal_health.rms_amplitude == pytest.approx(.125, abs=4e-5)
+    assert report.signal_health.active_fraction == 1.0
+    assert report.signal_health.clipping_fraction == 0.0
+    assert report.source_sha256 == written.wav_sha256
