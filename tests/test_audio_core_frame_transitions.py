@@ -136,7 +136,7 @@ def test_verified_wav_continuity_measures_exact_cross_packet_step(
     assert report["source_sha256"] == digest
     assert report["source_verified"] is True
     assert report["inspection_controls"]["continuity_enabled"] is True
-    assert report["inspection_controls"]["max_adjacent_step"] == .9
+    assert report["inspection_controls"]["max_adjacent_step"] == 1.1
     assert report["frame_continuity"]["over_limit_samples"] == 1
     assert report["frame_continuity"]["audible_click_proven"] is False
 
