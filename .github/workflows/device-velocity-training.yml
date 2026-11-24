@@ -15,6 +15,7 @@ on:
       - 'src/sonumio/engines/procedural.py'
       - 'tests/test_device_velocity_training.py'
       - 'tests/test_velocity_loss_weights.py'
+      - 'tests/test_device_sampling_policies.py'
       - '.github/workflows/device-velocity-training.yml'
   push:
     branches: [main]
@@ -23,6 +24,7 @@ on:
       - 'research/velocity_loss_weights.py'
       - 'tests/test_device_velocity_training.py'
       - 'tests/test_velocity_loss_weights.py'
+      - 'tests/test_device_sampling_policies.py'
       - '.github/workflows/device-velocity-training.yml'
 
 permissions:
@@ -45,7 +47,7 @@ jobs:
           python -m pip install -e '.[test]' 'scipy>=1.12,<2'
           python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
       - name: Test logical batches, gradients and device selection
-        run: python -m pytest -q -rs tests/test_device_velocity_training.py tests/test_velocity_loss_weights.py
+        run: python -m pytest -q -rs tests/test_device_velocity_training.py tests/test_velocity_loss_weights.py tests/test_device_sampling_policies.py
       - name: Compare two microbatch partitions with two independent initializations
         run: |
           for seed in 17 29; do
@@ -115,4 +117,30 @@ jobs:
                   if report["reference_probe"]["gate"]["passed"]:
                       assert len(arm["generated"]["cases"]) == 12
                       print("generated", seed, name, json.dumps(arm["generated"]["by_language"], sort_keys=True))
+          PY
+      - name: Verify stratified bilingual paired training
+        run: |
+          python -m research.device_velocity_study --device cpu --seed 17 \
+            --steps 16 --batch-size 4 --microbatch-size 3 --alternative-microbatch 1 \
+            --schedule-steps 8 --evaluations 4 --timestep-sampling stratified \
+            --caption-sampling bilingual_pair > "$RUNNER_TEMP/paired-sampling.json"
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          report = json.loads((Path(os.environ["RUNNER_TEMP"]) / "paired-sampling.json").read_text())
+          assert report["paired_initialization_and_inputs"]
+          arms = report["arms"]
+          assert set(arms) == {"reference_cpu", "alternative_cpu"}
+          for name, arm in arms.items():
+              plan = arm["training"]["batch_plan"]
+              assert plan["timestep_histogram"] == [8] * 8
+              assert plan["timestep_count_spread"] == 0
+              assert plan["distinct_caption_rows_seen"] % 2 == 0
+              assert plan["caption_sampling"] == "bilingual_pair"
+              assert plan["timestep_sampling"] == "stratified"
+              print("paired sampling", name, json.dumps(plan, sort_keys=True))
+              print("heldout", name, json.dumps(arm["heldout"], sort_keys=True))
+          assert arms["reference_cpu"]["training"]["batch_plan"] == arms["alternative_cpu"]["training"]["batch_plan"]
           PY
