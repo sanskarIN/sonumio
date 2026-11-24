@@ -7,10 +7,9 @@ release, uploading model weights, or claiming a trained Sonumio-1 model.
 ## Scope and integration
 
 - Merge only reviewed, passing research changes intended for v0.0.2.
-- The reviewed-corpus readiness and multiscale waveform research are
-  already integrated. Complete verification of the transform-codec,
-  device-aware training and reversible-waveform research before deciding
-  their inclusion.
+- The candidate includes the currently integrated research and offline audio
+  processing work, including verified quiet intervals, channel relationships,
+  block-spectrum diagnostics, and the reproducible procedural demo.
 - Preserve failed research findings in the record. Passing a regression
   suite is not equivalent to passing a model quality gate.
 - Do not introduce new public model identifiers for experimental weights.
@@ -18,7 +17,7 @@ release, uploading model weights, or claiming a trained Sonumio-1 model.
 
 ## Prepare an exact candidate
 
-Once the scope is frozen, update the package version consistently in
+The preparation branch updates the package version consistently in
 `pyproject.toml`, `src/sonumio/__init__.py` and `web/package.json`.
 Review any other version assertions, installation examples and user-facing
 metadata. Keep historical release references intact.
@@ -29,9 +28,9 @@ It validates the same commit's file tree and every blob hash, then checks
 the Python module and private web package versions. Both Git tar.gz and ZIP exports are checked against the same pinned blob
 tree; their file counts and uncompressed byte counts must agree. Duplicate
 or case-colliding paths, nonregular entries, encrypted or unsupported ZIP
-members, and oversized archives are rejected. The isolated installation
-smoke uses the tar.gz export; identical canonical source content is
-verified independently in ZIP. No archive extraction is used during audit.
+members, and oversized archives are rejected. Each archive is independently installed in a fresh virtual environment.
+The smoke checks installed version, model registry, WAV generation, SHA-verified
+inspection, spectrum energy against decoded PCM, and repeatable demo bytes. No archive extraction is used during audit.
 The manual CI dispatch requires the intended numeric package version.
 No source archive or generated audio is uploaded by the gate.
 
@@ -41,9 +40,11 @@ Run from the assembled, committed candidate:
 python scripts/source_release_gate.py --expected-version 0.0.2 --smoke
 ```
 
-The command deliberately fails on a current v0.0.1 checkout. Until the
-version bump is reviewed, use the existing version (or omit the optional
-expected-version argument for ordinary PR checks).
+The command deliberately fails if the committed version differs. CI also
+runs the gate after main-branch pushes. Review both isolated installation
+reports and the exact commit before approval. Independent dependency
+resolution may produce different NumPy versions, so demo hashes are
+compared within each environment, not unconditionally across machines.
 
 ## Release acceptance
 
@@ -54,7 +55,9 @@ and generates a valid short PCM WAV via the procedural engine. Review
 the archive exclusions; this is a bounded source-artifact audit, not a
 comprehensive secret scanner.
 
-Record the exact main commit and workflow evidence. Present a short
+Record the exact main commit and workflow evidence. The release branch
+and PR are preparation only; successful PR CI does not substitute for
+post-merge candidate evidence. Present a short
 source-only release note and request explicit owner approval tied to that
 commit. Only after approval may the v0.0.2 GitHub pre-release be published.
 No binary installers, generated audio or model weights belong in it.
