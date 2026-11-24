@@ -1,4 +1,4 @@
-"""Audit and smoke-test a v0.0.1 source archive without publishing it.
+"""Audit and smoke-test a pinned Sonumio source candidate without publishing it.
 
 Run: python scripts/source_release_gate.py --smoke
 Uses tracked Git source only, then a disposable virtual environment.
@@ -6,9 +6,12 @@ Uses tracked Git source only, then a disposable virtual environment.
 from __future__ import annotations
 
 import argparse
+import ast
+from dataclasses import dataclass
 import hashlib
 import json
 import os
+import re
 from pathlib import Path, PurePosixPath
 import subprocess
 import sys
@@ -18,9 +21,6 @@ import tomllib
 import venv
 import wave
 
-VERSION = "0.0.1"
-TAG = "v0.0.1"
-PREFIX = f"sonumio-{TAG}/"
 ROOT = Path(__file__).resolve().parent.parent
 REQUIRED = frozenset({
     "pyproject.toml", "README.md", "LICENSE",
@@ -49,28 +49,68 @@ def _run(args: list[str], *, cwd: Path,
                           stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
 
 
-def _make_archive(archive: Path) -> None:
+def _validate_version(version: str) -> str:
+    if (type(version) is not str
+            or not re.fullmatch(r"(?:0|[1-9][0-9]{0,5})\.(?:0|[1-9][0-9]{0,5})\.(?:0|[1-9][0-9]{0,5})", version)):
+        raise RuntimeError("Expected canonical numeric source version (major.minor.patch)")
+    return version
+
+
+@dataclass(frozen=True)
+class SourceCandidate:
+    commit: str
+    version: str
+
+    def __post_init__(self):
+        if type(self.commit) is not str or not re.fullmatch(r"(?:[a-f0-9]{40}|[a-f0-9]{64})", self.commit):
+            raise RuntimeError("Expected full pinned Git commit hash")
+        _validate_version(self.version)
+
+    @property
+    def tag(self) -> str:
+        return f"v{self.version}"
+
+    @property
+    def prefix(self) -> str:
+        return f"sonumio-{self.tag}/"
+
+
+def resolve_candidate(expected_version: str | None = None) -> SourceCandidate:
+    if expected_version is not None:
+        _validate_version(expected_version)
+    commit = _run(["git", "rev-parse", "--verify", "HEAD^{commit}"], cwd=ROOT).stdout.strip()
+    source = _run(["git", "show", f"{commit}:pyproject.toml"], cwd=ROOT).stdout
+    project = tomllib.loads(source)["project"]
+    version = _validate_version(project.get("version"))
+    if expected_version is not None and version != expected_version:
+        raise RuntimeError(f"Expected source version {expected_version}, found {version}")
+    return SourceCandidate(commit, version)
+
+
+def _make_archive(archive: Path, candidate: SourceCandidate) -> None:
     # On Windows, core.autocrlf=true can change bytes INSIDE git archive.
     # GitHub source snapshots must preserve committed blobs exactly.
     _run(["git", "-c", "core.autocrlf=false", "-c", "core.eol=lf",
-          "archive", "--format=tar.gz", f"--prefix={PREFIX}",
-          f"--output={archive}", "HEAD"], cwd=ROOT)
+          "archive", "--format=tar.gz", f"--prefix={candidate.prefix}",
+          f"--output={archive}", candidate.commit], cwd=ROOT)
     if not archive.is_file() or archive.stat().st_size == 0:
         raise RuntimeError("Git source archive was not created")
 
 
-def _audit_archive(archive: Path) -> dict[str, object]:
+def _audit_archive(archive: Path, candidate: SourceCandidate) -> dict[str, object]:
+    prefix = candidate.prefix
+    seen_paths: set[str] = set()
     files: dict[str, bytes] = {}
     total_size = 0
     with tarfile.open(archive, mode="r:gz") as tar:
         for member in tar:
             name = member.name
             # tarfile normalizes the root directory name without its final '/'.
-            if name == PREFIX.rstrip("/") and member.isdir():
+            if name == prefix.rstrip("/") and member.isdir():
                 continue
-            if not name.startswith(PREFIX):
+            if not name.startswith(prefix):
                 raise RuntimeError("Unexpected source archive prefix")
-            relative = name[len(PREFIX):]
+            relative = name[len(prefix):]
             if not relative:
                 if not member.isdir():
                     raise RuntimeError("Archive root is not a directory")
@@ -79,7 +119,13 @@ def _audit_archive(archive: Path) -> dict[str, object]:
             if (path.is_absolute() or ".." in path.parts
                     or "\\" in relative or not path.parts):
                 raise RuntimeError(f"Unsafe archive path: {relative}")
-            if any(part in BANNED_PARTS for part in path.parts):
+            if path.as_posix() != relative.rstrip("/"):
+                raise RuntimeError(f"Noncanonical source path: {relative}")
+            folded = path.as_posix().casefold()
+            if folded in seen_paths:
+                raise RuntimeError(f"Duplicate or case-colliding source path: {relative}")
+            seen_paths.add(folded)
+            if any(part.casefold() in BANNED_PARTS for part in path.parts):
                 raise RuntimeError(f"Private or generated directory: {relative}")
             if member.isdir():
                 continue
@@ -111,11 +157,13 @@ def _audit_archive(archive: Path) -> dict[str, object]:
     if object_format not in ("sha1", "sha256"):
         raise RuntimeError("Unsupported Git object format for release audit")
     tracked: dict[str, tuple[int, str]] = {}
-    tree_output = _run(["git", "ls-tree", "-r", "-l", "HEAD"], cwd=ROOT).stdout
-    for line in tree_output.splitlines():
+    tree_output = _run(["git", "ls-tree", "-r", "-l", "-z", candidate.commit], cwd=ROOT).stdout
+    for line in tree_output.split("\0"):
+        if not line:
+            continue
         header, separator, filename = line.partition("\t")
         pieces = header.split()
-        if separator != "\t" or len(pieces) != 4 or pieces[1] != "blob":
+        if separator != "\t" or len(pieces) != 4 or pieces[1] != "blob" or pieces[0] not in ("100644", "100755"):
             raise RuntimeError("Unexpected Git tree entry in source audit")
         if filename in tracked:
             raise RuntimeError(f"Duplicate Git tree entry: {filename}")
@@ -135,12 +183,18 @@ def _audit_archive(archive: Path) -> dict[str, object]:
     if missing:
         raise RuntimeError(f"Missing buildable-source entries: {missing}")
     project = tomllib.loads(files["pyproject.toml"].decode("utf-8"))["project"]
-    if project.get("name") != "sonumio" or project.get("version") != VERSION:
-        raise RuntimeError("Python package version is not exactly 0.0.1")
+    if project.get("name") != "sonumio" or project.get("version") != candidate.version:
+        raise RuntimeError("Python package metadata differs from pinned source candidate")
     if project.get("license") != "Apache-2.0":
         raise RuntimeError("Sonumio source-license metadata changed")
     package_init = files["src/sonumio/__init__.py"].decode("utf-8")
-    if f'__version__ = "{VERSION}"' not in package_init:
+    declarations = [
+        node.value for node in ast.parse(package_init).body
+        if isinstance(node, ast.Assign)
+        and any(isinstance(target, ast.Name) and target.id == "__version__" for target in node.targets)
+    ]
+    if (len(declarations) != 1 or not isinstance(declarations[0], ast.Constant)
+            or declarations[0].value != candidate.version):
         raise RuntimeError("Python module version differs from pyproject.toml")
     api_source = files["src/sonumio/api.py"].decode("utf-8")
     if "version=__version__" not in api_source:
@@ -148,13 +202,14 @@ def _audit_archive(archive: Path) -> dict[str, object]:
     web = json.loads(files["web/package.json"])
     if web.get("private") is not True:
         raise RuntimeError("Web package must remain private / unpublished")
-    if web.get("version") != VERSION:
+    if web.get("version") != candidate.version:
         raise RuntimeError("Web package version differs from source candidate")
     if not any(key.startswith("tests/test_") and key.endswith(".py")
                for key in files):
         raise RuntimeError("Source archive has no tests")
     return {
-        "tag_candidate": TAG, "source_files": len(files),
+        "tag_candidate": candidate.tag, "commit_candidate": candidate.commit,
+        "software_version": candidate.version, "source_files": len(files),
         "source_bytes": total_size,
         "archive_sha256": hashlib.sha256(archive.read_bytes()).hexdigest(),
         "canonical_blob_bytes_verified": True,
@@ -163,7 +218,8 @@ def _audit_archive(archive: Path) -> dict[str, object]:
     }
 
 
-def _smoke_archive(archive: Path, work: Path) -> dict[str, object]:
+def _smoke_archive(archive: Path, work: Path, candidate: SourceCandidate) -> dict[str, object]:
+    version = candidate.version
     venv_dir = work / "isolated-env"
     venv.EnvBuilder(with_pip=True, clear=True).create(venv_dir)
     if os.name == "nt":
@@ -182,13 +238,13 @@ def _smoke_archive(archive: Path, work: Path) -> dict[str, object]:
     version_check = (
         "from importlib.metadata import version; "
         "import sonumio; from sonumio.api import app; "
-        f"assert version('sonumio') == '{VERSION}'; "
-        f"assert sonumio.__version__ == '{VERSION}'; "
-        f"assert app.version == '{VERSION}'"
+        f"assert version('sonumio') == '{version}'; "
+        f"assert sonumio.__version__ == '{version}'; "
+        f"assert app.version == '{version}'"
     )
     _run([str(python), "-c", version_check], cwd=work, env=env)
     reported = _run([str(console), "--version"], cwd=work, env=env).stdout.strip()
-    if reported != f"sonumio {VERSION}":
+    if reported != f"sonumio {version}":
         raise RuntimeError(f"Unexpected console-script version: {reported}")
     registered = _run([str(console), "models"], cwd=work, env=env).stdout
     if "procedural-sfx-v0" not in registered:
@@ -210,14 +266,16 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--smoke", action="store_true",
                         help="Install and run the source candidate in a fresh venv")
+    parser.add_argument("--expected-version", help="Require an exact numeric software version")
     args = parser.parse_args()
+    candidate = resolve_candidate(args.expected_version)
     with tempfile.TemporaryDirectory(prefix="sonumio-source-gate-") as folder:
         work = Path(folder).resolve()
-        archive = work / f"sonumio-{TAG}-source.tar.gz"
-        _make_archive(archive)
-        result = _audit_archive(archive)
+        archive = work / f"sonumio-{candidate.tag}-source.tar.gz"
+        _make_archive(archive, candidate)
+        result = _audit_archive(archive, candidate)
         if args.smoke:
-            result.update(_smoke_archive(archive, work))
+            result.update(_smoke_archive(archive, work, candidate))
         print(json.dumps(result, sort_keys=True))
     return 0
 
