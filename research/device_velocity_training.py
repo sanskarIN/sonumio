@@ -19,6 +19,8 @@ from research.text_audio import MAX_TOKENS, BYTE_VOCAB
 from research.velocity_prediction import velocity_target
 from research.velocity_loss_weights import validate_policy, timestep_weights, velocity_loss, describe_weights
 from research.semantic_training import SemanticHead, semantic_loss, semantic_diagnostics, validate_semantic_weight, validate_targets
+from research.counterfactual_conditioning import CaptionInterventions
+from research.multi_negative_conditioning import validate_margin, negative_indices, training_margin_sum
 from research.wave_diffusion import DiffusionSchedule
 
 MAX_BATCH = 32
@@ -54,6 +56,9 @@ class TrainConfig:
     timestep_sampling: str = "uniform"
     caption_sampling: str = "independent"
     semantic_weight: float = 0.0
+    margin_weight: float = 0.0
+    relative_margin: float = 0.05
+    negative_count: int = 2
 
     def __post_init__(self):
         checks = ((self.steps, 1, 4096), (self.batch_size, 1, MAX_BATCH),
@@ -69,6 +74,7 @@ class TrainConfig:
                 raise ValueError("Invalid optimizer or condition dropout setting")
         validate_policy(self.loss_policy, self.min_snr_gamma)
         validate_semantic_weight(self.semantic_weight)
+        validate_margin(self.margin_weight, self.relative_margin, self.negative_count)
         if self.timestep_sampling not in ("uniform", "stratified") or self.caption_sampling not in ("independent", "bilingual_pair"):
             raise ValueError("Unknown training sampling policy")
         if self.caption_sampling == "bilingual_pair" and self.batch_size % 2:
@@ -192,12 +198,16 @@ def model_fingerprint(model: nn.Module) -> str:
 
 
 def training_update(model, optimizer, schedule, waves, tokens, plan, config, device,
-                    *, semantic_head=None, semantic_targets=None):
+                    *, semantic_head=None, semantic_targets=None, interventions=None, round_index=0):
     """One logical optimizer update; normalize over the entire logical batch."""
     if len(plan.indices) != config.batch_size:
         raise ValueError("Logical batch does not match configuration")
     if bool(config.semantic_weight) != (semantic_head is not None and semantic_targets is not None):
         raise ValueError("Semantic training requires explicit auxiliary head and targets")
+    if bool(config.margin_weight) != (interventions is not None):
+        raise ValueError("Caption margin requires explicit intervention table")
+    negative_rows = (negative_indices(interventions, plan.indices, round_index=round_index,
+                                      count=config.negative_count) if interventions is not None else None)
     model.train()
     if semantic_head is not None:
         semantic_head.train()
@@ -205,6 +215,7 @@ def training_update(model, optimizer, schedule, waves, tokens, plan, config, dev
     total = 0.0
     weighted_total = 0.0
     semantic_total = 0.0
+    margin_total = 0.0
     weights = timestep_weights(schedule.alpha_bars, config.loss_policy, config.min_snr_gamma)
     microbatches = 0
     try:
@@ -217,7 +228,8 @@ def training_update(model, optimizer, schedule, waves, tokens, plan, config, dev
             caption = tokens[indices].to(device)
             caption = torch.where(keep[:, None], caption, torch.zeros_like(caption))
             target = velocity_target(clean, noise, step, schedule)
-            prediction = model(schedule.corrupt(clean, step, noise), step, caption)
+            noisy = schedule.corrupt(clean, step, noise)
+            prediction = model(noisy, step, caption)
             if prediction.shape != target.shape:
                 raise ValueError("Denoiser output shape mismatch")
             # Weight each microbatch by its actual size, including a remainder.
@@ -227,13 +239,18 @@ def training_update(model, optimizer, schedule, waves, tokens, plan, config, dev
             auxiliary = (semantic_loss(model.text_encoder, semantic_head, caption,
                                        semantic_targets[indices].to(device), keep) / config.batch_size
                          if semantic_head is not None else objective.new_zeros(()))
-            loss = objective + config.semantic_weight * auxiliary
+            margin_loss = (training_margin_sum(
+                model, noisy, step, prediction, target, keep,
+                tokens[negative_rows[part]].to(device), margin=config.relative_margin,
+            ) / config.batch_size if negative_rows is not None else objective.new_zeros(()))
+            loss = objective + config.semantic_weight * auxiliary + config.margin_weight * margin_loss
             if not torch.isfinite(loss):
                 raise ValueError("Nonfinite combined objective")
             loss.backward()
             total += float(raw.detach().sum().cpu()) / config.batch_size
             weighted_total += float(objective.detach().cpu())
             semantic_total += float(auxiliary.detach().cpu())
+            margin_total += float(margin_loss.detach().cpu())
             microbatches += 1
         parameters = list(model.parameters())
         if semantic_head is not None:
@@ -247,12 +264,12 @@ def training_update(model, optimizer, schedule, waves, tokens, plan, config, dev
         # Prevent stale partial gradients after a failed or successful update.
         optimizer.zero_grad(set_to_none=True)
     return {"velocity_mse": total, "weighted_objective": weighted_total,
-            "semantic_auxiliary": semantic_total, "preclip_gradient_norm": float(norm.detach().cpu()),
+            "semantic_auxiliary": semantic_total, "caption_margin": margin_total, "preclip_gradient_norm": float(norm.detach().cpu()),
             "microbatches": microbatches}
 
 
 def train_model(model: nn.Module, waves, tokens, config: TrainConfig,
-                *, semantic_targets=None, semantic_validation=None):
+                *, semantic_targets=None, semantic_validation=None, intervention_seeds=None):
     """Return a trained CPU model and numeric report; CUDA inference is not assumed."""
     validate_corpus(waves, tokens)
     if not isinstance(config, TrainConfig):
@@ -275,6 +292,13 @@ def train_model(model: nn.Module, waves, tokens, config: TrainConfig,
             validate_targets(val_targets, len(val_tokens))
     elif semantic_targets is not None or semantic_validation is not None:
         raise ValueError("Semantic targets supplied with disabled objective")
+    interventions = None
+    if config.margin_weight:
+        interventions = CaptionInterventions.build(tokens, intervention_seeds)
+        if min(map(len, interventions.candidates)) < config.negative_count:
+            raise ValueError("Not enough disjoint captions for configured negatives")
+    elif intervention_seeds is not None:
+        raise ValueError("Intervention seeds supplied with disabled caption margin")
     device = resolve_device(config.device)
     initial = model_fingerprint(model)
     head = None
@@ -297,10 +321,11 @@ def train_model(model: nn.Module, waves, tokens, config: TrainConfig,
     if device.type == "cuda":
         torch.cuda.synchronize(device)
     try:
-        for _ in range(config.steps):
+        for round_index in range(config.steps):
             history.append(training_update(model, optimizer, schedule, waves, tokens,
                                            planner.next(), config, device,
-                                           semantic_head=head, semantic_targets=semantic_targets))
+                                           semantic_head=head, semantic_targets=semantic_targets,
+                                           interventions=interventions, round_index=round_index))
         if device.type == "cuda":
             torch.cuda.synchronize(device)
     finally:
@@ -322,7 +347,11 @@ def train_model(model: nn.Module, waves, tokens, config: TrainConfig,
         "loss_policy": config.loss_policy, "min_snr_gamma": config.min_snr_gamma,
         "semantic_weight": config.semantic_weight, "semantic_diagnostics": semantic_report,
         "mean_semantic_auxiliary": sum(row["semantic_auxiliary"] for row in history) / len(history),
-        "mean_combined_objective": sum(row["weighted_objective"] + config.semantic_weight * row["semantic_auxiliary"] for row in history) / len(history),
+        "margin_weight": config.margin_weight, "relative_margin": config.relative_margin,
+        "negative_count": config.negative_count,
+        "mean_caption_margin": sum(row["caption_margin"] for row in history) / len(history),
+        "mean_combined_objective": sum(row["weighted_objective"] + config.semantic_weight * row["semantic_auxiliary"]
+                                       + config.margin_weight * row["caption_margin"] for row in history) / len(history),
         "timestep_weights": describe_weights(timestep_weights(schedule.alpha_bars, config.loss_policy, config.min_snr_gamma)),
         "mean_weighted_objective": sum(row["weighted_objective"] for row in history) / len(history),
         "logical_batch_size": config.batch_size, "microbatch_size": config.microbatch_size,
