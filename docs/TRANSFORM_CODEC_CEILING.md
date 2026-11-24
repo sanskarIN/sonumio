@@ -69,11 +69,14 @@ estimate.
 
 The validation grid evaluates five methods, three coefficient budgets
 (8/16/32) and four bit widths, for 60 configurations. At each predeclared
-payload cap (8/16/32/64 kb/s), candidates are selected by descending correct
-accepted validation source count, then represented category count, then
-ascending mean relative squared reconstruction error, payload rate and
-stable configuration ID. If the independent probe fails its reference
-gate, the selection uses only numerical distortion, rate and ID.
+payload cap (8/16/32/64 kb/s), candidates are selected first by ascending
+false noise acceptance count on 21 independent validation noise controls,
+then descending correct accepted validation source count and represented
+category count, then ascending mean relative squared reconstruction error,
+payload rate and stable configuration ID. If the independent probe fails
+its reference gate or accepts any original validation noise, the selection
+uses only numerical distortion, rate and ID. All candidates are still
+reported, even if no candidate achieves zero reconstructed noise acceptance.
 
 All choices are fixed before evaluating any selected configuration on
 24 new confirmation recordings (four previously unused seeds per source).
@@ -151,3 +154,26 @@ The CPU workflow runs the same protocol for seeds 17 and 29. A green
 workflow verifies execution and fail-closed controls, not that the
 reconstruction gate passed or that a useful model exists. No audio,
 checkpoint, coefficient payload or model weights are saved.
+
+
+## Codec-induced noise confusion
+
+The quantized selection protocol v2 adds seven artificial noise families
+with three fresh seeds each for validation and four additional seeds each
+for confirmation. These 49 recordings do not enter transform fitting,
+quantizer calibration or probe fitting. Exact hashes and seed isolation
+are checked against every source and fixed probe panel. The same validation
+noises are used for every candidate; they are not independent new samples
+per configuration.
+
+For each codec, the frozen probe evaluates the original noise and its
+reconstructed waveform. Reports distinguish new false acceptance (an
+original abstention becomes an accepted category), removed false acceptance,
+and changes between accepted categories. Aggregate and family-level counts
+are checked for consistency. After selection is frozen, the same checks
+are applied to the selected quantized transform and its unquantized
+counterpart on 28 new noise recordings. A narrow confirmation noise
+screen passes only if the reference/validation probe controls were usable
+and neither original nor reconstructed confirmation noise is accepted.
+A passing screen is not a claim about real-world false-positive rates,
+audio quality, semantic accuracy, or readiness for release.
