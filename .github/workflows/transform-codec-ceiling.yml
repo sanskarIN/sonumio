@@ -1,0 +1,69 @@
+name: Transform codec ceiling (CPU)
+
+on:
+  pull_request:
+    paths:
+      - 'research/transform_*codec*.py'
+      - 'research/open_set_source*.py'
+      - 'research/generated_source_grounding.py'
+      - 'research/latent_audio.py'
+      - 'research/wave_diffusion.py'
+      - 'src/sonumio/engines/procedural.py'
+      - 'tests/test_transform_audio_codec.py'
+      - '.github/workflows/transform-codec-ceiling.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'research/**'
+      - 'src/sonumio/**'
+      - 'tests/test_transform_audio_codec.py'
+      - '.github/workflows/transform-codec-ceiling.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  transform:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      OMP_NUM_THREADS: '2'
+      MKL_NUM_THREADS: '2'
+      OPENBLAS_NUM_THREADS: '2'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install research dependencies
+        run: |
+          python -m pip install -e '.[test]' 'scipy>=1.12,<2'
+          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+      - name: Test transform reconstruction and evaluation isolation
+        run: python -m pytest -q tests/test_transform_audio_codec.py
+      - name: Run fixed twenty-configuration scalar budget study
+        run: |
+          python -m research.transform_codec_study > "$RUNNER_TEMP/transform-study.json"
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          report = json.loads((Path(os.environ["RUNNER_TEMP"]) / "transform-study.json").read_text())
+          assert len(report["experiments"]) == 20
+          assert not report["exact_split_overlap"]
+          assert report["fit_only_basis_and_coordinate_selection"]
+          assert not report["audio_or_weights_saved"]
+          assert not report["quantized_bitrate_established"]
+          print("reference gate", report["reference_gate_passed"])
+          for row in report["experiments"]:
+              holdout = row["probe_holdout"]
+              if row["coefficients_per_frame"] == 64:
+                  assert holdout["numerical"]["mse"] < 1e-12
+              print(row["method"], row["coefficients_per_frame"],
+                    "scalar ratio", row["scalar_compression_ratio"],
+                    "holdout accepted", holdout["reconstructed_correct_accepted"],
+                    "original accepted", holdout["original_correct_accepted"],
+                    "mean relative squared error", holdout["numerical"]["relative_squared_error"],
+                    "per-category", {k: v["reconstructed_correct_accepted"] for k, v in holdout["by_category"].items()})
+          PY
