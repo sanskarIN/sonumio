@@ -175,6 +175,12 @@ class VerifiedWavQuality:
     expected_sha256_required: bool = False
     max_pcm_rail_fraction: float | None = None
 
+    @property
+    def inspection_policy_passed(self) -> bool:
+        """Combined signal-health and optional exact PCM rail policy outcome."""
+        return (self.signal_health.passed
+                and (self.pcm_rails is None or self.pcm_rails.passed))
+
     def as_dict(self) -> dict:
         result = {
             "sample_rate": self.info.sample_rate,
@@ -185,6 +191,7 @@ class VerifiedWavQuality:
             "data_bytes": self.info.data_bytes,
             "source_sha256": self.source_sha256,
             "source_verified": True,
+            "inspection_policy_passed": self.inspection_policy_passed,
             "inspection_protocol": "sonumio-verified-wav-inspection-v1",
             "inspection_controls": {
                 "packet_frames": self.packet_frames,
