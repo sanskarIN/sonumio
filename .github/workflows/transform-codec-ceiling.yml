@@ -6,6 +6,9 @@ on:
       - 'research/transform_*codec*.py'
       - 'research/transform_quantization.py'
       - 'research/quantized_transform_study.py'
+      - 'research/frozen_transform*.py'
+      - 'research/velocity*.py'
+      - 'research/text_audio.py'
       - 'research/open_set_source*.py'
       - 'research/generated_source_grounding.py'
       - 'research/latent_audio.py'
@@ -13,6 +16,7 @@ on:
       - 'src/sonumio/engines/procedural.py'
       - 'tests/test_transform_audio_codec.py'
       - 'tests/test_transform_quantization.py'
+      - 'tests/test_frozen_transform_latent.py'
       - '.github/workflows/transform-codec-ceiling.yml'
   push:
     branches: [main]
@@ -21,6 +25,7 @@ on:
       - 'src/sonumio/**'
       - 'tests/test_transform_audio_codec.py'
       - 'tests/test_transform_quantization.py'
+      - 'tests/test_frozen_transform_latent.py'
       - '.github/workflows/transform-codec-ceiling.yml'
 
 permissions:
@@ -44,7 +49,7 @@ jobs:
           python -m pip install -e '.[test]' 'scipy>=1.12,<2'
           python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
       - name: Test transform reconstruction and evaluation isolation
-        run: python -m pytest -q tests/test_transform_audio_codec.py tests/test_transform_quantization.py
+        run: python -m pytest -q tests/test_transform_audio_codec.py tests/test_transform_quantization.py tests/test_frozen_transform_latent.py
       - name: Run fixed twenty-configuration scalar budget study
         run: |
           python -m research.transform_codec_study > "$RUNNER_TEMP/transform-study.json"
@@ -105,4 +110,39 @@ jobs:
                     "unquantized confirmation accepted", floating["reconstructed_correct_accepted"],
                     "confirmation relative error", quantized["numerical"]["relative_squared_error"],
                     "saturation", quantized["quantization"]["saturated_fraction"])
+          PY
+      - name: Gate continuous transform latent diffusion on fresh source and noise controls
+        run: |
+          for seed in 17 29; do
+            python -m research.frozen_transform_study --seed "$seed" --train-steps 96 --evaluations 8 \
+              --sampling-seeds 301 302 > "$RUNNER_TEMP/frozen-transform-$seed.json"
+          done
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          root = Path(os.environ["RUNNER_TEMP"])
+          reports = [json.loads((root / f"frozen-transform-{s}.json").read_text()) for s in (17, 29)]
+          assert reports[0]["selected_transform"] == reports[1]["selected_transform"]
+          assert reports[0]["gate"] == reports[1]["gate"]
+          for report in reports:
+              assert not report["exact_cross_domain_overlap"]
+              assert not report["confirmation_used_for_selection"]
+              assert not report["weights_or_audio_saved"]
+              assert not report["model_readiness_established"]
+              print("frozen transform", report["selected_transform"], "gate", report["gate"])
+              print("fresh reconstruction categories", {k: v["reconstructed_correct_accepted"] for k, v in report["confirmation"]["by_category"].items()})
+              print("fresh noise controls", report["noise_confirmation"])
+              print("latent statistics", json.dumps(report["codec_diagnostics"], sort_keys=True))
+              if report["gate"]["passed"]:
+                  assert report["status"] == "trained"
+                  assert set(report["arms"]) == {"native", "calibrated"}
+                  for name, arm in report["arms"].items():
+                      assert len(arm["generated"]["cases"]) == 24
+                      assert len(arm["generated"]["null_checks"]) == 2
+                      print("generation", name, json.dumps(arm["generated"]["by_language"], sort_keys=True))
+                      print("heldout", name, json.dumps(arm["heldout"], sort_keys=True))
+              else:
+                  assert report["status"] == "reconstruction_gate_failed" and not report["arms"]
           PY
