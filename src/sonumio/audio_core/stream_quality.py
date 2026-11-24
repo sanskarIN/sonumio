@@ -9,7 +9,7 @@ in-memory implementation when packet partitioning changes.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 import math
 from pathlib import Path
 
@@ -157,6 +157,9 @@ class VerifiedWavQuality:
     signal_health: QualityReport
     timeline: QualityTimeline | None = None
     pcm_rails: PcmRailReport | None = None
+    limits: QualityLimits = QualityLimits()
+    packet_frames: int = 8192
+    expected_sha256_required: bool = False
 
     def as_dict(self) -> dict:
         result = {
@@ -168,6 +171,13 @@ class VerifiedWavQuality:
             "data_bytes": self.info.data_bytes,
             "source_sha256": self.source_sha256,
             "source_verified": True,
+            "inspection_protocol": "sonumio-verified-wav-inspection-v1",
+            "inspection_controls": {
+                "packet_frames": self.packet_frames,
+                "expected_sha256_required": self.expected_sha256_required,
+                "timeline_enabled": self.timeline is not None,
+                "quality_limits": asdict(self.limits),
+            },
             "signal_health": self.signal_health.as_dict(),
             "model_quality_measured": False,
             "recording_rights_verified": False,
@@ -231,4 +241,5 @@ def inspect_wav_quality(
         )
         return VerifiedWavQuality(
             reader.info, reader.verified_sha256, health, timed, rails,
+            limits, packet_frames, expected_sha256 is not None,
         )
