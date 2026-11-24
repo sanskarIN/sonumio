@@ -161,3 +161,37 @@ evidence of audio grounding. Evaluate matched, rotated-label and null
 generated waveform controls independently. The source probe does not
 provide a training gradient. No pretrained weights or audio assets are
 downloaded, and neither the auxiliary head nor the denoiser is published.
+
+
+## Multi-negative caption margin
+
+The optional margin objective extends the earlier single-negative
+matched-only intervention to up to four distinct wrong captions. Each
+negative preserves the recording-seed template, language and source
+cardinality, while naming disjoint sources. A deterministic rotating
+selection requires no new random draws. All negatives are evaluated on
+the same corrupted recording and timestep as the matched caption.
+
+For retained caption rows the smallest wrong-caption velocity MSE is
+detached from the gradient graph. The auxiliary loss is
+max(0, matched_MSE - (1 - margin) * minimum_wrong_MSE).
+It is summed over retained rows and divided by the entire logical batch.
+Dropped captions contribute zero. This does not directly reward worsening
+wrong predictions, although shared parameter changes can affect them.
+
+```bash
+python -m research.device_velocity_study --steps 48 --batch-size 4 --microbatch-size 2 --alternative-microbatch 1 --caption-sampling bilingual_pair --timestep-sampling stratified --compare-margins
+```
+
+The baseline and treatment share initialization and stochastic inputs.
+The fixed treatment weight is 0.5, with two disjoint negatives and a
+relative margin of 0.05 by default. Independent runs can set
+`--margin-weight`, `--relative-margin` and `--negative-count`.
+
+Every arm now reports held-out matched, wrong and null caption errors
+on identical corruptions, stratified by language and source count.
+Generated single-source panels also enumerate all 720 balanced label
+assignments separately for each language, with accepted predictions and
+forced nearest-source rankings reported separately. Repeated labels and
+abstention are preserved in the null distribution. These narrow synthetic
+diagnostics do not establish general language or audio quality.
