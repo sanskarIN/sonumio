@@ -53,6 +53,19 @@ from dominating simply because it has more crops, but does not establish
 that declared groups are genuinely independent. Keep loaded arrays unchanged
 after constructing the sampler; it is not a tamper-proof security boundary.
 
-Existing diffusion trainers are unchanged: the sampler is an opt-in
-foundation for a later controlled training experiment, not yet an integrated
-default. Do not claim data readiness guarantees model quality.
+The class-conditioned waveform DDPM now has an explicit opt-in mode:
+
+```bash
+python -m research.wave_diffusion train --manifest manifest.jsonl --audio-root /path/to/reviewed/audio --group-balanced --steps 50
+```
+
+It requires the default readiness gate to pass before any optimizer update,
+samples only eligible training crops, and evaluates eligible validation
+crops in bounded minibatches. The report records available versus eligible
+example counts, the aggregate readiness audit, eligible split fingerprints
+and the deterministic sampler index trace. No test crop is used for
+optimization or held-out validation. The training checkpoint, if requested,
+remains local and is not an original Sonumio-1 model. The ordinary legacy
+sampling path is unchanged when the option is absent. The filtered validation
+metric is not directly comparable to an unfiltered evaluation with different
+examples. Do not claim data readiness guarantees model quality.
