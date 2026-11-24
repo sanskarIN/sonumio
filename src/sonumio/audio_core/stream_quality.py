@@ -17,7 +17,7 @@ import numpy as np
 
 from .contracts import MAX_CHANNELS, check_rate
 from .errors import AudioContractError, AudioIntegrityError, AudioLimitError
-from .quality import QualityFinding, QualityLimits, QualityReport
+from .quality import QualityLimits, QualityReport, _quality_report_from_metrics
 from .streaming import FramePacket
 from .wave_reader import WavPacketInfo, WavPacketReader
 from .wave_stream import MAX_STREAM_PACKET_FRAMES, MAX_STREAM_SECONDS
@@ -108,34 +108,10 @@ class StreamingQualityAccumulator:
             0.0 if highest <= 1e-12 else
             20.0 * math.log10(highest / max(float(np.min(rms_by_channel)), 1e-12))
         )
-        limits = self.limits
-        checks = (
-            ("peak", self._peak, limits.max_peak,
-             "Measured sample amplitude exceeds selected peak budget"),
-            ("clip_fraction", clipping, limits.max_clipping_fraction,
-             "At least one sample clipped or explicit clip budget was exceeded"),
-            ("dc_offset", dc, limits.max_dc_absolute,
-             "Mean PCM bias exceeds explicit DC-offset limit"),
-            ("boundary_jump", jump, limits.max_boundary_jump,
-             "PCM boundary does not fade toward zero"),
-            ("channel_imbalance", imbalance, limits.max_channel_imbalance_db,
-             "Per-channel RMS imbalance exceeds selected budget"),
-        )
-        findings = [
-            QualityFinding(code, "warning", value, cap, note)
-            for code, value, cap, note in checks if value > cap
-        ]
-        if active < limits.min_active_fraction:
-            findings.append(QualityFinding(
-                "activity", "warning", active, limits.min_active_fraction,
-                "Almost all frames are below the declared activity floor",
-            ))
-        return QualityReport(
+        return _quality_report_from_metrics(
             sample_rate=self.sample_rate, frames=frames, channels=self.channels,
-            peak_amplitude=self._peak, rms_amplitude=rms,
-            dc_offset_absolute=dc, clipping_fraction=clipping,
-            active_fraction=active, boundary_jump=jump,
-            channel_imbalance_db=imbalance, findings=tuple(findings),
+            peak=self._peak, rms=rms, dc=dc, clipping=clipping,
+            active=active, jump=jump, imbalance=imbalance, limits=self.limits,
         )
 
 
