@@ -76,3 +76,10 @@ def test_profile_cli_emits_one_json_result(capsys):
     assert payload["source_bytes"] > 44
     assert payload["packet_variants"][0]["packet_frames"] == 8192
     assert payload["packet_variants"][0]["timeline_windows"] is None
+
+
+
+def test_profile_preflight_rejects_excessive_packet_iteration_work():
+    with pytest.raises(ValueError, match="packet count"):
+        _validate(600, (1,), False)
+    _validate(1, (1,), False)
