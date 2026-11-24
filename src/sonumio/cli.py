@@ -129,11 +129,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"Sonumio WAV inspection: {exc}", file=sys.stderr)
             return 2
         print(json.dumps(report.as_dict(), sort_keys=True))
-        failed_policy = (
-            not report.signal_health.passed
-            or report.pcm_rails is not None and not report.pcm_rails.passed
-        )
-        return 1 if args.fail_on_warnings and failed_policy else 0
+        return 1 if args.fail_on_warnings and not report.inspection_policy_passed else 0
     if args.command == "wav-process":
         try:
             config = WavProcessingConfig(

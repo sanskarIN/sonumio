@@ -452,16 +452,19 @@ def test_cli_pcm_rail_policy_is_opt_in_and_has_distinct_exit_codes(tmp_path, cap
     normal = json.loads(capsys.readouterr().out)
     assert normal["signal_health"]["passed"] is True
     assert normal["pcm_rails"]["passed"] is True
+    assert normal["inspection_policy_passed"] is True
     assert normal["pcm_rails"]["max_rail_fraction"] is None
 
     assert main(common + ["--max-pcm-rail-fraction", "0.5"]) == 0
     at_budget = json.loads(capsys.readouterr().out)
     assert at_budget["pcm_rails"]["passed"] is True
+    assert at_budget["inspection_policy_passed"] is True
 
     assert main(common + ["--max-pcm-rail-fraction", "0.49"]) == 1
     over_budget = json.loads(capsys.readouterr().out)
     assert over_budget["signal_health"]["passed"] is True
     assert over_budget["pcm_rails"]["passed"] is False
+    assert over_budget["inspection_policy_passed"] is False
     assert over_budget["pcm_rails"]["rail_fraction"] == 0.5
     assert over_budget["inspection_controls"]["max_pcm_rail_fraction"] == 0.49
 
@@ -470,6 +473,7 @@ def test_cli_pcm_rail_policy_is_opt_in_and_has_distinct_exit_codes(tmp_path, cap
     assert main(observation + ["--max-pcm-rail-fraction", "0"]) == 0
     seen = json.loads(capsys.readouterr().out)
     assert seen["pcm_rails"]["passed"] is False
+    assert seen["inspection_policy_passed"] is False
 
     assert main(common + ["--max-pcm-rail-fraction", "nan"]) == 2
     failed = capsys.readouterr()
