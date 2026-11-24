@@ -102,7 +102,7 @@ class StreamingQualityAccumulator:
         dc = float(np.max(np.abs(self._channel_sums / frames)))
         clipping = self._clipped / (self.channels * frames)
         active = self._active / frames
-        jump = max(self._initial_boundary, self._final_boundary)
+        jump = 0.0 if frames < 2 else max(self._initial_boundary, self._final_boundary)
         highest = float(np.max(rms_by_channel))
         imbalance = (
             0.0 if highest <= 1e-12 else
