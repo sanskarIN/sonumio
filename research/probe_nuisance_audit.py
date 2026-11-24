@@ -14,6 +14,7 @@ from research.latent_audio import FRAMES, TRAIN_SEEDS, VALIDATION_SEEDS, render_
 from research.open_set_source_probe import NOISE_FAMILIES, NOISE_SEEDS, fit_probe, evaluate_probe, reference_panels, noise_wave
 from research.probe_nuisance_transforms import CONTROLS, INVARIANCE, apply_transform, waveform_diagnostics
 from research.wave_diffusion import CATEGORIES
+from research.text_audio import SYNTHETIC_COMBINATIONS
 
 PROTOCOL = "sonumio-frozen-probe-nuisance-audit-v1"
 SOURCE_SEEDS = (1601, 1602, 1603, 1604)
@@ -103,7 +104,11 @@ def run_audit(*, control_names=tuple(t.name for t in CONTROLS)):
     fresh_noise = [(family, seed, noise_wave(family, seed))
                    for family in NOISE_FAMILIES for seed in CONTROL_SEEDS]
     fresh_hashes = [_hash(wave) for _,_,wave in fresh_sources + fresh_noise]
-    if len(set(fresh_hashes)) != len(fresh_hashes) or set(fresh_hashes) & reference_hashes:
+    training_validation_hashes = {_hash(render_seeded_waveform(members, seed))
+                                  for members in SYNTHETIC_COMBINATIONS
+                                  for seed in TRAIN_SEEDS + VALIDATION_SEEDS}
+    if (len(set(fresh_hashes)) != len(fresh_hashes)
+            or set(fresh_hashes) & (reference_hashes | training_validation_hashes)):
         raise ValueError("Exact waveform overlap in fresh source/noise audit")
     panels = {}
     baseline = {(label,seed): _prediction(probe,wave)
@@ -144,7 +149,8 @@ def run_audit(*, control_names=tuple(t.name for t in CONTROLS)):
         "reference_gate": reference["gate"],
         "fresh_source_recordings": len(fresh_sources), "fresh_noise_recordings": len(fresh_noise),
         "fresh_panel_sha256": hashlib.sha256("".join(fresh_hashes).encode("ascii")).hexdigest(),
-        "exact_reference_overlap": False, "training_or_calibration_changed": False,
+        "exact_reference_overlap": False, "exact_training_validation_overlap": False,
+        "training_or_calibration_changed": False,
         "control_results": panels, "controls_are_paired_not_independent_recordings": True,
         "perceptual_quality_established": False, "model_readiness_established": False,
         "audio_or_weights_saved": False,
