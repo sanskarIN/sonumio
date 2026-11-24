@@ -15,7 +15,7 @@ from pathlib import Path
 
 import numpy as np
 
-from .contracts import MAX_CHANNELS, check_rate
+from .contracts import MAX_CHANNELS, check_rate, finite_float
 from .errors import AudioContractError, AudioIntegrityError, AudioLimitError
 from .quality import QualityLimits, QualityReport, _quality_report_from_metrics
 from .quality_timeline import QualityTimeline, StreamingQualityTimeline
@@ -125,6 +125,7 @@ class PcmRailReport:
     positive_samples: int
     negative_samples: int
     total_samples: int
+    max_rail_fraction: float | None = None
 
     def __post_init__(self) -> None:
         if any(type(v) is not int or v < 0 for v in (
@@ -134,10 +135,20 @@ class PcmRailReport:
         if (self.total_samples == 0
                 or self.positive_samples + self.negative_samples > self.total_samples):
             raise AudioContractError("PCM rail counts exceed decoded samples")
+        if self.max_rail_fraction is not None:
+            finite_float(
+                self.max_rail_fraction, "max_pcm_rail_fraction",
+                minimum=0.0, maximum=1.0,
+            )
 
     @property
     def rail_fraction(self) -> float:
         return (self.positive_samples + self.negative_samples) / self.total_samples
+
+    @property
+    def passed(self) -> bool:
+        return (self.max_rail_fraction is None
+                or self.rail_fraction <= self.max_rail_fraction)
 
     def as_dict(self) -> dict:
         return {
@@ -145,6 +156,8 @@ class PcmRailReport:
             "negative_samples": self.negative_samples,
             "total_samples": self.total_samples,
             "rail_fraction": self.rail_fraction,
+            "max_rail_fraction": self.max_rail_fraction,
+            "passed": self.passed,
             "possible_full_scale_saturation": self.rail_fraction > 0,
             "audible_clipping_proven": False,
         }
@@ -160,6 +173,7 @@ class VerifiedWavQuality:
     limits: QualityLimits = QualityLimits()
     packet_frames: int = 8192
     expected_sha256_required: bool = False
+    max_pcm_rail_fraction: float | None = None
 
     def as_dict(self) -> dict:
         result = {
@@ -177,6 +191,7 @@ class VerifiedWavQuality:
                 "expected_sha256_required": self.expected_sha256_required,
                 "timeline_enabled": self.timeline is not None,
                 "quality_limits": asdict(self.limits),
+                "max_pcm_rail_fraction": self.max_pcm_rail_fraction,
             },
             "signal_health": self.signal_health.as_dict(),
             "model_quality_measured": False,
@@ -194,6 +209,7 @@ def inspect_wav_quality(
     expected_sha256: str | None = None,
     limits: QualityLimits = QualityLimits(),
     include_timeline: bool = False,
+    max_pcm_rail_fraction: float | None = None,
 ) -> VerifiedWavQuality:
     """Inspect canonical local integer PCM with complete-file verification.
 
@@ -208,6 +224,11 @@ def inspect_wav_quality(
         raise AudioContractError("Expected QualityLimits")
     if type(include_timeline) is not bool:
         raise AudioContractError("include_timeline must be boolean")
+    if max_pcm_rail_fraction is not None:
+        finite_float(
+            max_pcm_rail_fraction, "max_pcm_rail_fraction",
+            minimum=0.0, maximum=1.0,
+        )
     with WavPacketReader(
         path, packet_frames=packet_frames, expected_sha256=expected_sha256,
     ) as reader:
@@ -238,8 +259,16 @@ def inspect_wav_quality(
             positive_samples=rail_counts[0],
             negative_samples=rail_counts[1],
             total_samples=reader.info.frames * reader.info.channels,
+            max_rail_fraction=max_pcm_rail_fraction,
         )
         return VerifiedWavQuality(
-            reader.info, reader.verified_sha256, health, timed, rails,
-            limits, packet_frames, expected_sha256 is not None,
+            info=reader.info,
+            source_sha256=reader.verified_sha256,
+            signal_health=health,
+            timeline=timed,
+            pcm_rails=rails,
+            limits=limits,
+            packet_frames=packet_frames,
+            expected_sha256_required=expected_sha256 is not None,
+            max_pcm_rail_fraction=max_pcm_rail_fraction,
         )
