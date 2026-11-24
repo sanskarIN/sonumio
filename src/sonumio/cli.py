@@ -83,6 +83,8 @@ def main(argv: list[str] | None = None) -> int:
     inspect.add_argument("--packet-frames", type=int, default=8192)
     inspect.add_argument("--expected-sha256",
                          help="Require an exact lowercase digest of the whole input WAV")
+    inspect.add_argument("--timeline", action="store_true",
+                         help="Include exact one-second signal diagnostics (max 3600 windows)")
     inspect.add_argument("--fail-on-warnings", action="store_true",
                          help="Return 1 after verified JSON if any quality limit fails")
     inspect.add_argument("--max-peak", type=float, default=1.0)
@@ -118,6 +120,7 @@ def main(argv: list[str] | None = None) -> int:
             report = inspect_wav_quality(
                 args.input, packet_frames=args.packet_frames,
                 expected_sha256=args.expected_sha256, limits=limits,
+                include_timeline=args.timeline,
             )
         except (OSError, ValueError, TypeError, RuntimeError) as exc:
             print(f"Sonumio WAV inspection: {exc}", file=sys.stderr)
