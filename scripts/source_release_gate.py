@@ -121,7 +121,7 @@ class SourceEntries:
         if self.entries > MAX_ENTRIES:
             raise RuntimeError("Source archive exceeds entry review limits")
         if name in (self.prefix, self.prefix.rstrip("/")):
-            if not directory or self.root_seen:
+            if not directory or self.root_seen or size != 0:
                 raise RuntimeError("Invalid or duplicate archive root")
             self.root_seen = True
             return
