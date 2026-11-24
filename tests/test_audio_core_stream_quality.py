@@ -350,3 +350,37 @@ def test_inspection_controls_distinguish_pinned_and_unpinned_reads(tmp_path):
     assert pinned["inspection_controls"]["timeline_enabled"] is True
     assert "timeline" not in loose
     assert "timeline" in pinned
+
+
+def test_cli_never_emits_partial_timeline_when_source_changes_midread(
+    tmp_path, monkeypatch, capsys,
+):
+    """Packet work may finish partially, but user-visible JSON must not leak."""
+    import os
+
+    path, written = _source(tmp_path, bits=16, channels=2, frames=257)
+    real_next = WavPacketReader.__next__
+    changed = []
+
+    def alter_metadata_after_first_packet(reader):
+        packet = real_next(reader)
+        if not changed:
+            before = path.stat()
+            os.utime(
+                path,
+                ns=(before.st_atime_ns, before.st_mtime_ns + 2_000_000_000),
+            )
+            changed.append(True)
+        return packet
+
+    monkeypatch.setattr(WavPacketReader, "__next__", alter_metadata_after_first_packet)
+    assert main([
+        "wav-inspect", str(path),
+        "--packet-frames", "7",
+        "--timeline",
+        "--expected-sha256", written.wav_sha256,
+    ]) == 2
+    captured = capsys.readouterr()
+    assert changed
+    assert captured.out == ""
+    assert "changed" in captured.err.lower()
