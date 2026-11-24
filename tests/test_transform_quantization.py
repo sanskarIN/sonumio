@@ -92,9 +92,10 @@ def test_invalid_quantizer_fit(values):
         quant.CoefficientQuantizer.fit(values, 8)
 
 
-def candidate(name, rate, correct, represented, error):
+def candidate(name, rate, correct, represented, error, noise_accepted=0):
     return {"id": name, "validation": {
         "payload_bits_per_second": rate, "reconstructed_correct_accepted": correct,
+        "noise_controls": {"reconstructed_accepted": noise_accepted},
         "by_category": {str(i): {"reconstructed_correct_accepted": int(i < represented)} for i in range(6)},
         "numerical": {"relative_squared_error": error},
     }}
@@ -108,6 +109,9 @@ def test_validation_selection_uses_cap_then_correct_coverage_error():
         candidate("less-accurate", 8000, 7, 6, 0.001),
     ]
     assert study.choose_candidate(rows, 16000, source_gate_passed=True) == "best-coverage"
+    rows[2]["validation"]["noise_controls"]["reconstructed_accepted"] = 1
+    assert study.choose_candidate(rows, 16000, source_gate_passed=True) == "best-error"
+    rows[2]["validation"]["noise_controls"]["reconstructed_accepted"] = 0
     assert study.choose_candidate(rows, 16000, source_gate_passed=False) == "less-accurate"
     assert study.choose_candidate(rows, 7999, source_gate_passed=True) is None
     # Confirmation outcomes have no effect on selection.
@@ -129,17 +133,33 @@ def test_actual_study_selects_only_validation_winners():
     assert report["panel_fingerprints"]["confirmation"]["recordings"] == 24
     assert len({x["sha256"] for x in report["panel_fingerprints"].values()}) == 3
     assert len(report["validation_candidates"]) == 8
+    assert report["noise_panel_fingerprints"]["validation"]["recordings"] == 21
+    assert report["noise_panel_fingerprints"]["confirmation"]["recordings"] == 28
+    assert report["selection_uses_noise_scores"] == report["selection_uses_source_scores"]
+    assert report["selection_uses_source_scores"] == (
+        report["reference_gate_passed"] and report["validation_original_noise_accepted"] == 0
+    )
+    for row in report["validation_candidates"]:
+        noise = row["validation"]["noise_controls"]
+        assert noise["recordings"] == 21
+        assert noise["original_accepted"] == report["validation_original_noise_accepted"]
     selected = {row["candidate_id"] for row in report["selection"]}
     assert None not in selected
     assert set(report["confirmation"]) == selected
     for row in report["selection"]:
         assert row["candidate_id"] == study.choose_candidate(
             report["validation_candidates"], row["payload_cap_bps"],
-            source_gate_passed=report["reference_gate_passed"],
+            source_gate_passed=report["selection_uses_source_scores"],
         )
     for row in report["confirmation"].values():
         assert row["quantized"]["recordings"] == 24
         assert row["same_transform_unquantized"]["recordings"] == 24
+        for key in ("quantized", "same_transform_unquantized"):
+            assert row[key]["noise_controls"]["recordings"] == 28
+            assert row[key]["noise_controls"]["original_accepted"] == report["confirmation_original_noise_accepted"]
+        assert row["confirmation_noise_screen_passed"] == (
+            report["selection_uses_source_scores"] and row["quantized"]["noise_controls"]["zero_original_and_reconstruction_acceptances"]
+        )
     json.dumps(report, allow_nan=False)
 
 
