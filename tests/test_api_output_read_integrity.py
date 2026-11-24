@@ -90,7 +90,12 @@ def test_path_replacement_after_descriptor_read_never_serves_old_bytes(
         nonlocal lookups
         if self == target:
             lookups += 1
-            if lookups == 2:
+            # Lookup 1 happens during _prune()'s path.is_symlink().
+            # Lookup 2 captures the original file before descriptor open.
+            # Lookup 3 is the critical post-read pathname verification.
+            # Replacing on lookup 2 incorrectly replaces the file BEFORE
+            # the reader snapshots it and does not test post-open swaps.
+            if lookups == 3:
                 target.replace(archived)
                 target.write_bytes(expected)  # same bytes, different inode
         return real_lstat(self, *args, **kwargs)
@@ -98,5 +103,5 @@ def test_path_replacement_after_descriptor_read_never_serves_old_bytes(
     monkeypatch.setattr(path_type, "lstat", replace_on_final_path_check)
     with pytest.raises(FileNotFoundError, match="Audio not found"):
         store.read(identifier)
-    assert lookups >= 2
+    assert lookups == 3
     assert archived.read_bytes() == expected
