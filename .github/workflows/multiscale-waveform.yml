@@ -4,6 +4,8 @@ on:
   pull_request:
     paths:
       - 'research/multiscale_waveform*.py'
+      - 'research/heldout_caption_panel.py'
+      - 'research/paired_grounding_audit.py'
       - 'research/open_set_source*.py'
       - 'research/velocity*.py'
       - 'research/latent_audio.py'
@@ -70,8 +72,14 @@ jobs:
                       assert len(arm["generated"]["cases"]) == 24
                       assert len(arm["generated"]["null_checks"]) == 2
                       print("generated", name, json.dumps(arm["generated"]["by_language"], sort_keys=True))
+                      lexical = arm["heldout_caption_panel"]
+                      assert lexical["zero_guidance_caption_invariant"]
+                      assert lexical["alternative_templates_token_disjoint_from_training"]
+                      for language, panel in lexical["by_language"].items():
+                          print("heldout caption", name, language, json.dumps(panel["summary"], sort_keys=True))
                   else:
                       assert arm["generated"] is None
+                      assert arm["heldout_caption_panel"] is None
           assert reports[0]["training_fingerprint"] == reports[1]["training_fingerprint"]
           assert reports[0]["validation_fingerprint"] == reports[1]["validation_fingerprint"]
           PY
