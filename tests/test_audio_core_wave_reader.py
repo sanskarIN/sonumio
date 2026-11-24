@@ -207,3 +207,84 @@ def test_reader_closes_symlink_swap_after_preflight(tmp_path, monkeypatch):
     monkeypatch.setattr(wave_reader.os, "open", swap)
     with pytest.raises(AudioFormatError, match="ordinary"):
         WavPacketReader(path)
+
+
+
+def test_reader_rejects_same_bytes_new_inode_between_preflight_and_open(
+    tmp_path, monkeypatch
+):
+    """SHA equality alone cannot validate that an opened path stayed put."""
+    path, _ = _write(tmp_path)
+    contents = path.read_bytes()
+    archived = tmp_path / "renamed-original.wav"
+    original_open = os.open
+    swaps = []
+
+    def swap_before_descriptor(file, flags, *args, **kwargs):
+        if os.fspath(file) == os.fspath(path) and not swaps:
+            path.replace(archived)
+            path.write_bytes(contents)  # identical bytes, different identity
+            swaps.append(True)
+        return original_open(file, flags, *args, **kwargs)
+
+    monkeypatch.setattr(wave_reader.os, "open", swap_before_descriptor)
+    with pytest.raises(AudioIntegrityError, match="between path validation"):
+        WavPacketReader(path)
+    assert swaps and archived.read_bytes() == contents
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Windows may prevent renaming open WAVs")
+def test_reader_rejects_same_byte_replacement_during_stream(tmp_path):
+    path, expected = _write(tmp_path, frames=500)
+    contents = path.read_bytes()
+    old = tmp_path / "old-descriptor.wav"
+    with WavPacketReader(path, packet_frames=100,
+                         expected_sha256=expected.wav_sha256) as reader:
+        assert next(reader).frames == 100
+        path.replace(old)
+        path.write_bytes(contents)
+        with pytest.raises(AudioIntegrityError, match="path changed"):
+            list(reader)
+        assert reader.verified_sha256 is None
+        assert reader.state == "closed"
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Windows may prevent unlinking open WAVs")
+def test_reader_rejects_unlinked_source_even_if_descriptor_bytes_match(tmp_path):
+    path, expected = _write(tmp_path, frames=500)
+    with WavPacketReader(path, packet_frames=100,
+                         expected_sha256=expected.wav_sha256) as reader:
+        assert next(reader).frames == 100
+        path.unlink()
+        with pytest.raises(AudioIntegrityError, match="path disappeared"):
+            list(reader)
+        assert reader.verified_sha256 is None
+        assert reader.state == "closed"
+
+
+def test_reader_does_not_follow_replacement_symlink_without_nofollow(
+    tmp_path, monkeypatch
+):
+    """A no-follow-less platform still must reject a leaf link after preflight."""
+    path, _ = _write(tmp_path)
+    alternate = tmp_path / "alternate.wav"
+    alternate.write_bytes(path.read_bytes())
+    original_open = os.open
+    swapped = []
+
+    def swap(file, flags, *args, **kwargs):
+        if os.fspath(file) == os.fspath(path) and not swapped:
+            path.unlink()
+            try:
+                path.symlink_to(alternate)
+            except (OSError, NotImplementedError):
+                pytest.skip("Symlinks unavailable on this host")
+            swapped.append(True)
+            # Simulate a platform where O_NOFOLLOW is not available.
+            flags &= ~getattr(os, "O_NOFOLLOW", 0)
+        return original_open(file, flags, *args, **kwargs)
+
+    monkeypatch.setattr(wave_reader.os, "open", swap)
+    with pytest.raises(AudioIntegrityError, match="between path validation"):
+        WavPacketReader(path)
+    assert swapped
