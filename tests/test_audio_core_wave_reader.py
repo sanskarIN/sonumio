@@ -288,3 +288,28 @@ def test_reader_does_not_follow_replacement_symlink_without_nofollow(
     with pytest.raises(AudioIntegrityError, match="between path validation"):
         WavPacketReader(path)
     assert swapped
+
+
+
+def test_reader_closes_unverified_descriptor_on_packet_read_os_error(tmp_path):
+    path, _ = _write(tmp_path, frames=500)
+    reader = WavPacketReader(path, packet_frames=100)
+
+    class FaultyStream:
+        def __init__(self):
+            self.closed = False
+
+        def read(self, size):
+            raise OSError("simulated device read failure")
+
+        def close(self):
+            self.closed = True
+
+    faulty = FaultyStream()
+    reader._fp.close()
+    reader._fp = faulty
+    with pytest.raises(OSError, match="simulated device"):
+        next(reader)
+    assert reader.state == "closed"
+    assert reader.verified_sha256 is None
+    assert faulty.closed is True
