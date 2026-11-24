@@ -89,6 +89,10 @@ def main(argv: list[str] | None = None) -> int:
                          help="Report decoded frame-to-frame sample steps, including packet joins")
     inspect.add_argument("--max-adjacent-step", type=float,
                          help="Optional [0,2] maximum PCM frame step (not proof of clicks)")
+    inspect.add_argument("--quiet-intervals", action="store_true",
+                         help="Report quiet intervals on the original PCM clock")
+    inspect.add_argument("--max-internal-quiet-frames", type=int,
+                         help="Optional longest internal quiet interval budget in frames")
     inspect.add_argument("--fail-on-warnings", action="store_true",
                          help="Return 1 after verified JSON if any quality limit fails")
     inspect.add_argument("--max-peak", type=float, default=1.0)
@@ -130,6 +134,8 @@ def main(argv: list[str] | None = None) -> int:
                 max_pcm_rail_fraction=args.max_pcm_rail_fraction,
                 include_continuity=args.continuity,
                 max_adjacent_step=args.max_adjacent_step,
+                include_quiet_intervals=args.quiet_intervals,
+                max_internal_quiet_frames=args.max_internal_quiet_frames,
             )
         except (OSError, ValueError, TypeError, RuntimeError) as exc:
             print(f"Sonumio WAV inspection: {exc}", file=sys.stderr)
