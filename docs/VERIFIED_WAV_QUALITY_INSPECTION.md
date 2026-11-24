@@ -38,6 +38,16 @@ source cap (the standalone window accumulator allows 4,096 windows).
 Timeline analysis is opt-in; the default JSON shape is unchanged.
 No generated audio is stored by this diagnostic.
 
+The JSON carries `inspection_protocol` and `inspection_controls`, including
+the packet frame size, whether an expected SHA256 was enforced, whether
+time-window inspection was enabled, and **all seven effective quality limits**.
+This is important even when no warnings are emitted: two different threshold
+policies can both pass the same audio while expressing different acceptance
+criteria. The source digest is always the actual verified SHA256, but a digest
+computed without an expected reference must not be mistaken for a previously
+pinned/approved source. These controls are non-sensitive and omit local
+absolute paths.
+
 The JSON includes exact WAV geometry, the verified whole-file SHA256, a
 `source_verified` flag and the `signal_health` report. Signal measurements
 include sample peak, RMS, per-channel mean DC absolute magnitude, share of

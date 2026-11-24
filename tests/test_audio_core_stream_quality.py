@@ -303,3 +303,50 @@ def test_cli_includes_verified_pcm_rail_metadata(tmp_path, capsys):
     assert "pcm_rails" in output
     assert output["pcm_rails"]["total_samples"] == output["frames"] * output["channels"]
     assert 0 <= output["pcm_rails"]["rail_fraction"] <= 1
+
+
+def test_verified_inspection_records_all_pass_thresholds_for_reproducibility(tmp_path):
+    path, written = _source(tmp_path, bits=16, channels=1)
+    first_limits = QualityLimits(max_peak=0.8, activity_floor_dbfs=-55)
+    second_limits = QualityLimits(max_peak=0.9, activity_floor_dbfs=-65)
+    results = [
+        inspect_wav_quality(
+            path, limits=limits, packet_frames=19,
+            expected_sha256=written.wav_sha256,
+        ).as_dict()
+        for limits in (first_limits, second_limits)
+    ]
+    assert [x["source_sha256"] for x in results] == [written.wav_sha256] * 2
+    assert all(x["inspection_protocol"] == "sonumio-verified-wav-inspection-v1"
+               for x in results)
+    assert all(x["inspection_controls"]["packet_frames"] == 19 for x in results)
+    assert all(x["inspection_controls"]["expected_sha256_required"] is True
+               for x in results)
+    assert all(x["inspection_controls"]["timeline_enabled"] is False
+               for x in results)
+    assert results[0]["inspection_controls"]["quality_limits"]["max_peak"] == 0.8
+    assert results[1]["inspection_controls"]["quality_limits"]["max_peak"] == 0.9
+    assert results[0]["inspection_controls"]["quality_limits"]["activity_floor_dbfs"] == -55
+    assert results[1]["inspection_controls"]["quality_limits"]["activity_floor_dbfs"] == -65
+    assert set(results[0]["inspection_controls"]["quality_limits"]) == {
+        "max_peak", "max_clipping_fraction", "max_dc_absolute",
+        "max_boundary_jump", "max_channel_imbalance_db",
+        "min_active_fraction", "activity_floor_dbfs",
+    }
+    assert results[0]["inspection_controls"] != results[1]["inspection_controls"]
+
+
+def test_inspection_controls_distinguish_pinned_and_unpinned_reads(tmp_path):
+    path, written = _source(tmp_path)
+    loose = inspect_wav_quality(path, packet_frames=41).as_dict()
+    pinned = inspect_wav_quality(
+        path, packet_frames=41, expected_sha256=written.wav_sha256,
+        include_timeline=True,
+    ).as_dict()
+    assert loose["source_sha256"] == pinned["source_sha256"]
+    assert loose["inspection_controls"]["expected_sha256_required"] is False
+    assert pinned["inspection_controls"]["expected_sha256_required"] is True
+    assert loose["inspection_controls"]["timeline_enabled"] is False
+    assert pinned["inspection_controls"]["timeline_enabled"] is True
+    assert "timeline" not in loose
+    assert "timeline" in pinned
