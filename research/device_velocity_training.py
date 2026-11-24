@@ -21,6 +21,7 @@ from research.velocity_loss_weights import validate_policy, timestep_weights, ve
 from research.semantic_training import SemanticHead, semantic_loss, semantic_diagnostics, validate_semantic_weight, validate_targets
 from research.counterfactual_conditioning import CaptionInterventions
 from research.multi_negative_conditioning import validate_margin, negative_indices, training_margin_sum
+from research.device_learning_rate import LearningRatePlan, set_learning_rate
 from research.wave_diffusion import DiffusionSchedule
 
 MAX_BATCH = 32
@@ -59,6 +60,9 @@ class TrainConfig:
     margin_weight: float = 0.0
     relative_margin: float = 0.05
     negative_count: int = 2
+    learning_rate_policy: str = "constant"
+    warmup_updates: int = 0
+    minimum_lr_ratio: float = 0.1
 
     def __post_init__(self):
         checks = ((self.steps, 1, 4096), (self.batch_size, 1, MAX_BATCH),
@@ -73,6 +77,7 @@ class TrainConfig:
             if type(value) not in (float, int) or not math.isfinite(value) or not lo <= value <= hi:
                 raise ValueError("Invalid optimizer or condition dropout setting")
         validate_policy(self.loss_policy, self.min_snr_gamma)
+        self.rate_plan()
         validate_semantic_weight(self.semantic_weight)
         validate_margin(self.margin_weight, self.relative_margin, self.negative_count)
         if self.timestep_sampling not in ("uniform", "stratified") or self.caption_sampling not in ("independent", "bilingual_pair"):
@@ -81,6 +86,11 @@ class TrainConfig:
             raise ValueError("Bilingual paired sampling requires an even logical batch")
         if not isinstance(self.device, str):
             raise ValueError("Device must be a string")
+
+
+    def rate_plan(self):
+        return LearningRatePlan(self.learning_rate, self.steps, self.learning_rate_policy,
+                                self.warmup_updates, self.minimum_lr_ratio)
 
 
 def validate_corpus(waves: torch.Tensor, tokens: torch.Tensor):
@@ -202,7 +212,8 @@ def training_update(model, optimizer, schedule, waves, tokens, plan, config, dev
     """One logical optimizer update; normalize over the entire logical batch."""
     if len(plan.indices) != config.batch_size:
         raise ValueError("Logical batch does not match configuration")
-    if bool(config.semantic_weight) != (semantic_head is not None and semantic_targets is not None):
+    if (bool(config.semantic_weight) != (semantic_head is not None)
+            or bool(config.semantic_weight) != (semantic_targets is not None)):
         raise ValueError("Semantic training requires explicit auxiliary head and targets")
     if bool(config.margin_weight) != (interventions is not None):
         raise ValueError("Caption margin requires explicit intervention table")
@@ -216,9 +227,9 @@ def training_update(model, optimizer, schedule, waves, tokens, plan, config, dev
     weighted_total = 0.0
     semantic_total = 0.0
     margin_total = 0.0
-    weights = timestep_weights(schedule.alpha_bars, config.loss_policy, config.min_snr_gamma)
     microbatches = 0
     try:
+        weights = timestep_weights(schedule.alpha_bars, config.loss_policy, config.min_snr_gamma)
         for part in plan.slices(config.microbatch_size):
             indices = plan.indices[part]
             clean = waves[indices].to(device)
@@ -257,9 +268,9 @@ def training_update(model, optimizer, schedule, waves, tokens, plan, config, dev
             parameters += list(semantic_head.parameters())
         norm = nn.utils.clip_grad_norm_(parameters, config.max_grad_norm,
                                         error_if_nonfinite=True)
-        optimizer.step()
-        if not math.isfinite(total) or not math.isfinite(weighted_total) or not torch.isfinite(norm):
+        if not all(math.isfinite(value) for value in (total, weighted_total, semantic_total, margin_total)) or not torch.isfinite(norm):
             raise ValueError("Nonfinite training update diagnostics")
+        optimizer.step()
     finally:
         # Prevent stale partial gradients after a failed or successful update.
         optimizer.zero_grad(set_to_none=True)
@@ -307,25 +318,30 @@ def train_model(model: nn.Module, waves, tokens, config: TrainConfig,
         with torch.random.fork_rng(devices=[]):
             torch.random.default_generator.manual_seed(config.seed + 6144)
             head = SemanticHead(model.channels)
-        head = head.to(device)
-    model.to(device)
-    schedule = DiffusionSchedule(config.schedule_steps, profile="cosine_zero_terminal_v1").to(device)
-    parameters = list(model.parameters()) + (list(head.parameters()) if head is not None else [])
-    optimizer = torch.optim.AdamW(parameters, lr=config.learning_rate, foreach=False)
-    if head is not None:
-        semantic_report = {"initial_training": semantic_diagnostics(model.text_encoder, head, tokens, semantic_targets),
-                           "initial_validation": semantic_diagnostics(model.text_encoder, head, *semantic_validation)
-                           if semantic_validation is not None else None}
+    rate_plan = config.rate_plan()
     planner = BatchPlanner(config, len(waves))
     history = []
-    if device.type == "cuda":
-        torch.cuda.synchronize(device)
+    applied_rates = []
     try:
+        model.to(device)
+        if head is not None:
+            head.to(device)
+        schedule = DiffusionSchedule(config.schedule_steps, profile="cosine_zero_terminal_v1").to(device)
+        parameters = list(model.parameters()) + (list(head.parameters()) if head is not None else [])
+        optimizer = torch.optim.AdamW(parameters, lr=config.learning_rate, foreach=False)
+        if head is not None:
+            semantic_report = {"initial_training": semantic_diagnostics(model.text_encoder, head, tokens, semantic_targets),
+                               "initial_validation": semantic_diagnostics(model.text_encoder, head, *semantic_validation)
+                               if semantic_validation is not None else None}
+        if device.type == "cuda":
+            torch.cuda.synchronize(device)
         for round_index in range(config.steps):
+            rate = set_learning_rate(optimizer, rate_plan, round_index)
             history.append(training_update(model, optimizer, schedule, waves, tokens,
                                            planner.next(), config, device,
                                            semantic_head=head, semantic_targets=semantic_targets,
                                            interventions=interventions, round_index=round_index))
+            applied_rates.append(rate)
         if device.type == "cuda":
             torch.cuda.synchronize(device)
     finally:
@@ -354,6 +370,7 @@ def train_model(model: nn.Module, waves, tokens, config: TrainConfig,
                                        + config.margin_weight * row["caption_margin"] for row in history) / len(history),
         "timestep_weights": describe_weights(timestep_weights(schedule.alpha_bars, config.loss_policy, config.min_snr_gamma)),
         "mean_weighted_objective": sum(row["weighted_objective"] for row in history) / len(history),
+        "learning_rate_schedule": rate_plan.describe(), "applied_learning_rates": applied_rates,
         "logical_batch_size": config.batch_size, "microbatch_size": config.microbatch_size,
         "optimizer_updates": len(history),
         "microbatch_backward_calls": sum(row["microbatches"] for row in history),
