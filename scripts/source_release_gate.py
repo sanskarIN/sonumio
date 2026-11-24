@@ -112,6 +112,7 @@ class SourceEntries:
         self.prefix = candidate.prefix
         self.seen_paths = set()
         self.files = {}
+        self.directories = set()
         self.total_size = 0
         self.entries = 0
         self.root_seen = False
@@ -145,6 +146,7 @@ class SourceEntries:
         if directory:
             if size != 0:
                 raise RuntimeError(f"Unexpected directory payload: {relative}")
+            self.directories.add(canonical)
             return
         if not regular:
             raise RuntimeError(f"Non-regular archive entry: {relative}")
@@ -226,6 +228,14 @@ def _audit_archive(archive: Path, candidate: SourceCandidate, *, format: str = "
         tracked[filename] = (int(pieces[3]), pieces[2])
     if files.keys() != tracked.keys():
         raise RuntimeError("Source archive paths differ from the committed tree")
+    # Git has no independent empty directory objects. Every exported
+    # directory must be an ancestor of an actual tracked source file.
+    expected_directories = {
+        parent.as_posix() for filename in tracked
+        for parent in PurePosixPath(filename).parents if parent != PurePosixPath(".")
+    }
+    if not entries.root_seen or entries.directories != expected_directories:
+        raise RuntimeError("Source archive directories differ from the committed tree")
     for filename, data in files.items():
         expected_size, expected_oid = tracked[filename]
         if len(data) != expected_size:
@@ -269,6 +279,7 @@ def _audit_archive(archive: Path, candidate: SourceCandidate, *, format: str = "
         "source_bytes": total_size,
         "archive_sha256": hashlib.sha256(archive.read_bytes()).hexdigest(),
         "canonical_blob_bytes_verified": True,
+        "canonical_directory_tree_verified": True,
         "canonical_blob_hashes_verified": True,
         "published": False, "binary_or_model_artifacts": 0,
     }
