@@ -21,6 +21,23 @@ and **no JSON on stdout**. On a verified source, the exit code is 0; with
 `--fail-on-warnings`, it is 1 when one or more signal thresholds fail.
 Quality warnings are not treated as corrupt source files.
 
+Optional frame-accurate window diagnostics:
+
+```bash
+sonumio wav-inspect existing.wav --timeline --expected-sha256 <64-lowercase-hex>
+```
+
+`--timeline` appends a `timeline` key containing zero-based, end-exclusive
+one-second window boundaries on the **original sample clock**. Each window
+reports its own peak, RMS, maximum absolute per-channel DC mean, clipping
+fraction and active-frame fraction. The final window may be shorter than one
+second. The window layout is fixed by sample rate rather than input packet
+size, so seeking and comparison do not depend on transport fragmentation.
+The command will keep at most 3,600 one-second windows for its one-hour
+source cap (the standalone window accumulator allows 4,096 windows).
+Timeline analysis is opt-in; the default JSON shape is unchanged.
+No generated audio is stored by this diagnostic.
+
 The JSON includes exact WAV geometry, the verified whole-file SHA256, a
 `source_verified` flag and the `signal_health` report. Signal measurements
 include sample peak, RMS, per-channel mean DC absolute magnitude, share of
@@ -69,3 +86,27 @@ is used as the regression oracle across bit depths and layouts.
 
 No source may be described as safe, licensed, original or perceptually good on
 the strength of these checks. Human and provenance review remain separate.
+
+## Reader identity and race safety
+
+The source reader preflights the exact leaf pathname without following links.
+It verifies that the opened regular-file descriptor still matches that
+preflight identity, then checks that the pathname still refers to that
+same file when full-file reading is complete. This rejects ordinary
+same-byte pathname replacement, symlink swaps (including platforms lacking
+`O_NOFOLLOW`), path deletion and byte modifications before declaring a
+source verified. The check uses platform-reported device, file identity,
+size and nanosecond timestamps; it is **not** a sandbox against hostile
+privileged filesystem manipulation or a guarantee of remote filesystem
+coherency. Review the trust boundary for each deployment.
+
+## Scientific scope and numerical caveats
+
+`QualityReport` is retained for backward compatibility and shares its
+warning decisions with the streaming implementation. The optional window
+measurements are independent per-window aggregates (not LUFS or true peak).
+Float64 sums and sums of squares are used; changing packet boundaries may
+vary the last few bits of a reduction, so tests use tight numerical
+tolerances rather than incorrectly demanding identical decimal rendering.
+Real-model evaluation still requires independent source rights, holdouts,
+blind listening, and prompt-grounding checks.
