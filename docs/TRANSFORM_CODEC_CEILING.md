@@ -91,3 +91,63 @@ OMP_NUM_THREADS=2 OPENBLAS_NUM_THREADS=2 python -m research.quantized_transform_
 The study prints aggregate and per-recording numeric diagnostics in JSON,
 without saving audio, coefficient payload files or model weights.
 No production bitrate, perceptual codec quality or model readiness is claimed.
+
+
+## Continuous transform latent diffusion bridge
+
+The separate frozen-transform study uses exactly 16 coefficients per
+64-sample block, giving the existing 16 x 128 latent layout. It considers
+DCT low-frequency, ranked DCT and block PCA, rather than the lapped
+129-frame MDCT representation. This is a continuous float32 latent model,
+not diffusion over the quantized payload codes.
+
+The transform basis remains frozen, with zero trainable codec parameters.
+A second adapter applies per-channel train-only means and standard
+deviations with a 0.001 scale floor. Both adapters reconstruct the same
+projection (within numerical precision) and the decoder does not silently
+clip waveform amplitude. The existing DDIM sampler can use the fixed
+decoder without changing production APIs or checkpoint formats.
+
+Selection uses only the 12 source validation recordings. It ranks the
+three candidates by correct accepted source count, represented category
+count, mean relative squared reconstruction error and stable method name.
+If the independent probe gate fails, source scores are not used for
+selection. The selected method then undergoes a new confirmation panel
+of 24 synthetic sources and 28 artificial noise controls, with seeds
+separate from the quantization study and the fixed probe references.
+
+The predeclared training gate requires:
+
+- The independent reference probe gate passes.
+- At least 16 of 24 original and reconstructed confirmation source
+  recordings are correctly accepted, and reconstruction preserves at
+  least one correct accepted recording per category.
+- None of the 28 original or reconstructed artificial noise controls is
+  accepted as a source.
+
+A failed gate is reported and **no denoiser optimization or generation**
+is performed in the study. These are conservative experiment heuristics,
+not a general-purpose audio-quality certification. The regression suite
+separately executes a tiny optimizer/DDIM smoke test on fabricated
+numerical inputs to verify the adapter even when the gate fails.
+
+If the gate passes, native and calibrated arms share identical denoiser
+initialization and stochastic minibatch inputs. The original 42 unique
+training recordings and 84 bilingual caption rows are used, with the
+fixed validation corpus for teacher-forced diagnostics. Training and
+transform fit may share originals, and validation and method selection
+may share originals; the reconstruction confirmation and probe reference
+domains are disjoint. Held-out diagnostics report both latent velocity
+MSE and decoded waveform MAE at three timesteps; MSE across different
+latent scales is not directly comparable. Real DDIM generation is
+evaluated under matched, rotated-label and null controls using paired
+sampling seeds, with pre-clipping numerical diagnostics.
+
+```bash
+OMP_NUM_THREADS=2 OPENBLAS_NUM_THREADS=2 python -m research.frozen_transform_study --seed 17 --train-steps 96 --evaluations 8 --sampling-seeds 301 302
+```
+
+The CPU workflow runs the same protocol for seeds 17 and 29. A green
+workflow verifies execution and fail-closed controls, not that the
+reconstruction gate passed or that a useful model exists. No audio,
+checkpoint, coefficient payload or model weights are saved.
