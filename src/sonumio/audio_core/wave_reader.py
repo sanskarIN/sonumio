@@ -150,6 +150,10 @@ class WavPacketReader:
         self._hash = hashlib.sha256()
         self._hash.update(raw_header)
         self._verified_sha256 = None
+        # Count *exact integer PCM endpoints*, before float32 rounding.
+        # Never expose these counters as verified on an incomplete read.
+        self._positive_rail_samples = 0
+        self._negative_rail_samples = 0
 
     @property
     def frames_read(self) -> int:
@@ -162,6 +166,13 @@ class WavPacketReader:
     @property
     def state(self) -> str:
         return self._state
+
+    @property
+    def verified_pcm_rail_counts(self) -> tuple[int, int] | None:
+        """(positive, negative) full-scale integer PCM sample counts at EOF."""
+        if self._state != "verified":
+            return None
+        return self._positive_rail_samples, self._negative_rail_samples
 
     def __enter__(self) -> "WavPacketReader":
         if self._state != "open":
@@ -201,9 +212,17 @@ class WavPacketReader:
             )
             floats = dequantize_pcm(ints, bits=self.info.bits_per_sample)
             packet = FramePacket(self.info.sample_rate, self._frames_read, floats)
+            # Conversion to float32 can round the positive rail and nearby
+            # 32-bit PCM integers to the same value. Count exact integers
+            # before discarding them rather than estimating from floats.
+            scale = 1 << (self.info.bits_per_sample - 1)
+            positive = int((ints == scale - 1).sum())
+            negative = int((ints == -scale).sum())
         except BaseException:
             self.close()
             raise
+        self._positive_rail_samples += positive
+        self._negative_rail_samples += negative
         self._frames_read += count
         if self._frames_read == self.info.frames:
             self._finish_verification()
