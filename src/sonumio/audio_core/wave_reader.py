@@ -27,6 +27,21 @@ from .waveio import MAX_WAV_BYTES
 _HEADER_BYTES = 44
 
 
+def _same_file_snapshot(left: os.stat_result, right: os.stat_result) -> bool:
+    """Compare platform-exposed identity and change metadata for one file.
+
+    This is best-effort local path integrity, not a filesystem sandbox or
+    protection against hostile privileged processes able to spoof metadata.
+    """
+    return (
+        left.st_dev, left.st_ino, left.st_size,
+        left.st_mtime_ns, left.st_ctime_ns,
+    ) == (
+        right.st_dev, right.st_ino, right.st_size,
+        right.st_mtime_ns, right.st_ctime_ns,
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class WavPacketInfo:
     sample_rate: int
@@ -87,7 +102,14 @@ class WavPacketReader:
         if expected_sha256 is not None:
             strict_sha256(expected_sha256)
         source = Path(path)
-        if not source.is_file() or source.is_symlink():
+        # Snapshot the *leaf* before opening it, without following links.
+        # O_NOFOLLOW is not universally available (notably on Windows), so
+        # compare the opened descriptor with this exact preflight identity.
+        try:
+            preflight = source.lstat()
+        except (OSError, ValueError) as exc:
+            raise AudioFormatError("Expected ordinary local WAVE file") from exc
+        if not stat.S_ISREG(preflight.st_mode):
             raise AudioFormatError("Expected ordinary local WAVE file")
         flags = (os.O_RDONLY | getattr(os, "O_BINARY", 0) |
                  getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0))
@@ -106,6 +128,10 @@ class WavPacketReader:
             before = os.fstat(fp.fileno())
             if not stat.S_ISREG(before.st_mode):
                 raise AudioFormatError("Expected ordinary local WAVE descriptor")
+            if not _same_file_snapshot(preflight, before):
+                raise AudioIntegrityError(
+                    "WAVE source changed between path validation and descriptor open"
+                )
             if before.st_size > MAX_WAV_BYTES:
                 raise AudioLimitError("WAV stream file exceeds transport byte cap")
             raw_header = fp.read(_HEADER_BYTES)
@@ -192,6 +218,20 @@ class WavPacketReader:
                     after.st_mtime_ns != before.st_mtime_ns or
                     after.st_ctime_ns != before.st_ctime_ns):
                 raise AudioIntegrityError("WAVE source changed during packet reading")
+            # A verified descriptor checksum is not enough when the path
+            # itself was renamed/replaced: the caller identifies this file
+            # by path, so it must still name the same regular file at EOF.
+            try:
+                at_path = self.path.lstat()
+            except (OSError, ValueError) as exc:
+                raise AudioIntegrityError(
+                    "WAVE source path disappeared during packet reading"
+                ) from exc
+            if (not stat.S_ISREG(at_path.st_mode)
+                    or not _same_file_snapshot(before, at_path)):
+                raise AudioIntegrityError(
+                    "WAVE source path changed during packet reading"
+                )
             actual = self._hash.hexdigest()
             if (self._expected_sha256 is not None and
                     actual != self._expected_sha256):
