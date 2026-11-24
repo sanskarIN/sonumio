@@ -227,3 +227,79 @@ def test_inspection_handles_longer_than_in_memory_audio_limit(tmp_path):
     assert report.signal_health.active_fraction == 1.0
     assert report.signal_health.clipping_fraction == 0.0
     assert report.source_sha256 == written.wav_sha256
+
+
+
+@pytest.mark.parametrize("bits", [8, 16, 24, 32])
+@pytest.mark.parametrize("packet_frames", [1, 3, 8])
+def test_exact_integer_pcm_rails_survive_float_rounding(
+    tmp_path, bits, packet_frames
+):
+    """32-bit float32 may coalesce near-rail values; integers do not."""
+    from sonumio.audio_core.dither import pack_pcm
+    from sonumio.audio_core.stream_quality import PcmRailReport
+
+    full = 1 << (bits - 1)
+    raw = np.array([[
+        -full, full - 1, -full + 1, full - 2,
+        0, 1, -1, 0,
+    ]], dtype=np.int64)
+    path = tmp_path / f"exact-{bits}.wav"
+    with wave.open(str(path), "wb") as out:
+        out.setnchannels(1)
+        out.setsampwidth(bits // 8)
+        out.setframerate(24000)
+        out.writeframes(pack_pcm(raw, bits=bits))
+    expected = hashlib.sha256(path.read_bytes()).hexdigest()
+    with WavPacketReader(path, packet_frames=packet_frames,
+                         expected_sha256=expected) as reader:
+        assert reader.verified_pcm_rail_counts is None
+        assert len(list(reader)) == (8 + packet_frames - 1) // packet_frames
+        assert reader.verified_pcm_rail_counts == (1, 1)
+    report = inspect_wav_quality(
+        path, packet_frames=packet_frames, expected_sha256=expected
+    )
+    rails = report.pcm_rails
+    assert isinstance(rails, PcmRailReport)
+    assert rails.positive_samples == 1
+    assert rails.negative_samples == 1
+    assert rails.total_samples == 8
+    assert rails.rail_fraction == pytest.approx(.25)
+    document = report.as_dict()["pcm_rails"]
+    assert document["possible_full_scale_saturation"]
+    assert document["audible_clipping_proven"] is False
+    if bits <= 24:
+        # Positive integer maximum decodes *below* +1.0.
+        assert report.signal_health.clipping_fraction == pytest.approx(1 / 8)
+
+
+def test_pcm_rail_counts_are_never_verified_on_failure(tmp_path):
+    path, _ = _source(tmp_path, bits=16, channels=1)
+    with WavPacketReader(path, expected_sha256="0" * 64) as reader:
+        assert reader.verified_pcm_rail_counts is None
+        with pytest.raises(AudioIntegrityError, match="SHA256"):
+            list(reader)
+        assert reader.verified_pcm_rail_counts is None
+        assert reader.state == "closed"
+
+
+@pytest.mark.parametrize("counts", [
+    (-1, 0, 8), (0, -1, 8), (0, 0, -1), (2, 7, 8),
+    (0, 0, 0), (True, 0, 8),
+])
+def test_pcm_rail_metadata_rejects_impossible_counts(counts):
+    from sonumio.audio_core.stream_quality import PcmRailReport
+    with pytest.raises(AudioContractError, match="PCM rail"):
+        PcmRailReport(*counts)
+
+
+def test_cli_includes_verified_pcm_rail_metadata(tmp_path, capsys):
+    path, result = _source(tmp_path, bits=8, channels=1)
+    assert main([
+        "wav-inspect", str(path), "--expected-sha256", result.wav_sha256,
+    ]) == 0
+    output = json.loads(capsys.readouterr().out)
+    assert output["source_verified"] is True
+    assert "pcm_rails" in output
+    assert output["pcm_rails"]["total_samples"] == output["frames"] * output["channels"]
+    assert 0 <= output["pcm_rails"]["rail_fraction"] <= 1
