@@ -45,3 +45,49 @@ No model training, quantization, checkpoint, waveform publication or
 Sonumio-1 readiness claim is part of this experiment. The purpose is to
 separate representation loss from failure of the neural denoising model
 and obtain a reproducible reconstruction reference.
+
+
+## Quantized payload and validation-only selection
+
+The optional quantized study adds a symmetric uniform quantizer per retained
+coefficient coordinate. Ranges are fitted only on the training panel, using
+maximum absolute coefficient value with a 1e-7 floor. Values outside the
+range saturate; their fraction is reported. Rounding is to nearest with
+ties to even. Supported widths are 4, 8, 12 and 16 bits. A code uses
+two's-complement representation with the most negative code reserved.
+Codes are serialized in row-major order, least-significant bit first,
+into canonical bytes; unused final padding bits must be zero. Decoding
+validates shape, payload length, padding and reserved codes before
+dequantizing. No pickle or general object deserialization is involved.
+
+The payload requires the transform, dimensions, shared coordinate mask or
+PCA basis, quantizer ranges and bit width out of band. It is not a complete
+audio file, and payload bits per second do not include these shared
+parameters or container overhead. Each recording is packed independently,
+and the report measures actual payload bytes, not a hypothetical entropy
+estimate.
+
+The validation grid evaluates five methods, three coefficient budgets
+(8/16/32) and four bit widths, for 60 configurations. At each predeclared
+payload cap (8/16/32/64 kb/s), candidates are selected by descending correct
+accepted validation source count, then represented category count, then
+ascending mean relative squared reconstruction error, payload rate and
+stable configuration ID. If the independent probe fails its reference
+gate, the selection uses only numerical distortion, rate and ID.
+
+All choices are fixed before evaluating any selected configuration on
+24 new confirmation recordings (four previously unused seeds per source).
+The same selected transform without quantization is scored alongside its
+quantized counterpart to separate loss of discarded coordinates from
+quantization loss. Selection and confirmation panels have distinct exact
+waveform hashes and recording seeds from the fit panel and probe references.
+The confirmation panel is still from the same synthetic DSP recipes, not
+a test of real-world sound generalization.
+
+```bash
+OMP_NUM_THREADS=2 OPENBLAS_NUM_THREADS=2 python -m research.quantized_transform_study
+```
+
+The study prints aggregate and per-recording numeric diagnostics in JSON,
+without saving audio, coefficient payload files or model weights.
+No production bitrate, perceptual codec quality or model readiness is claimed.
