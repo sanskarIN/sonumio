@@ -15,6 +15,7 @@ import stat
 import struct
 
 from .contracts import check_rate, MAX_CHANNELS
+from .._file_identity import same_path_descriptor, same_path_identity, same_snapshot
 from .dither import dequantize_pcm, unpack_pcm
 from .errors import AudioContractError, AudioFormatError, AudioIntegrityError, AudioLimitError
 from .hashing import strict_sha256
@@ -25,21 +26,6 @@ from .wave_stream import (
 from .waveio import MAX_WAV_BYTES
 
 _HEADER_BYTES = 44
-
-
-def _same_file_snapshot(left: os.stat_result, right: os.stat_result) -> bool:
-    """Compare platform-exposed identity and change metadata for one file.
-
-    This is best-effort local path integrity, not a filesystem sandbox or
-    protection against hostile privileged processes able to spoof metadata.
-    """
-    return (
-        left.st_dev, left.st_ino, left.st_size,
-        left.st_mtime_ns, left.st_ctime_ns,
-    ) == (
-        right.st_dev, right.st_ino, right.st_size,
-        right.st_mtime_ns, right.st_ctime_ns,
-    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -128,12 +114,22 @@ class WavPacketReader:
             before = os.fstat(fp.fileno())
             if not stat.S_ISREG(before.st_mode):
                 raise AudioFormatError("Expected ordinary local WAVE descriptor")
-            if not _same_file_snapshot(preflight, before):
+            if not same_path_descriptor(preflight, before):
                 raise AudioIntegrityError(
                     "WAVE source changed between path validation and descriptor open"
                 )
             if before.st_size > MAX_WAV_BYTES:
                 raise AudioLimitError("WAV stream file exceeds transport byte cap")
+            # Check native pathname metadata with the SAME API after
+            # opening the descriptor (important on Windows where CRT fstat
+            # may not report nanosecond precision or native inode fields).
+            opened_path = source.lstat()
+            if not stat.S_ISREG(opened_path.st_mode) or not same_snapshot(
+                preflight, opened_path
+            ):
+                raise AudioIntegrityError(
+                    "WAVE source changed between path validation and descriptor open"
+                )
             raw_header = fp.read(_HEADER_BYTES)
             info = _decode_canonical_header(raw_header, before.st_size)
         except BaseException:
@@ -145,6 +141,7 @@ class WavPacketReader:
         self._expected_sha256 = expected_sha256
         self._fp = fp
         self._stat = before
+        self._preflight_path = preflight
         self._frames_read = 0
         self._state = "open"
         self._hash = hashlib.sha256()
@@ -249,21 +246,22 @@ class WavPacketReader:
                     "WAVE source path disappeared during packet reading"
                 ) from exc
             if (not stat.S_ISREG(at_path.st_mode)
-                    or (at_path.st_dev, at_path.st_ino)
-                       != (after.st_dev, after.st_ino)):
+                    or not same_path_identity(self._preflight_path, at_path)):
                 raise AudioIntegrityError(
                     "WAVE source path changed during packet reading"
                 )
-            if (after.st_size != before.st_size or
-                    after.st_mtime_ns != before.st_mtime_ns or
-                    after.st_ctime_ns != before.st_ctime_ns):
+            if not same_snapshot(before, after):
                 raise AudioIntegrityError("WAVE source changed during packet reading")
             # Detect a path-metadata change even if the descriptor's snapshot
             # did not reveal it; a complete digest alone does not protect
             # against replacing the pathname during an inspection.
-            if not _same_file_snapshot(before, at_path):
+            if not same_snapshot(self._preflight_path, at_path):
                 raise AudioIntegrityError(
                     "WAVE source path changed during packet reading"
+                )
+            if not same_path_descriptor(at_path, after):
+                raise AudioIntegrityError(
+                    "WAVE source changed during packet reading"
                 )
             actual = self._hash.hexdigest()
             if (self._expected_sha256 is not None and
