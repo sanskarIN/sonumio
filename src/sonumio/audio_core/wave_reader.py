@@ -239,13 +239,9 @@ class WavPacketReader:
                 raise AudioIntegrityError("WAVE file grew after header validation")
             after = os.fstat(self._fp.fileno())
             before = self._stat
-            if (after.st_size != before.st_size or
-                    after.st_mtime_ns != before.st_mtime_ns or
-                    after.st_ctime_ns != before.st_ctime_ns):
-                raise AudioIntegrityError("WAVE source changed during packet reading")
-            # A verified descriptor checksum is not enough when the path
-            # itself was renamed/replaced: the caller identifies this file
-            # by path, so it must still name the same regular file at EOF.
+            # Classify path identity before descriptor metadata: unlink and
+            # rename also update ctime on POSIX. The path-level reason must
+            # not be obscured by that secondary metadata change.
             try:
                 at_path = self.path.lstat()
             except (OSError, ValueError) as exc:
@@ -253,7 +249,19 @@ class WavPacketReader:
                     "WAVE source path disappeared during packet reading"
                 ) from exc
             if (not stat.S_ISREG(at_path.st_mode)
-                    or not _same_file_snapshot(before, at_path)):
+                    or (at_path.st_dev, at_path.st_ino)
+                       != (after.st_dev, after.st_ino)):
+                raise AudioIntegrityError(
+                    "WAVE source path changed during packet reading"
+                )
+            if (after.st_size != before.st_size or
+                    after.st_mtime_ns != before.st_mtime_ns or
+                    after.st_ctime_ns != before.st_ctime_ns):
+                raise AudioIntegrityError("WAVE source changed during packet reading")
+            # Detect a path-metadata change even if the descriptor's snapshot
+            # did not reveal it; a complete digest alone does not protect
+            # against replacing the pathname during an inspection.
+            if not _same_file_snapshot(before, at_path):
                 raise AudioIntegrityError(
                     "WAVE source path changed during packet reading"
                 )
