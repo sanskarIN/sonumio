@@ -195,3 +195,32 @@ assignments separately for each language, with accepted predictions and
 forced nearest-source rankings reported separately. Repeated labels and
 abstention are preserved in the null distribution. These narrow synthetic
 diagnostics do not establish general language or audio quality.
+
+
+## Logical-update learning-rate schedules
+
+The default constant policy preserves the existing training learning rate.
+The optional warmup/cosine policy increases the rate linearly over the
+configured number of logical updates, then decreases it from the base
+rate to the configured minimum ratio. It requires at least two
+post-warmup updates. The rate is applied exactly once before each logical
+optimizer update and never advanced by microbatch backward calls.
+
+```bash
+python -m research.device_velocity_study --steps 32 --batch-size 5 --microbatch-size 2 --alternative-microbatch 1 --compare-learning-rates
+```
+
+The comparison uses a constant-rate reference, a different microbatch
+partition and a warmup/cosine treatment. All three share initialization
+and stochastic inputs. The full sequence of planned and applied rates
+is reported, and CI checks equality. Independent runs can select
+`--learning-rate`, `--learning-rate-policy`, `--warmup-updates` and
+`--minimum-lr-ratio`. A schedule may improve or worsen model quality;
+the comparison is not a claim of superiority.
+
+Setup and training now share a cleanup scope so an optimizer initialization
+failure or auxiliary evaluation failure returns the model to CPU eval
+mode. Partial accumulated gradients are cleared on failures inside an
+update. Finite objective diagnostics are checked before the optimizer
+step. This is not transactional optimizer-state rollback after an
+optimizer itself fails.
