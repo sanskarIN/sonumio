@@ -50,6 +50,8 @@ class TrainConfig:
     device: str = "cpu"
     loss_policy: str = "uniform"
     min_snr_gamma: float = 5.0
+    timestep_sampling: str = "uniform"
+    caption_sampling: str = "independent"
 
     def __post_init__(self):
         checks = ((self.steps, 1, 4096), (self.batch_size, 1, MAX_BATCH),
@@ -64,6 +66,10 @@ class TrainConfig:
             if type(value) not in (float, int) or not math.isfinite(value) or not lo <= value <= hi:
                 raise ValueError("Invalid optimizer or condition dropout setting")
         validate_policy(self.loss_policy, self.min_snr_gamma)
+        if self.timestep_sampling not in ("uniform", "stratified") or self.caption_sampling not in ("independent", "bilingual_pair"):
+            raise ValueError("Unknown training sampling policy")
+        if self.caption_sampling == "bilingual_pair" and self.batch_size % 2:
+            raise ValueError("Bilingual paired sampling requires an even logical batch")
         if not isinstance(self.device, str):
             raise ValueError("Device must be a string")
 
@@ -101,23 +107,54 @@ class BatchPlanner:
             raise ValueError("Invalid batch planning inputs")
         self.config = config
         self.rows = rows
+        if config.caption_sampling == "bilingual_pair" and rows % 2:
+            raise ValueError("Bilingual sampling requires adjacent recording pairs")
         self.rng = torch.Generator(device="cpu").manual_seed(config.seed + 1)
+        self.timestep_rng = torch.Generator(device="cpu").manual_seed(config.seed + 4096)
+        self.pending_timesteps = torch.empty(0, dtype=torch.long)
         self.trace = hashlib.sha256(b"sonumio-device-velocity-plan-v1\0")
         self.draws = 0
         self.kept = 0
         self.histogram = torch.zeros(config.schedule_steps, dtype=torch.long)
+        self.row_histogram = torch.zeros(rows, dtype=torch.long)
+
+    def _stratified_timesteps(self, count):
+        # Consume complete random permutations, carrying the remainder across
+        # logical batches. Every completed cycle visits every timestep once.
+        parts = []
+        while count:
+            if not len(self.pending_timesteps):
+                self.pending_timesteps = torch.randperm(self.config.schedule_steps, generator=self.timestep_rng)
+            take = min(count, len(self.pending_timesteps))
+            parts.append(self.pending_timesteps[:take])
+            self.pending_timesteps = self.pending_timesteps[take:]
+            count -= take
+        return torch.cat(parts)
 
     def next(self) -> PlannedBatch:
         if self.draws >= self.config.steps:
             raise ValueError("Logical training plan exhausted")
         n = self.config.batch_size
-        indices = torch.randint(self.rows, (n,), generator=self.rng)
-        timesteps = torch.randint(self.config.schedule_steps, (n,), generator=self.rng)
-        keep = torch.rand(n, generator=self.rng) >= self.config.condition_dropout
-        noise = torch.randn((n, 1, FRAMES), generator=self.rng, dtype=torch.float32)
+        paired = self.config.caption_sampling == "bilingual_pair"
+        units = n // 2 if paired else n
+        selected = torch.randint(self.rows // 2 if paired else self.rows, (units,), generator=self.rng)
+        # Draw the original uniform timestep stream even when it is replaced
+        # by stratification, so index/dropout/noise draws remain paired.
+        uniform = torch.randint(self.config.schedule_steps, (units,), generator=self.rng)
+        timesteps = self._stratified_timesteps(units) if self.config.timestep_sampling == "stratified" else uniform
+        keep = torch.rand(units, generator=self.rng) >= self.config.condition_dropout
+        noise = torch.randn((units, 1, FRAMES), generator=self.rng, dtype=torch.float32)
+        if paired:
+            indices = torch.stack((selected * 2, selected * 2 + 1), dim=1).flatten()
+            timesteps = timesteps.repeat_interleave(2)
+            keep = keep.repeat_interleave(2)
+            noise = noise.repeat_interleave(2, dim=0)
+        else:
+            indices = selected
         for value in (indices, timesteps, keep, noise):
             self.trace.update(value.numpy().tobytes())
         self.histogram += torch.bincount(timesteps, minlength=self.config.schedule_steps)
+        self.row_histogram += torch.bincount(indices, minlength=self.rows)
         self.draws += 1
         self.kept += int(keep.sum())
         return PlannedBatch(indices, timesteps, keep, noise)
@@ -130,6 +167,12 @@ class BatchPlanner:
             "timestep_histogram": self.histogram.tolist(),
             "input_trace_sha256": self.trace.hexdigest(),
             "rng_device": "cpu",
+            "timestep_sampling": self.config.timestep_sampling,
+            "caption_sampling": self.config.caption_sampling,
+            "distinct_caption_rows_seen": int((self.row_histogram > 0).sum()),
+            "minimum_caption_row_draws": int(self.row_histogram.min()),
+            "maximum_caption_row_draws": int(self.row_histogram.max()),
+            "timestep_count_spread": int(self.histogram.max() - self.histogram.min()),
         }
 
 
@@ -193,6 +236,11 @@ def train_model(model: nn.Module, waves, tokens, config: TrainConfig):
     validate_corpus(waves, tokens)
     if not isinstance(config, TrainConfig):
         raise ValueError("Expected validated training configuration")
+    if config.caption_sampling == "bilingual_pair":
+        if (len(waves) % 2 or not torch.equal(waves[::2], waves[1::2])
+                or (tokens[::2] == tokens[1::2]).all(dim=1).any()
+                or (tokens == 0).all(dim=1).any()):
+            raise ValueError("Bilingual paired sampling requires equal adjacent waveforms and distinct non-null captions")
     device = resolve_device(config.device)
     initial = model_fingerprint(model)
     model.to(device)
