@@ -234,3 +234,35 @@ No perceptual claims should be inferred. The accumulator retains only
 the last frame per channel and bounded scratch arrays. The verified file
 report remains inaccessible until the whole canonical source is authenticated.
 Single-frame recordings have zero adjacent transitions and zero measured step.
+
+
+## Optional quiet-interval diagnostics
+
+```bash
+sonumio wav-inspect source.wav --quiet-intervals
+sonumio wav-inspect source.wav --max-internal-quiet-frames 8000 --fail-on-warnings
+```
+
+A frame is quiet when **every** decoded channel is at or below the effective
+`--activity-floor-dbfs` amplitude. This is the exact complement of the existing
+active-frame count. The longest internal quiet interval excludes leading and
+trailing pauses; its zero-based start and exclusive stop are measured on the
+original frame clock. Ties choose the earliest interval. The report also
+includes the total quiet frames, quiet fraction, total runs, internal runs and
+leading/trailing lengths. An entirely quiet recording has one run, both edge
+lengths equal the recording length, and no internal run. No internal run
+means zero longest length and null coordinates.
+
+The optional nonnegative integer frame budget automatically enables the
+analysis. Equality passes; a longer internal interval fails the combined
+inspection policy, producing exit code 1 with `--fail-on-warnings` only
+after source verification. Invalid budgets produce exit code 2 and no JSON.
+At 8 kHz a budget of 8000 frames corresponds to one second; at other sample
+rates the same count represents a different duration. Without a budget this
+is observation only. The effective activity floor and budget are recorded.
+
+The algorithm stores one unfinished run and constant-sized summaries, plus
+bounded per-packet scratch arrays. Neither edge nor internal quiet is proof of
+a recording defect, perceptual silence or an audible dropout: pauses may be
+intentional and a partially muted channel is not an all-channel quiet frame.
+The existing global activity policy remains independent.
