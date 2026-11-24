@@ -36,6 +36,7 @@ from .wave_pipeline import WavProcessingConfig, WavProcessingResult, process_wav
 from .stream_quality import StreamingQualityAccumulator, VerifiedWavQuality, inspect_wav_quality, PcmRailReport
 from .quality_timeline import QualityWindow, QualityTimeline, StreamingQualityTimeline
 from .frame_transitions import FrameTransitionReport, StreamingFrameTransitionAccumulator
+from .quiet_intervals import QuietIntervalReport, StreamingQuietIntervalAccumulator
 
 from .streaming import (
     FramePacket, FramerConfig, PacketCollector, StreamingFramer,
@@ -59,6 +60,7 @@ __all__ = [
     "PcmRailReport",
     "QualityWindow", "QualityTimeline", "StreamingQualityTimeline",
     "FrameTransitionReport", "StreamingFrameTransitionAccumulator",
+    "QuietIntervalReport", "StreamingQuietIntervalAccumulator",
     "FramePacket",
     "FramerConfig",
     "PacketCollector",
