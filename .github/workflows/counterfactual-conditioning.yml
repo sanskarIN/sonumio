@@ -1,0 +1,79 @@
+name: Counterfactual velocity conditioning (CPU)
+
+on:
+  pull_request:
+    paths:
+      - 'research/counterfactual_conditioning*.py'
+      - 'research/velocity_ddim_study.py'
+      - 'research/velocity_ddim.py'
+      - 'research/velocity_prediction.py'
+      - 'research/generated_source_grounding.py'
+      - 'research/text_audio.py'
+      - 'research/latent_audio.py'
+      - 'research/wave_diffusion.py'
+      - 'src/sonumio/engines/procedural.py'
+      - 'tests/test_counterfactual_conditioning.py'
+      - '.github/workflows/counterfactual-conditioning.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'research/**'
+      - 'src/sonumio/**'
+      - 'tests/test_counterfactual_conditioning.py'
+      - '.github/workflows/counterfactual-conditioning.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  paired:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      OMP_NUM_THREADS: '2'
+      MKL_NUM_THREADS: '2'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install research dependencies
+        run: |
+          python -m pip install -e '.[test]' 'scipy>=1.12,<2'
+          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+      - name: Regression and paired real training tests
+        run: python -m pytest -q tests/test_counterfactual_conditioning.py
+      - name: Run two independent paired experiments
+        run: |
+          for seed in 17 29; do
+            python -m research.counterfactual_conditioning_study \
+              --seed "$seed" --train-steps 32 --codec-steps 16 \
+              --weight 0.5 --evaluations 8 --sampling-seeds 301 302 > "$RUNNER_TEMP/conditioning-$seed.json"
+          done
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          root = Path(os.environ["RUNNER_TEMP"])
+          reports = [json.loads((root / f"conditioning-{s}.json").read_text()) for s in (17, 29)]
+          for report in reports:
+              assert report["same_initial_parameters"]
+              assert report["same_training_input_trace"]
+              assert report["same_frozen_codec"]
+              assert not report["weights_or_audio_saved"]
+              assert not report["semantic_quality_established"]
+              assert report["generated_scores_available"]
+              for name, result in report["arms"].items():
+                  assert result["generated_case_count"] == 48
+                  assert len(result["null_guidance_checks"]) == 4
+                  for arm, languages in result["generated_reference_summaries"].items():
+                      for language, scores in languages.items():
+                          print(report["configuration"]["seed"], name, arm, language, {
+                              key: row["accepted_rank_one_excluding_noise_confounds"]
+                              for key, row in scores.items()
+                          })
+              print("teacher-forced treatment minus baseline",
+                    json.dumps(report["treatment_minus_baseline_teacher_forced"], sort_keys=True))
+          assert reports[0]["arms"]["baseline"]["trained_model_sha256"] != reports[1]["arms"]["baseline"]["trained_model_sha256"]
+          PY
