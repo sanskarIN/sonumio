@@ -45,6 +45,13 @@ def _aggregate(rows):
 def _score_panel(fitted, method, budget, waves, labels, probe):
     coefficients = fitted.encode(waves, method, budget)
     decoded = fitted.decode(coefficients, method, budget)
+    return score_decoded_panel(waves, decoded, labels, probe)
+
+
+def score_decoded_panel(waves, decoded, labels, probe):
+    """Shared pre-clipping numerical and post-clipping source evaluation."""
+    if len(labels) != len(waves):
+        raise ValueError("Recording and label count mismatch")
     metrics = reconstruction_metrics(waves, decoded)
     rows = []
     for i, label in enumerate(labels):
