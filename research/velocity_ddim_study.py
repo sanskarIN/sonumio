@@ -90,6 +90,7 @@ def _train_models(*, seed: int, train_steps: int, codec_steps: int,
     raw = TextWaveDenoiser(channels)
     latent = LatentResearchModel(channels)
     codec = latent.codec
+    initial_state = _model_state_sha256({"raw": raw, "latent": latent.denoiser}, codec)
     index_rng = torch.Generator(device="cpu").manual_seed(seed + 1)
     codec_optim = torch.optim.AdamW(codec.parameters(), lr=0.001)
     unique = train.waves[::2]
@@ -131,6 +132,7 @@ def _train_models(*, seed: int, train_steps: int, codec_steps: int,
     models = {"raw": raw, "latent": latent.denoiser}
     losses = {"raw": [], "latent": []}
     auxiliary = {"raw": [], "latent": []}
+    retained_caption_examples = 0
     for step in range(train_steps):
         indices = torch.randint(len(train.waves), (2,), generator=index_rng)
         timestep = torch.randint(
@@ -141,6 +143,7 @@ def _train_models(*, seed: int, train_steps: int, codec_steps: int,
             keep[:, None], train.tokens[indices],
             torch.zeros_like(train.tokens[indices]),
         )
+        retained_caption_examples += int(keep.sum())
         for value in (indices, timestep, keep):
             trace.update(value.numpy().tobytes())
         wrong_tokens = (train.tokens[interventions.wrong_indices(indices, round_index=step)]
@@ -200,6 +203,8 @@ def _train_models(*, seed: int, train_steps: int, codec_steps: int,
         "training_fingerprint": train.fingerprint,
         "training_input_trace_sha256": trace.hexdigest(),
         "conditioning_weight": conditioning_weight,
+        "initial_model_state_sha256": initial_state,
+        "retained_caption_examples": retained_caption_examples,
         "mean_auxiliary_caption_penalty": {arm: mean(values) for arm, values in auxiliary.items()},
         "validation_fingerprint": validation.fingerprint,
         "unique_training_waveforms": len(training_hashes),
