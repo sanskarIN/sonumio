@@ -117,11 +117,44 @@ class StreamingQualityAccumulator:
 
 
 @dataclass(frozen=True, slots=True)
+class PcmRailReport:
+    """Exact decoded integer endpoint counts, not inferred distortion."""
+
+    positive_samples: int
+    negative_samples: int
+    total_samples: int
+
+    def __post_init__(self) -> None:
+        if any(type(v) is not int or v < 0 for v in (
+            self.positive_samples, self.negative_samples, self.total_samples
+        )):
+            raise AudioContractError("Invalid PCM rail count")
+        if (self.total_samples == 0
+                or self.positive_samples + self.negative_samples > self.total_samples):
+            raise AudioContractError("PCM rail counts exceed decoded samples")
+
+    @property
+    def rail_fraction(self) -> float:
+        return (self.positive_samples + self.negative_samples) / self.total_samples
+
+    def as_dict(self) -> dict:
+        return {
+            "positive_samples": self.positive_samples,
+            "negative_samples": self.negative_samples,
+            "total_samples": self.total_samples,
+            "rail_fraction": self.rail_fraction,
+            "possible_full_scale_saturation": self.rail_fraction > 0,
+            "audible_clipping_proven": False,
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class VerifiedWavQuality:
     info: WavPacketInfo
     source_sha256: str
     signal_health: QualityReport
     timeline: QualityTimeline | None = None
+    pcm_rails: PcmRailReport | None = None
 
     def as_dict(self) -> dict:
         result = {
@@ -139,6 +172,8 @@ class VerifiedWavQuality:
         }
         if self.timeline is not None:
             result["timeline"] = self.timeline.as_dict()
+        if self.pcm_rails is not None:
+            result["pcm_rails"] = self.pcm_rails.as_dict()
         return result
 
 
@@ -184,4 +219,14 @@ def inspect_wav_quality(
             raise AudioIntegrityError("Incomplete verified WAV inspection")
         health = accumulator.finalize()
         timed = timeline.finalize() if timeline is not None else None
-        return VerifiedWavQuality(reader.info, reader.verified_sha256, health, timed)
+        rail_counts = reader.verified_pcm_rail_counts
+        if rail_counts is None:
+            raise AudioIntegrityError("Unverified WAV PCM endpoints")
+        rails = PcmRailReport(
+            positive_samples=rail_counts[0],
+            negative_samples=rail_counts[1],
+            total_samples=reader.info.frames * reader.info.channels,
+        )
+        return VerifiedWavQuality(
+            reader.info, reader.verified_sha256, health, timed, rails,
+        )
