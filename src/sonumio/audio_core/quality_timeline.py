@@ -8,7 +8,6 @@ cryptographic proof, perceptual score or source-rights verification.
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
-import math
 
 import numpy as np
 
