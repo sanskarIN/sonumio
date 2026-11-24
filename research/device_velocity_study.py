@@ -21,6 +21,8 @@ from research.architecture_compare import _audio_hashes
 from research.device_velocity_training import TrainConfig, resolve_device, train_model
 from research.velocity_loss_weights import POLICIES
 from research.semantic_training import synthetic_source_targets
+from research.counterfactual_conditioning import CaptionInterventions, heldout_interventions
+from research.paired_grounding_audit import _exact_assignment
 from research.generated_source_grounding import LANGUAGES, _summary
 from research.latent_audio import TRAIN_SEEDS, VALIDATION_SEEDS, synthetic_bilingual_waves
 from research.open_set_source_probe import evaluate_probe, fit_probe, reference_panels
@@ -81,7 +83,14 @@ def generate(model, schedule, probe, *, seed, evaluations):
                          "null_guidance": null.as_dict(label),
                          "unclamped_rms": float(wave.square().mean().sqrt()),
                          "out_of_range_fraction": float((wave.abs() > 1).float().mean())})
-    return {"cases": rows, "null_caption_invariant": True,
+    assignment = {}
+    for language in LANGUAGES:
+        cases = [row for row in rows if row["language"] == language]
+        accepted = tuple(row["matched"]["closest"] if row["matched"]["within_reference_radius"] else None for row in cases)
+        assignment[language] = {"accepted": _exact_assignment(accepted),
+                                "forced_rank_one": _exact_assignment(tuple(row["matched"]["closest"] for row in cases)),
+                                "distinct_accepted_categories": len(set(accepted) - {None})}
+    return {"cases": rows, "null_caption_invariant": True, "balanced_assignment": assignment,
             "by_language": {
                 language: {condition: _summary([row[condition] for row in rows if row["language"] == language])
                            for condition in ("matched", "rotated", "null_guidance")}
@@ -108,7 +117,7 @@ def compare_parameters(left, right):
 
 
 def run_study(*, config=TrainConfig(), alternative_microbatch=1, sampling_seed=301, evaluations=4,
-              compare_objectives=False, compare_semantics=False):
+              compare_objectives=False, compare_semantics=False, compare_margins=False):
     if not isinstance(config, TrainConfig):
         raise ValueError("Expected validated training configuration")
     # A smaller fixed experiment budget than the underlying training runner.
@@ -122,6 +131,8 @@ def run_study(*, config=TrainConfig(), alternative_microbatch=1, sampling_seed=3
         raise ValueError('Objective comparison requires uniform reference policy')
     if type(compare_semantics) is not bool or (compare_semantics and config.semantic_weight != 0):
         raise ValueError('Semantic comparison requires unsupervised reference')
+    if type(compare_margins) is not bool or (compare_margins and config.margin_weight != 0):
+        raise ValueError('Margin comparison requires zero-margin reference')
     resolve_device(config.device)
     train = synthetic_bilingual_waves(TRAIN_SEEDS)
     validation = synthetic_bilingual_waves(VALIDATION_SEEDS)
@@ -145,6 +156,9 @@ def run_study(*, config=TrainConfig(), alternative_microbatch=1, sampling_seed=3
             variants[policy + "_cpu"] = replace(config, device="cpu", loss_policy=policy)
     if compare_semantics:
         variants["semantic_cpu"] = replace(config, device="cpu", semantic_weight=0.5)
+    if compare_margins:
+        variants["margin_cpu"] = replace(config, device="cpu", margin_weight=0.5)
+    validation_interventions = CaptionInterventions.build(validation.tokens, VALIDATION_SEEDS)
     training_targets = synthetic_source_targets(train.tokens, TRAIN_SEEDS) if any(v.semantic_weight for v in variants.values()) else None
     validation_targets = synthetic_source_targets(validation.tokens, VALIDATION_SEEDS) if training_targets is not None else None
     models, reports = {}, {}
@@ -156,6 +170,8 @@ def run_study(*, config=TrainConfig(), alternative_microbatch=1, sampling_seed=3
             started = perf_counter()
             kwargs = ({"semantic_targets": training_targets, "semantic_validation": (validation.tokens, validation_targets)}
                       if variant.semantic_weight else {})
+            if variant.margin_weight:
+                kwargs["intervention_seeds"] = TRAIN_SEEDS
             report = train_model(model, train.waves, train.tokens, variant, **kwargs)
             report["training_wall_seconds"] = perf_counter() - started
             # Includes transfers, hashing and synchronization, not just kernels.
@@ -163,6 +179,9 @@ def run_study(*, config=TrainConfig(), alternative_microbatch=1, sampling_seed=3
             reports[name] = {
                 "training": report,
                 "heldout": heldout(model, validation, schedule, seed=config.seed + 2),
+                "heldout_interventions": heldout_interventions(
+                    model, validation.waves, validation.tokens, validation_interventions,
+                    schedule, noise_seed=config.seed + 2),
                 "generated": (generate(model, schedule, probe, seed=sampling_seed, evaluations=evaluations)
                               if gate["gate"]["passed"] else None),
             }
@@ -175,7 +194,8 @@ def run_study(*, config=TrainConfig(), alternative_microbatch=1, sampling_seed=3
         "protocol": PROTOCOL,
         "configuration": {**vars(config), "alternative_microbatch": alternative_microbatch,
                           "sampling_seed": sampling_seed, "evaluations": evaluations,
-                          "compare_objectives": compare_objectives, "compare_semantics": compare_semantics},
+                          "compare_objectives": compare_objectives, "compare_semantics": compare_semantics,
+                          "compare_margins": compare_margins},
         "training_fingerprint": train.fingerprint, "validation_fingerprint": validation.fingerprint,
         "unique_training_recordings": len(train_hashes), "unique_validation_recordings": len(val_hashes),
         "exact_split_overlap": False, "paired_initialization_and_inputs": True,
@@ -206,6 +226,10 @@ def main():
     parser.add_argument("--min-snr-gamma", type=float, default=5.0)
     parser.add_argument("--compare-objectives", action="store_true")
     parser.add_argument("--compare-semantics", action="store_true")
+    parser.add_argument("--compare-margins", action="store_true")
+    parser.add_argument("--margin-weight", type=float, default=0.0)
+    parser.add_argument("--relative-margin", type=float, default=0.05)
+    parser.add_argument("--negative-count", type=int, default=2)
     parser.add_argument("--semantic-weight", type=float, default=0.0)
     parser.add_argument("--timestep-sampling", choices=("uniform", "stratified"), default="uniform")
     parser.add_argument("--caption-sampling", choices=("independent", "bilingual_pair"), default="independent")
@@ -215,10 +239,11 @@ def main():
                          seed=args.seed, schedule_steps=args.schedule_steps,
                          loss_policy=args.loss_policy, min_snr_gamma=args.min_snr_gamma,
                          timestep_sampling=args.timestep_sampling, caption_sampling=args.caption_sampling,
-                         semantic_weight=args.semantic_weight)
+                         semantic_weight=args.semantic_weight, margin_weight=args.margin_weight,
+                         relative_margin=args.relative_margin, negative_count=args.negative_count)
     print(json.dumps(run_study(config=config, alternative_microbatch=args.alternative_microbatch,
                                evaluations=args.evaluations, compare_objectives=args.compare_objectives,
-                               compare_semantics=args.compare_semantics), allow_nan=False, indent=2))
+                               compare_semantics=args.compare_semantics, compare_margins=args.compare_margins), allow_nan=False, indent=2))
 
 
 if __name__ == "__main__":
