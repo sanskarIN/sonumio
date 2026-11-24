@@ -65,3 +65,37 @@ This is a bounded synthetic-only training experiment at 8 kHz, using
 1.024-second waveform clips and the existing 16-channel research architecture.
 Successful optimization does not establish perceptual quality, general
 prompt grounding, long-duration generation, or Sonumio-1 readiness.
+
+
+## Timestep weighting ablation
+
+The existing default uniform velocity objective is preserved. Two opt-in
+policies keep the same stochastic sampling plan, model initialization and
+logical-batch normalization:
+
+- Min-SNR velocity weighting: min(alpha_bar, gamma * (1 - alpha_bar)).
+  This is algebraically equivalent to min(SNR, gamma)/(SNR + 1)
+  and avoids division by very small terminal signal powers.
+- Clean-space MSE weighting: 1 - alpha_bar. For identical noisy input,
+  clean-waveform MSE equals velocity-prediction MSE times this factor.
+
+The first policy follows Hang et al., [Efficient Diffusion Training via
+Min-SNR Weighting Strategy](https://arxiv.org/abs/2303.09556), ICCV 2023.
+The second is a separate algebraic diagnostic. Neither policy is assumed
+to improve audio quality. In particular Min-SNR strongly downweights the
+near-zero terminal SNR, while clean-space weighting emphasizes it.
+
+Use the controlled comparison:
+
+```bash
+python -m research.device_velocity_study --device cpu --steps 32 --batch-size 5 --microbatch-size 2 --alternative-microbatch 1 --compare-objectives
+```
+
+The four arms share random indices, timesteps, condition dropout, Gaussian
+noise and initial model parameters. Weighted training objectives are
+reported separately from raw velocity MSE; a lower weighted objective is
+not evidence that one policy is better than another. Compare unweighted
+held-out waveform errors and matched versus rotated/null generation.
+The weighting formula and uneven microbatch gradient equivalence have
+dedicated regression tests. The experiment makes no claim of successful
+prompt grounding or hardware acceleration.
