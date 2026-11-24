@@ -15,6 +15,24 @@ The experimental web client builds separately using Node/npm; a committed
 npm dependency lockfile is still pending. The local API is not for public
 hosting and the neural research is not a release-ready original model.
 
+## Next source-only candidate (v0.0.2)
+
+The next software pre-release is under preparation, not published.
+The candidate includes the local audio analysis and research changes on
+main, plus an updated source-build verification gate. See the
+[v0.0.2 candidate checklist](docs/V0_0_2_SOURCE_CANDIDATE.md).
+
+Generate a local procedural demo and its verification report:
+
+```bash
+python -m sonumio.demo --output outputs/forest-storm.wav
+python -m sonumio.audio_core.spectrum_cli outputs/forest-storm.wav --fft-frames 1024
+```
+
+See [demo instructions](docs/PROCEDURAL_DEMO.md) and
+[streaming spectrum diagnostics](docs/VERIFIED_WAV_SPECTRUM.md).
+These are DSP tools, not a trained Sonumio-1 model.
+
 ## Setup
 Python 3.11+:
 1. `python -m venv .venv`
