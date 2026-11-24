@@ -1,0 +1,82 @@
+name: Open-set synthetic source probe (CPU)
+
+on:
+  pull_request:
+    paths:
+      - 'research/open_set_source*.py'
+      - 'research/generated_source_grounding.py'
+      - 'research/generation_audit.py'
+      - 'research/velocity_ddim*.py'
+      - 'research/latent_audio.py'
+      - 'research/text_audio.py'
+      - 'research/wave_diffusion.py'
+      - 'src/sonumio/engines/procedural.py'
+      - 'tests/test_open_set_source_probe.py'
+      - '.github/workflows/open-set-source-probe.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'research/**'
+      - 'src/sonumio/**'
+      - 'tests/test_open_set_source_probe.py'
+      - '.github/workflows/open-set-source-probe.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      OMP_NUM_THREADS: '2'
+      MKL_NUM_THREADS: '2'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install CPU research dependencies
+        run: |
+          python -m pip install -e '.[test]' 'scipy>=1.12,<2'
+          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+      - name: Test isolated noise controls and fail-closed gate
+        run: python -m pytest -q tests/test_open_set_source_probe.py
+      - name: Evaluate independent controls and conditionally sample two neural initializations
+        run: |
+          for seed in 17 29; do
+            python -m research.open_set_source_study --train --seed "$seed" \
+              --train-steps 32 --codec-steps 16 --evaluations 8 --sampling-seeds 301 302 \
+              > "$RUNNER_TEMP/open-set-$seed.json"
+          done
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          root = Path(os.environ["RUNNER_TEMP"])
+          a, b = [json.loads((root / f"open-set-{seed}.json").read_text()) for seed in (17, 29)]
+          for key in ("reference_splits", "calibration", "old_probe_on_same_holdout", "open_set_holdout"):
+              assert a[key] == b[key], key
+          for report in (a, b):
+              assert not report["overlap_with_generator_data"]
+              assert not report["weights_or_audio_saved"]
+              assert not report["model_readiness_established"]
+              holdout = report["open_set_holdout"]
+              assert holdout["source_cases"] == 18 and holdout["noise_cases"] == 28
+              print("old probe", report["old_probe_on_same_holdout"])
+              print("new probe", holdout["correct_accepted_sources"], holdout["false_accepted_noise"], holdout["gate"])
+              print("source coverage", holdout["by_source_category"])
+              print("noise rejection", holdout["by_noise_family"])
+              print("phase surrogate correct accepted", report["phase_surrogate_challenge"]["correct_accepted_source"])
+              if holdout["gate"]["passed"]:
+                  assert report["status"] == "generated"
+                  assert len(report["generated_cases"]) == 48
+                  assert len(report["null_guidance_checks"]) == 4
+                  print("generated summaries", json.dumps(report["generated_summaries"], sort_keys=True))
+              else:
+                  assert report["status"] == "reference_gate_failed"
+                  assert report["training"] is None and not report["generated_cases"]
+          if a["status"] == "generated":
+              assert a["trained_model_sha256"] != b["trained_model_sha256"]
+          PY
