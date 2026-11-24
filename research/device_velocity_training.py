@@ -18,6 +18,7 @@ from research.latent_audio import FRAMES
 from research.text_audio import MAX_TOKENS, BYTE_VOCAB
 from research.velocity_prediction import velocity_target
 from research.velocity_loss_weights import validate_policy, timestep_weights, velocity_loss, describe_weights
+from research.semantic_training import SemanticHead, semantic_loss, semantic_diagnostics, validate_semantic_weight, validate_targets
 from research.wave_diffusion import DiffusionSchedule
 
 MAX_BATCH = 32
@@ -52,6 +53,7 @@ class TrainConfig:
     min_snr_gamma: float = 5.0
     timestep_sampling: str = "uniform"
     caption_sampling: str = "independent"
+    semantic_weight: float = 0.0
 
     def __post_init__(self):
         checks = ((self.steps, 1, 4096), (self.batch_size, 1, MAX_BATCH),
@@ -66,6 +68,7 @@ class TrainConfig:
             if type(value) not in (float, int) or not math.isfinite(value) or not lo <= value <= hi:
                 raise ValueError("Invalid optimizer or condition dropout setting")
         validate_policy(self.loss_policy, self.min_snr_gamma)
+        validate_semantic_weight(self.semantic_weight)
         if self.timestep_sampling not in ("uniform", "stratified") or self.caption_sampling not in ("independent", "bilingual_pair"):
             raise ValueError("Unknown training sampling policy")
         if self.caption_sampling == "bilingual_pair" and self.batch_size % 2:
@@ -188,14 +191,20 @@ def model_fingerprint(model: nn.Module) -> str:
     return digest.hexdigest()
 
 
-def training_update(model, optimizer, schedule, waves, tokens, plan, config, device):
+def training_update(model, optimizer, schedule, waves, tokens, plan, config, device,
+                    *, semantic_head=None, semantic_targets=None):
     """One logical optimizer update; normalize over the entire logical batch."""
     if len(plan.indices) != config.batch_size:
         raise ValueError("Logical batch does not match configuration")
+    if bool(config.semantic_weight) != (semantic_head is not None and semantic_targets is not None):
+        raise ValueError("Semantic training requires explicit auxiliary head and targets")
     model.train()
+    if semantic_head is not None:
+        semantic_head.train()
     optimizer.zero_grad(set_to_none=True)
     total = 0.0
     weighted_total = 0.0
+    semantic_total = 0.0
     weights = timestep_weights(schedule.alpha_bars, config.loss_policy, config.min_snr_gamma)
     microbatches = 0
     try:
@@ -214,12 +223,22 @@ def training_update(model, optimizer, schedule, waves, tokens, plan, config, dev
             # Weight each microbatch by its actual size, including a remainder.
             # Summing independent gradients gives the logical-batch mean.
             raw, weighted = velocity_loss(prediction, target, step, weights)
-            loss = weighted.sum() / config.batch_size
+            objective = weighted.sum() / config.batch_size
+            auxiliary = (semantic_loss(model.text_encoder, semantic_head, caption,
+                                       semantic_targets[indices].to(device), keep) / config.batch_size
+                         if semantic_head is not None else objective.new_zeros(()))
+            loss = objective + config.semantic_weight * auxiliary
+            if not torch.isfinite(loss):
+                raise ValueError("Nonfinite combined objective")
             loss.backward()
             total += float(raw.detach().sum().cpu()) / config.batch_size
-            weighted_total += float(loss.detach().cpu())
+            weighted_total += float(objective.detach().cpu())
+            semantic_total += float(auxiliary.detach().cpu())
             microbatches += 1
-        norm = nn.utils.clip_grad_norm_(model.parameters(), config.max_grad_norm,
+        parameters = list(model.parameters())
+        if semantic_head is not None:
+            parameters += list(semantic_head.parameters())
+        norm = nn.utils.clip_grad_norm_(parameters, config.max_grad_norm,
                                         error_if_nonfinite=True)
         optimizer.step()
         if not math.isfinite(total) or not math.isfinite(weighted_total) or not torch.isfinite(norm):
@@ -227,11 +246,13 @@ def training_update(model, optimizer, schedule, waves, tokens, plan, config, dev
     finally:
         # Prevent stale partial gradients after a failed or successful update.
         optimizer.zero_grad(set_to_none=True)
-    return {"velocity_mse": total, "weighted_objective": weighted_total, "preclip_gradient_norm": float(norm.detach().cpu()),
+    return {"velocity_mse": total, "weighted_objective": weighted_total,
+            "semantic_auxiliary": semantic_total, "preclip_gradient_norm": float(norm.detach().cpu()),
             "microbatches": microbatches}
 
 
-def train_model(model: nn.Module, waves, tokens, config: TrainConfig):
+def train_model(model: nn.Module, waves, tokens, config: TrainConfig,
+                *, semantic_targets=None, semantic_validation=None):
     """Return a trained CPU model and numeric report; CUDA inference is not assumed."""
     validate_corpus(waves, tokens)
     if not isinstance(config, TrainConfig):
@@ -241,11 +262,36 @@ def train_model(model: nn.Module, waves, tokens, config: TrainConfig):
                 or (tokens[::2] == tokens[1::2]).all(dim=1).any()
                 or (tokens == 0).all(dim=1).any()):
             raise ValueError("Bilingual paired sampling requires equal adjacent waveforms and distinct non-null captions")
+    if config.semantic_weight:
+        validate_targets(semantic_targets, len(tokens))
+        if not hasattr(model, "text_encoder") or not hasattr(model, "channels"):
+            raise ValueError("Semantic training requires the text waveform denoiser")
+        if semantic_validation is not None:
+            val_tokens, val_targets = semantic_validation
+            if (val_tokens.ndim != 2 or val_tokens.shape[1] != MAX_TOKENS or val_tokens.dtype != torch.long
+                    or val_tokens.device.type != "cpu" or not 1 <= len(val_tokens) <= MAX_ROWS
+                    or (val_tokens < 0).any() or (val_tokens >= BYTE_VOCAB).any()):
+                raise ValueError("Invalid semantic validation caption batch")
+            validate_targets(val_targets, len(val_tokens))
+    elif semantic_targets is not None or semantic_validation is not None:
+        raise ValueError("Semantic targets supplied with disabled objective")
     device = resolve_device(config.device)
     initial = model_fingerprint(model)
+    head = None
+    semantic_report = None
+    if config.semantic_weight:
+        with torch.random.fork_rng(devices=[]):
+            torch.random.default_generator.manual_seed(config.seed + 6144)
+            head = SemanticHead(model.channels)
+        head = head.to(device)
     model.to(device)
     schedule = DiffusionSchedule(config.schedule_steps, profile="cosine_zero_terminal_v1").to(device)
-    optimizer = torch.optim.AdamW(model.parameters(), lr=config.learning_rate, foreach=False)
+    parameters = list(model.parameters()) + (list(head.parameters()) if head is not None else [])
+    optimizer = torch.optim.AdamW(parameters, lr=config.learning_rate, foreach=False)
+    if head is not None:
+        semantic_report = {"initial_training": semantic_diagnostics(model.text_encoder, head, tokens, semantic_targets),
+                           "initial_validation": semantic_diagnostics(model.text_encoder, head, *semantic_validation)
+                           if semantic_validation is not None else None}
     planner = BatchPlanner(config, len(waves))
     history = []
     if device.type == "cuda":
@@ -253,12 +299,20 @@ def train_model(model: nn.Module, waves, tokens, config: TrainConfig):
     try:
         for _ in range(config.steps):
             history.append(training_update(model, optimizer, schedule, waves, tokens,
-                                           planner.next(), config, device))
+                                           planner.next(), config, device,
+                                           semantic_head=head, semantic_targets=semantic_targets))
         if device.type == "cuda":
             torch.cuda.synchronize(device)
     finally:
         # The existing research DDIM sampler is CPU-only.
         model.to("cpu").eval()
+        if head is not None:
+            head.to("cpu").eval()
+    if head is not None:
+        semantic_report["final_training"] = semantic_diagnostics(model.text_encoder, head, tokens, semantic_targets)
+        semantic_report["final_validation"] = (semantic_diagnostics(model.text_encoder, head, *semantic_validation)
+                                               if semantic_validation is not None else None)
+        semantic_report["head_retained_for_inference"] = False
     losses = [row["velocity_mse"] for row in history]
     return {
         "device": str(device), "torch_version": str(torch.__version__),
@@ -266,6 +320,9 @@ def train_model(model: nn.Module, waves, tokens, config: TrainConfig):
         "cuda_device_name": torch.cuda.get_device_name(device) if device.type == "cuda" else None,
         "training_dtype": "float32", "gradient_accumulation": True,
         "loss_policy": config.loss_policy, "min_snr_gamma": config.min_snr_gamma,
+        "semantic_weight": config.semantic_weight, "semantic_diagnostics": semantic_report,
+        "mean_semantic_auxiliary": sum(row["semantic_auxiliary"] for row in history) / len(history),
+        "mean_combined_objective": sum(row["weighted_objective"] + config.semantic_weight * row["semantic_auxiliary"] for row in history) / len(history),
         "timestep_weights": describe_weights(timestep_weights(schedule.alpha_bars, config.loss_policy, config.min_snr_gamma)),
         "mean_weighted_objective": sum(row["weighted_objective"] for row in history) / len(history),
         "logical_batch_size": config.batch_size, "microbatch_size": config.microbatch_size,
