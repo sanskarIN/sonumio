@@ -10,6 +10,7 @@ import ast
 from dataclasses import dataclass
 import hashlib
 import json
+import math
 import os
 import re
 import stat
@@ -29,6 +30,8 @@ REQUIRED = frozenset({
     "src/sonumio/__init__.py", "src/sonumio/cli.py",
     "src/sonumio/api.py", "src/sonumio/engines/procedural.py",
     "web/package.json", "scripts/source_release_gate.py",
+    "src/sonumio/demo.py", "src/sonumio/audio_core/stream_spectrum.py",
+    "src/sonumio/audio_core/spectrum_cli.py",
 })
 BANNED_PARTS = frozenset({
     ".git", "node_modules", "dist", "build", "outputs", "checkpoints",
@@ -287,6 +290,7 @@ def _audit_archive(archive: Path, candidate: SourceCandidate, *, format: str = "
 
 def _smoke_archive(archive: Path, work: Path, candidate: SourceCandidate) -> dict[str, object]:
     version = candidate.version
+    work.mkdir(parents=True, exist_ok=False)
     venv_dir = work / "isolated-env"
     venv.EnvBuilder(with_pip=True, clear=True).create(venv_dir)
     if os.name == "nt":
@@ -323,10 +327,90 @@ def _smoke_archive(archive: Path, work: Path, candidate: SourceCandidate) -> dic
         if (source.getframerate() != 24_000 or source.getnchannels() != 1
                 or source.getsampwidth() != 2 or source.getnframes() != 12_000):
             raise RuntimeError("Installed source produced invalid PCM WAV")
+    digest = hashlib.sha256(destination.read_bytes()).hexdigest()
+    inspected = json.loads(_run([
+        str(console), "wav-inspect", str(destination),
+        "--expected-sha256", digest, "--timeline", "--continuity",
+        "--quiet-intervals", "--channel-relationships",
+    ], cwd=work, env=env).stdout)
+    if (inspected.get("source_sha256") != digest
+            or inspected.get("source_verified") is not True
+            or inspected.get("frames") != 12000
+            or inspected.get("signal_health", {}).get("clipping_fraction") != 0
+            or not {"timeline", "frame_continuity", "quiet_intervals",
+                    "channel_relationships"}.issubset(inspected)):
+        raise RuntimeError("Installed source WAV inspection failed")
+    spectrum = json.loads(_run([
+        str(python), "-m", "sonumio.audio_core.spectrum_cli", str(destination),
+        "--expected-sha256", digest, "--fft-frames", "256", "--include-bins",
+    ], cwd=work, env=env).stdout)
+    _check_spectrum_smoke(spectrum, digest, destination)
+    demo_path = work / "source-built-demo.wav"
+    demo = json.loads(_run([
+        str(python), "-m", "sonumio.demo", "--output", str(demo_path),
+    ], cwd=work, env=env).stdout)
+    _check_demo_smoke(demo, demo_path, version)
+    repeated = work / "source-built-demo-repeat.wav"
+    repeat = json.loads(_run([
+        str(python), "-m", "sonumio.demo", "--output", str(repeated),
+        "--expected-sha256", demo["wav_sha256"],
+    ], cwd=work, env=env).stdout)
+    if (repeat != demo or repeated.read_bytes() != demo_path.read_bytes()):
+        raise RuntimeError("Installed source procedural demo is not reproducible")
     return {
         "installed_version": reported, "source_install": "isolated non-editable",
-        "generated_wav_frames": 12_000, "uploaded_artifacts": 0,
+        "generated_wav_frames": 12_000,
+        "verified_wav_inspection": True, "verified_spectrum": True,
+        "verified_demo": True, "demo_repeat_identical": True,
+        "demo_wav_sha256": demo["wav_sha256"], "uploaded_artifacts": 0,
     }
+
+
+def _check_spectrum_smoke(report: dict, digest: str, destination: Path) -> None:
+    """Check installed FFT report independently against actual PCM16 bytes."""
+    import struct
+    spectral = report["spectrum"]
+    if (report.get("source_verified") is not True
+            or report.get("source_sha256") != digest
+            or spectral.get("frames") != 12000
+            or spectral.get("fft_frames") != 256
+            or spectral.get("channels") != 1
+            or spectral.get("complete_blocks") != 46
+            or spectral.get("padded_tail_frames") != 224):
+        raise RuntimeError("Installed spectrum geometry or provenance mismatch")
+    with wave.open(str(destination), "rb") as source:
+        data = source.readframes(source.getnframes())
+    expected = math.fsum(
+        (sample / 32768.0) ** 2 for (sample,) in struct.iter_unpack("<h", data)
+    ) / 12000
+    channel = spectral["channel_spectra"][0]
+    bins = channel["bin_mean_square"]
+    if (len(bins) != 129 or any(not math.isfinite(x) or x < 0 for x in bins)
+            or not math.isclose(math.fsum(bins), expected, rel_tol=1e-8, abs_tol=1e-12)
+            or not math.isclose(channel["mean_square"], expected,
+                                rel_tol=1e-8, abs_tol=1e-12)):
+        raise RuntimeError("Installed spectrum failed independent PCM energy check")
+
+
+def _check_demo_smoke(report: dict, destination: Path, version: str) -> None:
+    digest = hashlib.sha256(destination.read_bytes()).hexdigest()
+    inspection = report["inspection"]
+    if (report.get("software_version") != version
+            or report.get("engine_id") != "procedural-sfx-v0"
+            or report.get("seed") != 42
+            or report.get("duration_seconds") != 12.0
+            or report.get("original_model_inference") is not False
+            or report.get("third_party_recordings_used") is not False
+            or report.get("wav_sha256") != digest
+            or report.get("bytes_written") != 576044
+            or inspection.get("source_sha256") != digest
+            or inspection.get("source_verified") is not True
+            or inspection.get("signal_health", {}).get("clipping_fraction") != 0):
+        raise RuntimeError("Installed demo provenance or signal contract mismatch")
+    with wave.open(str(destination), "rb") as source:
+        if (source.getframerate(), source.getnchannels(), source.getsampwidth(),
+                source.getnframes()) != (24000, 1, 2, 288000):
+            raise RuntimeError("Installed demo WAV geometry mismatch")
 
 
 def main() -> int:
@@ -349,7 +433,15 @@ def main() -> int:
         result.update({'zip_archive_sha256': zip_result['archive_sha256'],
                        'both_source_formats_verified': True})
         if args.smoke:
-            result.update(_smoke_archive(archive, work, candidate))
+            tar_smoke = _smoke_archive(archive, work / "tar-smoke", candidate)
+            zip_smoke = _smoke_archive(zipped, work / "zip-smoke", candidate)
+            result.update(tar_smoke)
+            result["archive_install_smokes"] = {
+                "tar.gz": tar_smoke, "zip": zip_smoke,
+            }
+            result["both_source_formats_installed"] = True
+            # Dependency resolution is independent in each environment.
+            # Do not assert identical hashes across different NumPy versions.
         print(json.dumps(result, sort_keys=True))
     return 0
 
