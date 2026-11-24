@@ -18,6 +18,7 @@ import numpy as np
 from .contracts import MAX_CHANNELS, check_rate
 from .errors import AudioContractError, AudioIntegrityError, AudioLimitError
 from .quality import QualityLimits, QualityReport, _quality_report_from_metrics
+from .quality_timeline import QualityTimeline, StreamingQualityTimeline
 from .streaming import FramePacket
 from .wave_reader import WavPacketInfo, WavPacketReader
 from .wave_stream import MAX_STREAM_PACKET_FRAMES, MAX_STREAM_SECONDS
@@ -120,9 +121,10 @@ class VerifiedWavQuality:
     info: WavPacketInfo
     source_sha256: str
     signal_health: QualityReport
+    timeline: QualityTimeline | None = None
 
     def as_dict(self) -> dict:
-        return {
+        result = {
             "sample_rate": self.info.sample_rate,
             "channels": self.info.channels,
             "frames": self.info.frames,
@@ -135,12 +137,16 @@ class VerifiedWavQuality:
             "model_quality_measured": False,
             "recording_rights_verified": False,
         }
+        if self.timeline is not None:
+            result["timeline"] = self.timeline.as_dict()
+        return result
 
 
 def inspect_wav_quality(
     path: str | Path, *, packet_frames: int = 8192,
     expected_sha256: str | None = None,
     limits: QualityLimits = QualityLimits(),
+    include_timeline: bool = False,
 ) -> VerifiedWavQuality:
     """Inspect canonical local integer PCM with complete-file verification.
 
@@ -153,6 +159,8 @@ def inspect_wav_quality(
         raise AudioContractError("Invalid quality-inspection packet frame size")
     if not isinstance(limits, QualityLimits):
         raise AudioContractError("Expected QualityLimits")
+    if type(include_timeline) is not bool:
+        raise AudioContractError("include_timeline must be boolean")
     with WavPacketReader(
         path, packet_frames=packet_frames, expected_sha256=expected_sha256,
     ) as reader:
@@ -160,9 +168,20 @@ def inspect_wav_quality(
             reader.info.sample_rate, reader.info.channels,
             expected_frames=reader.info.frames, limits=limits,
         )
+        timeline = (
+            StreamingQualityTimeline(
+                reader.info.sample_rate, reader.info.channels,
+                expected_frames=reader.info.frames,
+                activity_floor_dbfs=limits.activity_floor_dbfs,
+            )
+            if include_timeline else None
+        )
         for packet in reader:
             accumulator.update(packet)
+            if timeline is not None:
+                timeline.update(packet)
         if reader.state != "verified" or reader.verified_sha256 is None:
             raise AudioIntegrityError("Incomplete verified WAV inspection")
         health = accumulator.finalize()
-        return VerifiedWavQuality(reader.info, reader.verified_sha256, health)
+        timed = timeline.finalize() if timeline is not None else None
+        return VerifiedWavQuality(reader.info, reader.verified_sha256, health, timed)
