@@ -184,7 +184,13 @@ class WavPacketReader:
             raise AudioIntegrityError("WAVE reader reached inconsistent frame state")
         count = min(left, self.packet_frames)
         size = count * self.info.channels * (self.info.bits_per_sample // 8)
-        raw = self._fp.read(size)
+        try:
+            raw = self._fp.read(size)
+        except BaseException:
+            # An I/O error can happen before any bytes are returned. Do not
+            # leave an unverified descriptor open outside a context manager.
+            self.close()
+            raise
         if len(raw) != size:
             self.close()
             raise AudioFormatError("Truncated WAVE payload during packet read")
