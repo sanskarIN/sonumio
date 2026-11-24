@@ -129,3 +129,35 @@ timestep count spread, distinct caption rows observed and minimum/maximum
 row exposure. Pair sampling changes the number of independent recordings
 per logical batch; it is not equivalent to independently sampled rows.
 No training efficiency or semantic grounding improvement is asserted.
+
+
+## Training-only semantic supervision
+
+The optional auxiliary head predicts multi-label source membership directly
+from the shared UTF-8 text encoder. The six categories and their one- or
+two-source membership targets are derived from the exact canonical synthetic
+caption table, with strict token order checks. No source label or class
+lookup is added to denoiser inference. The head is initialized with its own
+CPU seed and discarded at the end of the experiment.
+
+The loss is mean binary cross-entropy across the six source coordinates,
+summed over retained caption rows and divided by the entire logical batch.
+Classifier-free dropped captions contribute zero auxiliary loss. The shared
+encoder, denoiser and auxiliary head are jointly optimized and gradient
+clipped, including when a bilingual pair crosses a microbatch boundary.
+
+```bash
+python -m research.device_velocity_study --steps 48 --batch-size 4 --microbatch-size 2 --alternative-microbatch 1 --timestep-sampling stratified --caption-sampling bilingual_pair --compare-semantics
+```
+
+The comparison uses a fixed auxiliary weight of 0.5 and an otherwise
+identical baseline. An explicit `--semantic-weight` is available for
+separate runs. Initial and final classification BCE, exact source-set
+matches, bit accuracy and micro-F1 are reported for training and held-out
+caption rows. The latter may share caption templates with training even
+when waveform recordings are seed-disjoint; it is not a novel-language
+generalization test. A reduction in text classification loss alone is not
+evidence of audio grounding. Evaluate matched, rotated-label and null
+generated waveform controls independently. The source probe does not
+provide a training gradient. No pretrained weights or audio assets are
+downloaded, and neither the auxiliary head nor the denoiser is published.
