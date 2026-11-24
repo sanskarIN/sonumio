@@ -266,3 +266,35 @@ bounded per-packet scratch arrays. Neither edge nor internal quiet is proof of
 a recording defect, perceptual silence or an audible dropout: pauses may be
 intentional and a partially muted channel is not an all-channel quiet frame.
 The existing global activity policy remains independent.
+
+
+## Optional interchannel relationships
+
+```bash
+sonumio wav-inspect source.wav --channel-relationships
+```
+
+This observation-only mode reports signed per-channel DC, RMS, and every
+unordered pair of distinct channels, in ascending zero-based channel order.
+Mono has an empty pair list; up to eight channels produce at most 28 pairs.
+Each pair includes centered Pearson correlation and equal-weight mix RMS.
+For signals x and y, the reference RMS is sqrt(mean((x² + y²)/2)) and the
+hypothetical mix RMS is sqrt(mean(((x + y)/2)²)). Their ratio, the
+equal-mix retention, lies in [0,1]. Identical nonzero signals retain 1;
+opposite signals cancel to 0. A zero-energy pair has null retention.
+Correlation is null if either signal is constant (including one-frame input).
+DC is removed only for correlation, not for the RMS calculations.
+
+The centered covariance uses stable packet-combination equations, rather
+than subtracting raw second moments. Equal-mix energy is accumulated directly
+to preserve small residuals when large opposite-polarity signals cancel.
+The persistent state scales with channel count squared, not file duration.
+Floating-point reductions may differ slightly across packet boundaries.
+This mode is optional and does not affect the existing acceptance policy or
+exit code. No partial result is returned before complete source verification.
+
+A low retention value is not necessarily a defect: it depends on the channel
+content and the intended playback/mixing system. Correlation is not a
+frequency-dependent phase measurement; this tool does not infer speaker
+positions, claim inversion is present, prescribe a surround downmix, or
+measure perceptual quality.
