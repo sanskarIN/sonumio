@@ -5,6 +5,8 @@ on:
     paths:
       - 'research/device_velocity*.py'
       - 'research/velocity_loss_weights.py'
+      - 'research/semantic_training.py'
+      - 'research/counterfactual_conditioning.py'
       - 'research/velocity_prediction.py'
       - 'research/velocity_ddim.py'
       - 'research/text_audio.py'
@@ -16,15 +18,19 @@ on:
       - 'tests/test_device_velocity_training.py'
       - 'tests/test_velocity_loss_weights.py'
       - 'tests/test_device_sampling_policies.py'
+      - 'tests/test_semantic_training.py'
       - '.github/workflows/device-velocity-training.yml'
   push:
     branches: [main]
     paths:
       - 'research/device_velocity*.py'
       - 'research/velocity_loss_weights.py'
+      - 'research/semantic_training.py'
+      - 'research/counterfactual_conditioning.py'
       - 'tests/test_device_velocity_training.py'
       - 'tests/test_velocity_loss_weights.py'
       - 'tests/test_device_sampling_policies.py'
+      - 'tests/test_semantic_training.py'
       - '.github/workflows/device-velocity-training.yml'
 
 permissions:
@@ -33,7 +39,7 @@ permissions:
 jobs:
   training:
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
+    timeout-minutes: 35
     env:
       OMP_NUM_THREADS: '2'
       MKL_NUM_THREADS: '2'
@@ -47,7 +53,7 @@ jobs:
           python -m pip install -e '.[test]' 'scipy>=1.12,<2'
           python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
       - name: Test logical batches, gradients and device selection
-        run: python -m pytest -q -rs tests/test_device_velocity_training.py tests/test_velocity_loss_weights.py tests/test_device_sampling_policies.py
+        run: python -m pytest -q -rs tests/test_device_velocity_training.py tests/test_velocity_loss_weights.py tests/test_device_sampling_policies.py tests/test_semantic_training.py
       - name: Compare two microbatch partitions with two independent initializations
         run: |
           for seed in 17 29; do
@@ -143,4 +149,40 @@ jobs:
               print("paired sampling", name, json.dumps(plan, sort_keys=True))
               print("heldout", name, json.dumps(arm["heldout"], sort_keys=True))
           assert arms["reference_cpu"]["training"]["batch_plan"] == arms["alternative_cpu"]["training"]["batch_plan"]
+          PY
+      - name: Compare matched-input semantic supervision
+        run: |
+          for seed in 17 29; do
+            python -m research.device_velocity_study --device cpu --seed "$seed" \
+              --steps 48 --batch-size 4 --microbatch-size 2 --alternative-microbatch 1 \
+              --schedule-steps 8 --evaluations 4 --compare-semantics \
+              --caption-sampling bilingual_pair --timestep-sampling stratified \
+              > "$RUNNER_TEMP/semantic-study-$seed.json"
+          done
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          root = Path(os.environ["RUNNER_TEMP"])
+          for seed in (17, 29):
+              report = json.loads((root / f"semantic-study-{seed}.json").read_text())
+              assert report["paired_initialization_and_inputs"]
+              assert not report["weights_or_audio_saved"]
+              arms = report["arms"]
+              assert set(arms) == {"reference_cpu", "alternative_cpu", "semantic_cpu"}
+              baseline = arms["reference_cpu"]["training"]
+              trained = arms["semantic_cpu"]["training"]
+              assert baseline["batch_plan"] == trained["batch_plan"]
+              assert baseline["initial_state_sha256"] == trained["initial_state_sha256"]
+              assert baseline["semantic_diagnostics"] is None
+              diagnostics = trained["semantic_diagnostics"]
+              assert not diagnostics["head_retained_for_inference"]
+              assert diagnostics["final_validation"]["caption_rows"] == 84
+              assert not diagnostics["final_validation"]["generated_audio_semantics_established"]
+              print("semantic head", seed, json.dumps(diagnostics, sort_keys=True))
+              for name, arm in arms.items():
+                  print("heldout", seed, name, json.dumps(arm["heldout"], sort_keys=True))
+                  if report["reference_probe"]["gate"]["passed"]:
+                      print("generated", seed, name, json.dumps(arm["generated"]["by_language"], sort_keys=True))
           PY
