@@ -6,6 +6,8 @@ on:
       - 'research/device_velocity*.py'
       - 'research/velocity_loss_weights.py'
       - 'research/semantic_training.py'
+      - 'research/multi_negative_conditioning.py'
+      - 'research/paired_grounding_audit.py'
       - 'research/counterfactual_conditioning.py'
       - 'research/velocity_prediction.py'
       - 'research/velocity_ddim.py'
@@ -19,6 +21,7 @@ on:
       - 'tests/test_velocity_loss_weights.py'
       - 'tests/test_device_sampling_policies.py'
       - 'tests/test_semantic_training.py'
+      - 'tests/test_multi_negative_conditioning.py'
       - '.github/workflows/device-velocity-training.yml'
   push:
     branches: [main]
@@ -26,11 +29,14 @@ on:
       - 'research/device_velocity*.py'
       - 'research/velocity_loss_weights.py'
       - 'research/semantic_training.py'
+      - 'research/multi_negative_conditioning.py'
+      - 'research/paired_grounding_audit.py'
       - 'research/counterfactual_conditioning.py'
       - 'tests/test_device_velocity_training.py'
       - 'tests/test_velocity_loss_weights.py'
       - 'tests/test_device_sampling_policies.py'
       - 'tests/test_semantic_training.py'
+      - 'tests/test_multi_negative_conditioning.py'
       - '.github/workflows/device-velocity-training.yml'
 
 permissions:
@@ -39,7 +45,7 @@ permissions:
 jobs:
   training:
     runs-on: ubuntu-24.04
-    timeout-minutes: 35
+    timeout-minutes: 45
     env:
       OMP_NUM_THREADS: '2'
       MKL_NUM_THREADS: '2'
@@ -53,7 +59,7 @@ jobs:
           python -m pip install -e '.[test]' 'scipy>=1.12,<2'
           python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
       - name: Test logical batches, gradients and device selection
-        run: python -m pytest -q -rs tests/test_device_velocity_training.py tests/test_velocity_loss_weights.py tests/test_device_sampling_policies.py tests/test_semantic_training.py
+        run: python -m pytest -q -rs tests/test_device_velocity_training.py tests/test_velocity_loss_weights.py tests/test_device_sampling_policies.py tests/test_semantic_training.py tests/test_multi_negative_conditioning.py
       - name: Compare two microbatch partitions with two independent initializations
         run: |
           for seed in 17 29; do
@@ -185,4 +191,41 @@ jobs:
                   print("heldout", seed, name, json.dumps(arm["heldout"], sort_keys=True))
                   if report["reference_probe"]["gate"]["passed"]:
                       print("generated", seed, name, json.dumps(arm["generated"]["by_language"], sort_keys=True))
+          PY
+      - name: Compare multi-negative matched-only caption margin
+        run: |
+          for seed in 17 29; do
+            python -m research.device_velocity_study --device cpu --seed "$seed" \
+              --steps 48 --batch-size 4 --microbatch-size 2 --alternative-microbatch 1 \
+              --schedule-steps 8 --evaluations 4 --compare-margins \
+              --caption-sampling bilingual_pair --timestep-sampling stratified \
+              > "$RUNNER_TEMP/margin-study-$seed.json"
+          done
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          for seed in (17, 29):
+              report = json.loads((Path(os.environ["RUNNER_TEMP"]) / f"margin-study-{seed}.json").read_text())
+              assert report["paired_initialization_and_inputs"]
+              arms = report["arms"]
+              assert set(arms) == {"reference_cpu", "alternative_cpu", "margin_cpu"}
+              base = arms["reference_cpu"]["training"]
+              margin = arms["margin_cpu"]["training"]
+              assert base["batch_plan"] == margin["batch_plan"]
+              assert base["initial_state_sha256"] == margin["initial_state_sha256"]
+              assert base["mean_caption_margin"] == 0
+              assert margin["negative_count"] == 2
+              assert margin["mean_caption_margin"] >= 0
+              for name, arm in arms.items():
+                  heldout = arm["heldout_interventions"]
+                  assert heldout["same_corruption_for_all_caption_interventions"]
+                  assert heldout["caption_cases_per_timestep"] == 84
+                  print("heldout interventions", seed, name, json.dumps(heldout, sort_keys=True))
+                  if report["reference_probe"]["gate"]["passed"]:
+                      for language, panel in arm["generated"]["balanced_assignment"].items():
+                          assert panel["accepted"]["permutations"] == 720
+                          assert panel["forced_rank_one"]["permutations"] == 720
+                          print("balanced assignment", seed, name, language, json.dumps(panel, sort_keys=True))
           PY
