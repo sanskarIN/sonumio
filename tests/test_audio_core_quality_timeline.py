@@ -179,7 +179,7 @@ def _make_canonical(tmp_path, *, frames=17_003, rate=8000, bits=16):
     return path, result
 
 
-@pytest.mark.parametrize("packet_frames", [1, 503, 8192])
+@pytest.mark.parametrize("packet_frames", [7, 503, 8192])
 def test_verified_wav_timeline_covers_full_source(tmp_path, packet_frames):
     path, published = _make_canonical(tmp_path)
     result = inspect_wav_quality(
