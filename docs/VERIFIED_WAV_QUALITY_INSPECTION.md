@@ -88,10 +88,12 @@ duplicates and excessive input. The file-based entry point additionally
 verifies the entire original WAVE representation, unlike standalone packet
 aggregation.
 
-Memory use is proportional to **one packet and the channel count**, not the
-full recording duration. Each packet accumulates float64 sums and sum of
-squares, plus fixed-size counters; rounding may differ minutely with different
-packet boundaries. The independent NumPy in-memory quality implementation
+With the default whole-file report, processing memory scales with **one PCM
+packet and the channel count**, not the full recording duration. When the
+optional timeline is enabled, it additionally retains **one compact result per
+one-second window** (at most 3,600 records for an hour-long WAV). Each packet
+accumulates float64 sums and sum of squares, plus fixed-size counters; rounding
+may differ minutely with different packet boundaries. The independent NumPy in-memory quality implementation
 is used as the regression oracle across bit depths and layouts.
 
 No source may be described as safe, licensed, original or perceptually good on
