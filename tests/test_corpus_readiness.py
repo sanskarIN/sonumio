@@ -173,3 +173,50 @@ def test_actual_wav_ingestion_retains_provenance_and_cli_coverage(tmp_path, monk
     assert result["wav_bytes_verified"]
     assert not result["readiness_gate_passed"]
     assert "private-" not in output
+
+
+def test_group_balanced_mode_trains_with_audited_eligible_indices(monkeypatch):
+    import math
+    from research import audio_dataset, wave_diffusion
+
+    splits = synthetic_splits()
+    # Keep all categories covered while excluding a known silent crop.
+    splits["train"].clips[0] = 0
+    splits["validation"].clips[0] = 0
+    monkeypatch.setattr(audio_dataset, "load_reviewed_splits",
+                        lambda *args, **kwargs: (splits, {"wav_bytes_verified": True}))
+    options = dict(steps=2, channels=8, diffusion_steps=8, seed=17,
+                   manifest="reviewed.jsonl", audio_root="recordings", group_balanced=True)
+    first = wave_diffusion.train(**options)
+    second = wave_diffusion.train(**options)
+    assert first["group_balanced_training"]
+    assert first["training_examples"] == 35
+    assert first["available_training_examples"] == 36
+    assert first["heldout_examples"] == 29
+    assert first["available_heldout_examples"] == 30
+    assert first["corpus_readiness"]["readiness_gate_passed"]
+    assert first["training_sampler"]["draws"] == 16
+    assert first["training_sampler"] == second["training_sampler"]
+    assert first["eligible_split_fingerprints"] == second["eligible_split_fingerprints"]
+    assert math.isfinite(first["heldout_noise_mse"])
+    assert first["weights_published"] is False
+
+
+def test_group_balanced_mode_rejects_inadequate_corpus_before_optimization(monkeypatch):
+    from research import audio_dataset, wave_diffusion
+    splits = synthetic_splits()
+    splits["train"].clips[5] = 0
+    monkeypatch.setattr(audio_dataset, "load_reviewed_splits",
+                        lambda *args, **kwargs: (splits, {"wav_bytes_verified": True}))
+    monkeypatch.setattr(wave_diffusion, "training_step",
+                        lambda *args, **kwargs: pytest.fail("Training ran despite failed coverage"))
+    with pytest.raises(ValueError, match="failed group-balanced training readiness"):
+        wave_diffusion.train(steps=1, channels=8, diffusion_steps=8,
+                             manifest="reviewed.jsonl", audio_root="recordings", group_balanced=True)
+
+
+@pytest.mark.parametrize("options", [{"group_balanced": True}, {"group_balanced": 1}])
+def test_group_balanced_requires_reviewed_manifest(options):
+    from research.wave_diffusion import train
+    with pytest.raises(ValueError, match="reviewed manifest|boolean"):
+        train(steps=1, channels=8, diffusion_steps=8, **options)
