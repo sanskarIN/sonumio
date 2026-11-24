@@ -1,0 +1,83 @@
+name: Device-aware velocity training (CPU)
+
+on:
+  pull_request:
+    paths:
+      - 'research/device_velocity*.py'
+      - 'research/velocity_prediction.py'
+      - 'research/velocity_ddim.py'
+      - 'research/text_audio.py'
+      - 'research/latent_audio.py'
+      - 'research/open_set_source_probe.py'
+      - 'research/generated_source_grounding.py'
+      - 'research/wave_diffusion.py'
+      - 'src/sonumio/engines/procedural.py'
+      - 'tests/test_device_velocity_training.py'
+      - '.github/workflows/device-velocity-training.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'research/device_velocity*.py'
+      - 'tests/test_device_velocity_training.py'
+      - '.github/workflows/device-velocity-training.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  training:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      OMP_NUM_THREADS: '2'
+      MKL_NUM_THREADS: '2'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install CPU research dependencies
+        run: |
+          python -m pip install -e '.[test]' 'scipy>=1.12,<2'
+          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+      - name: Test logical batches, gradients and device selection
+        run: python -m pytest -q -rs tests/test_device_velocity_training.py
+      - name: Compare two microbatch partitions with two independent initializations
+        run: |
+          for seed in 17 29; do
+            python -m research.device_velocity_study --device cpu --seed "$seed" \
+              --steps 24 --batch-size 5 --microbatch-size 5 --alternative-microbatch 2 \
+              --schedule-steps 8 --evaluations 4 > "$RUNNER_TEMP/device-study-$seed.json"
+          done
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          root = Path(os.environ["RUNNER_TEMP"])
+          reports = [json.loads((root / f"device-study-{s}.json").read_text()) for s in (17, 29)]
+          for report in reports:
+              assert report["paired_initialization_and_inputs"]
+              assert not report["exact_split_overlap"]
+              assert not report["cuda_training_executed"]
+              assert not report["cuda_performance_or_quality_established"]
+              assert not report["weights_or_audio_saved"]
+              assert not report["model_readiness_established"]
+              arms = report["arms"]
+              assert set(arms) == {"reference_cpu", "alternative_cpu"}
+              assert arms["reference_cpu"]["training"]["batch_plan"] == arms["alternative_cpu"]["training"]["batch_plan"]
+              assert arms["reference_cpu"]["training"]["microbatch_backward_calls"] == 24
+              assert arms["alternative_cpu"]["training"]["microbatch_backward_calls"] == 72
+              print("seed", report["configuration"]["seed"], "parameter comparison", report["parameter_comparisons"])
+              for name, arm in arms.items():
+                  print("training", name, json.dumps(arm["training"], sort_keys=True))
+                  print("heldout", name, json.dumps(arm["heldout"], sort_keys=True))
+                  if report["reference_probe"]["gate"]["passed"]:
+                      assert len(arm["generated"]["cases"]) == 12
+                      assert arm["generated"]["null_caption_invariant"]
+                      print("generated", name, json.dumps(arm["generated"]["by_language"], sort_keys=True))
+                  else:
+                      assert arm["generated"] is None
+          assert reports[0]["training_fingerprint"] == reports[1]["training_fingerprint"]
+          assert reports[0]["validation_fingerprint"] == reports[1]["validation_fingerprint"]
+          PY
