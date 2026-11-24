@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - 'research/device_velocity*.py'
+      - 'research/device_learning_rate.py'
       - 'research/velocity_loss_weights.py'
       - 'research/semantic_training.py'
       - 'research/multi_negative_conditioning.py'
@@ -18,6 +19,7 @@ on:
       - 'research/wave_diffusion.py'
       - 'src/sonumio/engines/procedural.py'
       - 'tests/test_device_velocity_training.py'
+      - 'tests/test_device_learning_rate.py'
       - 'tests/test_velocity_loss_weights.py'
       - 'tests/test_device_sampling_policies.py'
       - 'tests/test_semantic_training.py'
@@ -27,12 +29,14 @@ on:
     branches: [main]
     paths:
       - 'research/device_velocity*.py'
+      - 'research/device_learning_rate.py'
       - 'research/velocity_loss_weights.py'
       - 'research/semantic_training.py'
       - 'research/multi_negative_conditioning.py'
       - 'research/paired_grounding_audit.py'
       - 'research/counterfactual_conditioning.py'
       - 'tests/test_device_velocity_training.py'
+      - 'tests/test_device_learning_rate.py'
       - 'tests/test_velocity_loss_weights.py'
       - 'tests/test_device_sampling_policies.py'
       - 'tests/test_semantic_training.py'
@@ -45,7 +49,7 @@ permissions:
 jobs:
   training:
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 50
     env:
       OMP_NUM_THREADS: '2'
       MKL_NUM_THREADS: '2'
@@ -59,7 +63,7 @@ jobs:
           python -m pip install -e '.[test]' 'scipy>=1.12,<2'
           python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
       - name: Test logical batches, gradients and device selection
-        run: python -m pytest -q -rs tests/test_device_velocity_training.py tests/test_velocity_loss_weights.py tests/test_device_sampling_policies.py tests/test_semantic_training.py tests/test_multi_negative_conditioning.py
+        run: python -m pytest -q -rs tests/test_device_velocity_training.py tests/test_velocity_loss_weights.py tests/test_device_sampling_policies.py tests/test_semantic_training.py tests/test_multi_negative_conditioning.py tests/test_device_learning_rate.py
       - name: Compare two microbatch partitions with two independent initializations
         run: |
           for seed in 17 29; do
@@ -228,4 +232,28 @@ jobs:
                           assert panel["accepted"]["permutations"] == 720
                           assert panel["forced_rank_one"]["permutations"] == 720
                           print("balanced assignment", seed, name, language, json.dumps(panel, sort_keys=True))
+          PY
+      - name: Compare constant and warmup cosine logical-update schedules
+        run: |
+          python -m research.device_velocity_study --device cpu --seed 17 \
+            --steps 32 --batch-size 5 --microbatch-size 2 --alternative-microbatch 1 \
+            --compare-learning-rates > "$RUNNER_TEMP/learning-rates.json"
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          report = json.loads((Path(os.environ["RUNNER_TEMP"]) / "learning-rates.json").read_text())
+          assert report["paired_initialization_and_inputs"]
+          arms = report["arms"]
+          assert set(arms) == {"reference_cpu", "alternative_cpu", "warmup_cosine_cpu"}
+          assert len({arm["training"]["batch_plan"]["input_trace_sha256"] for arm in arms.values()}) == 1
+          for name, arm in arms.items():
+              train = arm["training"]
+              plan = train["learning_rate_schedule"]
+              assert train["applied_learning_rates"] == plan["per_update_learning_rates"]
+              assert len(train["applied_learning_rates"]) == 32
+              assert train["optimizer_updates"] == 32
+              print("learning rate", name, json.dumps(plan, sort_keys=True))
+              print("heldout", name, json.dumps(arm["heldout"], sort_keys=True))
           PY
