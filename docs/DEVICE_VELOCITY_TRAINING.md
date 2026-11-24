@@ -99,3 +99,33 @@ held-out waveform errors and matched versus rotated/null generation.
 The weighting formula and uneven microbatch gradient equivalence have
 dedicated regression tests. The experiment makes no claim of successful
 prompt grounding or hardware acceleration.
+
+
+## Stratified timestep and paired-caption sampling
+
+The default independent uniform sampler remains unchanged in its random
+draw sequence. The opt-in stratified policy consumes complete random
+permutations of the diffusion timesteps, carrying unused positions across
+logical batches. Each completed cycle covers all timesteps exactly once.
+It uses a separate CPU random stream, preserving waveform indices, noise
+and condition dropout when only timestep sampling changes.
+
+The opt-in bilingual pair policy draws adjacent recording pairs, with an
+even logical batch. Every adjacent pair must have exactly identical
+waveform samples and distinct non-null caption tokens. Both rows share
+one sampled timestep, one Gaussian noise tensor and one dropout decision.
+The policy checks recording adjacency but does not independently verify
+the language or translation of arbitrary caption tokens. The synthetic
+study uses known English/Hindi pairs. Pairs can span microbatch boundaries;
+each row retains its correct loss normalization.
+
+```bash
+python -m research.device_velocity_study --steps 16 --batch-size 4 --microbatch-size 3 --alternative-microbatch 1 --timestep-sampling stratified --caption-sampling bilingual_pair
+```
+
+With eight diffusion timesteps, this example covers 32 pair draws,
+or exactly eight caption rows at every timestep. The report records
+timestep count spread, distinct caption rows observed and minimum/maximum
+row exposure. Pair sampling changes the number of independent recordings
+per logical batch; it is not equivalent to independently sampled rows.
+No training efficiency or semantic grounding improvement is asserted.
