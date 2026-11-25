@@ -1,0 +1,43 @@
+name: Crop codec rate-distortion research (CPU)
+on:
+  pull_request:
+    paths:
+      - 'research/crop_codec*.py'
+      - 'research/crop_source_data.py'
+      - 'research/latent_audio.py'
+      - 'research/wave_diffusion.py'
+      - 'research/crop_latent*.py'
+      - 'tests/test_crop_latent.py'
+      - 'tests/test_crop_latent_replicates.py'
+      - 'tests/test_crop_codec.py'
+      - '.github/workflows/crop-codec-research.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'research/crop_codec*.py'
+      - 'research/crop_source_data.py'
+      - 'research/latent_audio.py'
+      - 'research/wave_diffusion.py'
+      - 'research/crop_latent*.py'
+      - 'tests/test_crop_latent.py'
+      - 'tests/test_crop_latent_replicates.py'
+      - 'tests/test_crop_codec.py'
+      - '.github/workflows/crop-codec-research.yml'
+permissions:
+  contents: read
+jobs:
+  codec:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      OMP_NUM_THREADS: '2'
+      MKL_NUM_THREADS: '2'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: |
+          python -m pip install -e '.[test]' 'scipy>=1.12,<2'
+          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+      - run: python -m pytest -q tests/test_crop_codec.py tests/test_crop_latent.py tests/test_crop_latent_replicates.py
