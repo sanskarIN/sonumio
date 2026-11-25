@@ -13,7 +13,13 @@ python -m research.archive_latent_study private.scorpus --expected-sha256 ARCHIV
 
 Stage 1 trains the codec on group/asset/category-balanced training batches.
 Then the codec is frozen. A streamed calibration scans each eligible
-training clip once; calibration moments are clip-weighted, not group-weighted.
+training clip once. By default, the moments are weighted uniformly by
+category, then recording group, asset and crop. This matches the sampler's
+intended hierarchy rather than the number of crops in each recording.
+Use `--calibration-mode clip_weighted` for the original uniform-crop
+control. The report includes category mass and a weight-plan digest,
+without identifiers. The weighted channel variance includes both within-
+and between-clip variation.
 Stage 2 uses a separate deterministic balanced sampler and encodes each
 minibatch on demand. No full waveform or latent corpus is materialized.
 Each crop is checked against audited row and PCM identity before use.
