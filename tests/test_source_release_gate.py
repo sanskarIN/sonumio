@@ -315,3 +315,39 @@ def test_source_gate_refuses_private_training_artifacts(filename):
     with pytest.raises(RuntimeError, match="Binary or sensitive artifact"):
         entries.accept(candidate.prefix+filename, directory=False, regular=True,
                        size=1, read=forbidden)
+
+
+@pytest.mark.parametrize("payload", [
+    b"SCORPUS1"+bytes(32), b"STCP0001"+bytes(32),
+    b"SLHAND01"+bytes(32), b"SLCROP01"+bytes(32),
+    b"\x93NUMPY"+bytes(32), b"PK\x03\x04"+bytes(32),
+    b"PK\x05\x06"+bytes(18), b"PK\x07\x08"+bytes(12),
+    b"RIFF"+bytes(4)+b"WAVE"+bytes(32),
+    b"RF64"+bytes(4)+b"WAVE"+bytes(32),
+    b"RIFX"+bytes(4)+b"WAVE"+bytes(32),
+    b"fLaC"+bytes(32), b"OggS"+bytes(32),
+])
+@pytest.mark.parametrize("format", ["tar.gz","zip"])
+def test_disguised_artifact_detected_before_tree_comparison(tmp_path, payload, format):
+    candidate = gate.resolve_candidate()
+    archive = tmp_path / ("disguised." + format)
+    name = candidate.prefix + "research/ordinary.txt"
+    if format == "zip":
+        with zipfile.ZipFile(archive,"w") as writer:
+            writer.writestr(name,payload)
+    else:
+        with tarfile.open(archive,"w:gz") as writer:
+            member = tarfile.TarInfo(name)
+            member.size = len(payload)
+            writer.addfile(member,io.BytesIO(payload))
+    with pytest.raises(RuntimeError,match="Binary artifact signature"):
+        gate._audit_archive(archive,candidate,format=format)
+
+
+def test_format_documentation_is_not_rejected():
+    candidate = gate.SourceCandidate("a"*40,"0.0.4")
+    entries = gate.SourceEntries(candidate)
+    source = b'# Private archive format\nMAGIC = b"SCORPUS1"\n'
+    entries.accept(candidate.prefix+"docs/format.md",directory=False,regular=True,
+                   size=len(source),read=lambda:source)
+    assert entries.files["docs/format.md"] == source
