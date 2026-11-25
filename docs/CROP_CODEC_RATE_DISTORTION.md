@@ -46,3 +46,13 @@ tests. No external audio, checkpoints, generated WAVs or trained model
 weights are saved. This establishes neither perceptual fidelity nor
 Sonumio-1 readiness. Private reviewed archive training integration is a
 separate step.
+
+
+### Source recipe correction
+
+The crop study uses the versioned seeded-window source from the longer
+first-party latent research waveform. The older fixed-start source may
+produce identical audio for different seeds, including deterministic
+ambient synthesis. Seed disjointness alone is insufficient. Exact PCM
+overlap checks remain mandatory; different crop offsets do not establish
+independent recordings or real-world generalization.
