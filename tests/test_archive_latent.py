@@ -177,3 +177,57 @@ def test_validation_budget_preflight():
 def test_generation_budget_preflight():
     with pytest.raises(ArchiveError,match="workload exceeds budget"):
         small_plan(generation_seeds=tuple(range(8)),schedule_steps=64,reverse_steps=64)
+
+
+def test_balanced_calibration_equal_category_group_mass(archive):
+    from research.archive_latent_calibration import calibration_weights
+    from collections import defaultdict
+    path,sha=archive
+    with CorpusArchiveReader(path,expected_sha256=sha) as reader:
+        ready=audit_archive(reader)
+        access=AuditedCropAccess(reader,ready)
+        balanced, report=calibration_weights(access,"group_balanced")
+        uniform, other=calibration_weights(access,"clip_weighted")
+    assert sum(balanced.values())==pytest.approx(1)
+    assert all(row["weight_mass"]==pytest.approx(1/6) for row in report["by_category"].values())
+    groups=defaultdict(float)
+    for item in ready.eligible["train"]:
+        groups[(item.row.label,item.row.group_id)]+=balanced[item.row.index]
+    assert all(value==pytest.approx(1/12) for value in groups.values())
+    assert report["weight_trace_sha256"]!=other["weight_trace_sha256"]
+    assert len(set(uniform.values()))==1
+    assert "private-train-group-" not in json.dumps(report)
+
+
+def test_weighted_moment_analytic_two_clip_mixture():
+    from research.archive_latent_calibration import WeightedChannelMoments
+    accumulator=WeightedChannelMoments(2048)
+    accumulator.add(torch.zeros(1,16,32),.25)
+    accumulator.add(torch.ones(1,16,32),.75)
+    result=accumulator.finish()
+    np.testing.assert_allclose(result.mean,.75,atol=1e-15)
+    np.testing.assert_allclose(result.std,np.sqrt(.1875),atol=1e-15)
+
+
+def test_weighted_moments_include_within_clip_variance():
+    from research.archive_latent_calibration import WeightedChannelMoments
+    first=torch.tensor([-.5,.5]*16,dtype=torch.float32).repeat(16,1)[None]
+    second=torch.tensor([0.,1.]*16,dtype=torch.float32).repeat(16,1)[None]
+    accumulator=WeightedChannelMoments(2048)
+    accumulator.add(first,.5)
+    accumulator.add(second,.5)
+    result=accumulator.finish()
+    np.testing.assert_allclose(result.mean,.25,atol=1e-15)
+    np.testing.assert_allclose(result.std,np.sqrt(.3125),atol=1e-15)
+
+
+def test_calibration_weighting_integrated_and_private(completed):
+    _,_,_,report=completed
+    weighting=report["codec"]["calibration"]["weighting"]
+    assert weighting["mode"]=="group_balanced"
+    assert weighting["calibration_sha256"]==report["codec"]["calibration"]["calibration_sha256"]
+    assert weighting["heldout_used_for_fitting"] is False
+    assert weighting["eligible_clips"]==report["eligible_training_clips"]
+    assert weighting["total_weight"]==pytest.approx(1)
+    with pytest.raises(ArchiveError):
+        small_plan(calibration_mode="unknown")
