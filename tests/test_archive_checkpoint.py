@@ -578,7 +578,13 @@ def test_audit_cli_same_step_gate_and_privacy(trained, capsys):
     result = json.loads(output)
     assert result["identical_same_step_state"]
     assert str(prefix.parent) not in output
-    assert "private-train" not in output
+    # Protocol name contains "private-training"; inspect actual fixture identifiers.
+    _, _, _, fixture_prefix, _ = trained
+    assert fixture_prefix.name not in output
+    for split in ("train", "validation", "test"):
+        assert f"private-{split}-asset-" not in output
+        assert f"private-{split}-group-" not in output
+    assert result["protocol"] == "sonumio-private-training-checkpoint-audit-v1"
 
 
 def test_audit_cli_rejects_incomplete_comparison(trained, capsys):
