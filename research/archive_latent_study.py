@@ -2,7 +2,7 @@
 
 Bounded group-balanced codec and denoiser training, a frozen codec, train-only
 streamed calibration, aggregate held-out validation and in-memory generation.
-No audio, private identifiers, checkpoint or weights are exported.
+No audio or identifiers are exported; an explicit local codec handoff is optional.
 """
 from __future__ import annotations
 
@@ -18,6 +18,7 @@ import torch
 
 from research.archive_latent_access import AuditedCropAccess, counter_generator, hash_tensor
 from research.archive_latent_validation import validate_latent
+from research.archive_latent_handoff import save_codec_stage, load_codec_stage
 from research.archive_latent_calibration import fit_archive_calibration, MODES
 from research.archive_readiness import audit_archive
 from research.archive_sampler import CounterGroupSampler
@@ -154,11 +155,18 @@ def train_denoiser(access, plan, codec, calibration, model, schedule):
     return {**_loss_report(losses,sampler,trace),"null_examples":null_examples}
 
 
-def run_archive_latent(path, *, expected_sha256, plan=None):
+def run_archive_latent(path, *, expected_sha256, plan=None, codec_out=None,
+                       codec_in=None, codec_sha256=None, codec_only=False):
     require_sha256(expected_sha256)
     plan = ArchiveLatentPlan() if plan is None else plan
     if not isinstance(plan,ArchiveLatentPlan):
         raise ArchiveError("Expected ArchiveLatentPlan")
+    if (type(codec_only) is not bool or (codec_in is None) != (codec_sha256 is None)
+            or (codec_out is not None and codec_in is not None)
+            or (codec_only and (codec_out is None or codec_in is not None))):
+        raise ArchiveError("Invalid private codec handoff options")
+    if codec_sha256 is not None:
+        require_sha256(codec_sha256)
     if torch.get_default_dtype() != torch.float32:
         raise ArchiveError("Private latent study requires default float32")
     with CorpusArchiveReader(path,expected_sha256=expected_sha256) as reader:
@@ -175,18 +183,44 @@ def run_archive_latent(path, *, expected_sha256, plan=None):
             with torch.device("cpu"):
                 codec = CropAudioCodec(CLIP_FRAMES)
             initial_codec = model_state_sha256(codec)
-            codec_report = train_codec(access,plan,codec)
-            trained_codec = model_state_sha256(codec)
-            if initial_codec == trained_codec:
-                raise ArchiveError("Private crop codec did not train")
-            # No held-out rows, cached dataset, or materialized latent corpus.
-            # Scan calibration one eligible clip at a time so its Float64
-            # reduction order does not change with shard or optimizer batch.
-            calibration, calibration_weights = fit_archive_calibration(
-                access,codec,bits=plan.bits,mode=plan.calibration_mode,
-            )
+            receipt = None
+            if codec_in is None:
+                codec_report = train_codec(access,plan,codec)
+                trained_codec = model_state_sha256(codec)
+                if initial_codec == trained_codec:
+                    raise ArchiveError("Private crop codec did not train")
+                calibration, calibration_weights = fit_archive_calibration(
+                    access,codec,bits=plan.bits,mode=plan.calibration_mode,
+                )
+                if codec_out is not None:
+                    receipt = save_codec_stage(
+                        codec_out,access=access,plan=plan,codec=codec,initial_sha256=initial_codec,
+                        training=codec_report,calibration=calibration,weighting=calibration_weights,
+                    )
+            else:
+                codec,codec_report,calibration,calibration_weights,receipt = load_codec_stage(
+                    codec_in,expected_sha256=codec_sha256,access=access,plan=plan,codec=codec,
+                )
+                trained_codec = model_state_sha256(codec)
             if calibration.clips != access.count("train"):
                 raise ArchiveError("Private latent calibration coverage changed")
+            codec_summary = {
+                "initial_sha256":initial_codec,"trained_sha256":trained_codec,"training":codec_report,
+                "calibration":{**calibration.report(),"weighting":calibration_weights},
+                "frozen_during_diffusion":True,
+                "rate":payload_rate_report(CLIP_FRAMES,plan.bits) if plan.bits is not None else None,
+            }
+            handoff = {"mode":"restored" if codec_in is not None else "saved" if codec_out is not None else "none",
+                       "receipt":receipt.report() if receipt is not None else None,
+                       "codec_optimizer_steps_executed":0 if codec_in is not None else plan.codec_steps,
+                       "full_optimizer_resume_supported":False}
+            if codec_only:
+                reader.report()
+                return {"protocol":"sonumio-private-codec-stage-only-v1","codec":codec_summary,
+                        "codec_handoff":handoff,"archive_sha256":ready.archive_sha256,
+                        "denoiser_steps_executed":0,"checkpoint_written":True,
+                        "audio_or_weights_written":True,"model_publication_authorized":False,
+                        "original_sonumio_1":False}
             torch.random.default_generator.manual_seed(plan.seed)
             with torch.device("cpu"):
                 model = CropLatentDenoiser(CLIP_FRAMES,plan.width)
@@ -209,9 +243,7 @@ def run_archive_latent(path, *, expected_sha256, plan=None):
         "eligible_training_clips":access.count("train"),"eligible_validation_clips":access.count("validation"),
         "training_examples":plan.training_examples,"validation_prediction_rows":validation_work,
         "generation_forward_calls":plan.generation_forwards,
-        "codec":{"initial_sha256":initial_codec,"trained_sha256":trained_codec,"training":codec_report,
-                 "calibration":{**calibration.report(),"weighting":calibration_weights},"frozen_during_diffusion":True,
-                 "rate":payload_rate_report(CLIP_FRAMES,plan.bits) if plan.bits is not None else None},
+        "codec":codec_summary,"codec_handoff":handoff,
         "denoiser":{"initial_sha256":initial_model,"trained_sha256":trained_model,"training":training,
                     "objective":"velocity","schedule":"cosine_zero_terminal_v1",
                     "parameter_count":sum(p.numel() for p in model.parameters()),
@@ -219,7 +251,7 @@ def run_archive_latent(path, *, expected_sha256, plan=None):
         "validation":validation,"generation":generated,
         "calibration_train_only":True,"latent_corpus_materialized":False,
         "bounded_archive_batches":True,"test_split_scored":False,
-        "recording_identifiers_exported":False,"audio_or_weights_written":False,
+        "recording_identifiers_exported":False,"audio_or_weights_written":codec_out is not None,
         "perceptual_quality_established":False,"model_publication_authorized":False,
         "original_sonumio_1":False,
     }
@@ -236,6 +268,10 @@ def main(argv=None):
     parser.add_argument("--bits",choices=("float","2","4","6","8"),default="8")
     parser.add_argument("--generation-seeds",default="701,709")
     parser.add_argument("--calibration-mode",choices=MODES,default=defaults.calibration_mode)
+    parser.add_argument("--codec-out",type=Path)
+    parser.add_argument("--codec-in",type=Path)
+    parser.add_argument("--codec-sha256")
+    parser.add_argument("--codec-only",action="store_true")
     args=parser.parse_args(argv)
     try:
         settings={key:getattr(args,key) for key in ArchiveLatentPlan.__dataclass_fields__}
@@ -245,7 +281,8 @@ def main(argv=None):
             raise ArchiveError("Invalid canonical generation seed list")
         settings["generation_seeds"]=tuple(map(int,parts))
         report=run_archive_latent(args.archive,expected_sha256=args.expected_sha256,
-                                  plan=ArchiveLatentPlan(**settings))
+                                  plan=ArchiveLatentPlan(**settings),codec_out=args.codec_out,
+                                  codec_in=args.codec_in,codec_sha256=args.codec_sha256,codec_only=args.codec_only)
     except (ValueError,RuntimeError,OSError) as exc:
         parser.exit(2,f"Private archive latent experiment: {exc}\n")
     print(json.dumps(report,sort_keys=True,allow_nan=False))
