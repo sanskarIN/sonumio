@@ -165,3 +165,15 @@ def test_cli_aggregate_report(completed,capsys):
     assert report["protocol"]=="sonumio-private-archive-latent-study-v1"
     assert str(path) not in output
     assert not report["audio_or_weights_written"]
+
+
+def test_validation_budget_preflight():
+    plan=small_plan(validation_repeats=4)
+    with pytest.raises(ArchiveError,match="validation workload"):
+        plan.validation_predictions(4096)
+    assert plan.validation_predictions(100)==8400
+
+
+def test_generation_budget_preflight():
+    with pytest.raises(ArchiveError,match="workload exceeds budget"):
+        small_plan(generation_seeds=tuple(range(8)),schedule_steps=64,reverse_steps=64)
