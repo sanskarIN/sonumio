@@ -19,6 +19,7 @@ import wave
 import numpy as np
 
 from research.dataset_manifest import ManifestError, load_manifest_snapshot
+from research.local_snapshot import SnapshotError, read_local_snapshot
 from research.aligned_leakage import AlignedLeakageGuard
 from research.shifted_leakage import ShiftedLeakageGuard
 from research.wave_diffusion import CATEGORIES, CLIP_FRAMES, SAMPLE_RATE
@@ -26,6 +27,9 @@ from sonumio.engines.procedural import TOKENS
 
 MAX_ASSET_BYTES = 20 * 1024 * 1024
 MAX_ASSETS = 10_000
+# Bound materialized training/evaluation PCM across all splits; leakage indexes
+# and Python metadata require additional memory outside this PCM-only budget.
+MAX_CORPUS_PCM_BYTES = 256 * 1024 * 1024
 CATEGORY_TO_DSP = {"ocean": "water", "ambient": "drone"}
 
 
@@ -82,9 +86,9 @@ def _confined_path(root: Path, filename: str) -> Path:
     destination = (root / filename).resolve(strict=False)
     if not destination.is_relative_to(root.resolve()):
         raise ManifestError("audio asset resolves outside the configured audio root")
-    if not destination.is_file():
-        raise ManifestError(f"local WAV file does not exist: {filename}")
-    return destination
+    # Retain the original leaf so snapshot validation can refuse symlinks.
+    # The resolved path above is only the confinement check.
+    return root / filename
 
 
 def _decode_pcm16(wav_bytes: bytes, record: dict) -> tuple[np.ndarray, int]:
@@ -180,6 +184,18 @@ def _crop_clips(signal: np.ndarray, rate: int, per_asset: int) -> list[np.ndarra
     return segments
 
 
+def _plan_corpus_arrays(records, clips_per_asset: int) -> tuple[dict[str, int], int]:
+    counts = {split: 0 for split in ("train", "validation", "test")}
+    for _, row in records:
+        counts[row["split"]] += clips_per_asset
+    if not counts["train"] or not counts["validation"]:
+        raise ManifestError("both train and validation recording groups must exist")
+    pcm_bytes = sum(counts.values()) * CLIP_FRAMES * np.dtype(np.float32).itemsize
+    if pcm_bytes > MAX_CORPUS_PCM_BYTES:
+        raise ManifestError("decoded model-input corpus exceeds bounded PCM allocation")
+    return counts, pcm_bytes
+
+
 def load_reviewed_splits(manifest: str | Path, audio_root: str | Path, *,
                          clips_per_asset: int = 2) -> tuple[dict[str, LoadedSplit], dict]:
     """Verify rights declarations, bytes and WAV layout before creating splits.
@@ -196,7 +212,12 @@ def load_reviewed_splits(manifest: str | Path, audio_root: str | Path, *,
     records, declaration = load_manifest_snapshot(manifest)
     if declaration["records"] > MAX_ASSETS:
         raise ManifestError("audio manifest exceeds the bounded asset limit")
-    clips: dict[str, list[np.ndarray]] = {split: [] for split in ("train", "validation", "test")}
+    planned, planned_bytes = _plan_corpus_arrays(records, clips_per_asset)
+    # Allocate once. Overlap guards reference rows of these arrays rather
+    # than separately retained crop arrays; do not stack a second full corpus.
+    clips = {split: np.empty((size, 1, CLIP_FRAMES), dtype=np.float32)
+             for split, size in planned.items()}
+    positions = {split: 0 for split in planned}
     labels: dict[str, list[int]] = {split: [] for split in clips}
     captions: dict[str, list[str]] = {split: [] for split in clips}
     provenance: dict[str, list[ClipProvenance]] = {split: [] for split in clips}
@@ -219,14 +240,10 @@ def load_reviewed_splits(manifest: str | Path, audio_root: str | Path, *,
                 path = _confined_path(root, row.get("local_path"))
                 if path.suffix.lower() != ".wav":
                     raise ManifestError("only .wav files are permitted")
-                if path.stat().st_size > MAX_ASSET_BYTES:
-                    raise ManifestError("WAV asset exceeds 20 MiB safety limit")
-                # Opening a file after stat can observe a larger replacement.
-                # Enforce the memory budget on the actual bytes read too.
-                with path.open("rb") as wav_file:
-                    wav_bytes = wav_file.read(MAX_ASSET_BYTES + 1)
-                if len(wav_bytes) > MAX_ASSET_BYTES:
-                    raise ManifestError("WAV asset exceeds 20 MiB safety limit")
+                try:
+                    wav_bytes = read_local_snapshot(path, max_bytes=MAX_ASSET_BYTES, root=root)
+                except SnapshotError as exc:
+                    raise ManifestError(f"WAV snapshot: {exc}") from exc
                 if sha256(wav_bytes).hexdigest() != row["sha256"]:
                     raise ManifestError("WAV SHA256 does not match the manifest")
                 label = caption_category(row["caption"])
@@ -257,12 +274,14 @@ def load_reviewed_splits(manifest: str | Path, audio_root: str | Path, *,
                         repeated_within_split += 1
                     else:
                         cropped_clips[crop_sha] = (line_no, split, piece_number)
-                    aligned_overlap.add(piece, split=split, line=line_no,
+                    destination = clips[split][positions[split], 0]
+                    destination[:] = piece
+                    aligned_overlap.add(destination, split=split, line=line_no,
                                         piece=piece_number)
-                    shifted_overlap.add(piece, split=split, line=line_no,
+                    shifted_overlap.add(destination, split=split, line=line_no,
                                         piece=piece_number)
+                    positions[split] += 1
                 decoded_recordings[decoded_hash] = (line_no, split)
-                clips[split].extend(pieces)
                 labels[split].extend([label] * len(pieces))
                 captions[split].extend([row["caption"]] * len(pieces))
                 provenance[split].extend(
@@ -280,12 +299,11 @@ def load_reviewed_splits(manifest: str | Path, audio_root: str | Path, *,
                 fingerprints[split].update(record_identity)
             except ManifestError as exc:
                 raise ManifestError(f"line {line_no}: {exc}") from exc
-    if not counts["train"] or not counts["validation"]:
-        raise ManifestError("both train and validation recording groups must exist")
+    if positions != planned:
+        raise ManifestError("Decoded crop count differs from planned corpus allocation")
 
     loaded = {
-        split: LoadedSplit(np.stack(clips[split])[:, None].astype(np.float32)
-                           if clips[split] else np.empty((0, 1, CLIP_FRAMES), dtype=np.float32),
+        split: LoadedSplit(clips[split],
                            np.asarray(labels[split], dtype=np.int64), counts[split],
                            fingerprints[split].hexdigest(), tuple(captions[split]),
                            tuple(provenance[split]), split)
@@ -296,6 +314,9 @@ def load_reviewed_splits(manifest: str | Path, audio_root: str | Path, *,
         "asset_counts": counts,
         "clip_counts": {split: len(value.labels) for split, value in loaded.items()},
         "clips_per_asset": clips_per_asset,
+        "planned_model_input_pcm_bytes": planned_bytes,
+        "model_input_pcm_byte_cap": MAX_CORPUS_PCM_BYTES,
+        "local_file_snapshot_checks": True,
         "wav_bytes_verified": True,
         "decoded_audio_duplicate_gate": "exact mono PCM at identical sample rate",
         "decoded_audio_distinct_recordings": len(decoded_recordings),

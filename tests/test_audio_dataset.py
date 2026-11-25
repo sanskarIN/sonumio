@@ -254,3 +254,51 @@ def test_same_fingerprint_and_wav_samples_for_existing_complete_clips(tmp_path):
         np.testing.assert_array_equal(a[split].clips, b[split].clips)
         assert a[split].fingerprint == b[split].fingerprint
     assert ar["split_fingerprints"] == br["split_fingerprints"]
+
+
+def test_corpus_pcm_preflight_rejects_before_opening_any_audio(tmp_path, monkeypatch):
+    from research import audio_dataset
+    manifest, root = make_dataset(tmp_path)
+    monkeypatch.setattr(audio_dataset, "MAX_CORPUS_PCM_BYTES", 8192)
+    def unexpected(*args, **kwargs):
+        pytest.fail("audio was opened despite failed corpus budget")
+    monkeypatch.setattr(audio_dataset, "read_local_snapshot", unexpected)
+    with pytest.raises(ManifestError, match="bounded PCM allocation"):
+        load_reviewed_splits(manifest, root, clips_per_asset=2)
+
+
+def test_preallocated_model_inputs_match_declared_byte_plan(tmp_path):
+    manifest, root = make_dataset(tmp_path)
+    loaded, report = load_reviewed_splits(manifest, root, clips_per_asset=3)
+    assert report["planned_model_input_pcm_bytes"] == sum(
+        split.clips.nbytes for split in loaded.values()
+    )
+    assert report["planned_model_input_pcm_bytes"] == 6*2048*4
+    assert report["local_file_snapshot_checks"] is True
+    assert loaded["test"].clips.shape == (0, 1, 2048)
+    assert loaded["train"].clips.flags.c_contiguous
+
+
+def test_reject_inside_root_leaf_symlink(tmp_path):
+    manifest, root = make_dataset(tmp_path)
+    original = root / "clip-0.wav"
+    other = root / "actual.wav"
+    original.rename(other)
+    try:
+        original.symlink_to(other)
+    except OSError:
+        pytest.skip("symlinks unavailable")
+    with pytest.raises(ManifestError, match="ordinary"):
+        load_reviewed_splits(manifest, root)
+
+
+def test_wav_snapshot_rejects_special_file(tmp_path):
+    import os
+    if not hasattr(os, "mkfifo"):
+        pytest.skip("FIFO unavailable")
+    manifest, root = make_dataset(tmp_path)
+    target = root / "clip-0.wav"
+    target.unlink()
+    os.mkfifo(target)
+    with pytest.raises(ManifestError, match="ordinary"):
+        load_reviewed_splits(manifest, root)

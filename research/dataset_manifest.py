@@ -11,7 +11,10 @@ import argparse
 import hashlib
 import json
 import math
+from io import BytesIO
 from pathlib import Path
+
+from research.local_snapshot import SnapshotError, read_local_snapshot
 
 REQUIRED = {
     "asset_id", "source_url", "sha256", "caption", "language", "group_id",
@@ -39,6 +42,17 @@ def _unique_keys(pairs: list[tuple[str, object]]) -> dict:
     return row
 
 
+def _reject_constant(value: str):
+    raise ValueError("Nonfinite JSON number")
+
+
+def _finite_json_float(value: str) -> float:
+    result = float(value)
+    if not math.isfinite(result):
+        raise ValueError("Nonfinite JSON number")
+    return result
+
+
 def load_manifest_snapshot(path: str | Path) -> tuple[tuple[tuple[int, dict], ...], dict]:
     """Return validated (source line, record) pairs from one bounded byte snapshot.
 
@@ -46,30 +60,31 @@ def load_manifest_snapshot(path: str | Path) -> tuple[tuple[tuple[int, dict], ..
     a second manifest read. File-level SHA256 is in the report; audio WAV
     hashes are separately verified by the ingestion loader.
     """
-    path = Path(path)
-    if path.stat().st_size > MAX_MANIFEST_BYTES:
-        raise ManifestError("manifest exceeds 32 MiB limit")
-    raw = path.read_bytes()
-    if len(raw) > MAX_MANIFEST_BYTES:
-        raise ManifestError("manifest exceeds 32 MiB limit")
+    try:
+        raw = read_local_snapshot(path, max_bytes=MAX_MANIFEST_BYTES)
+    except SnapshotError as exc:
+        raise ManifestError(f"manifest snapshot: {exc}") from exc
     identities: set[str] = set()
     hashes: set[str] = set()
     group_splits: dict[str, str] = {}
     counts: Counter[str] = Counter()
     records: list[tuple[int, dict]] = []
 
-    for line_no, line in enumerate(raw.splitlines(), 1):
-        if not line.strip():
-            continue
+    for line_no, line in enumerate(BytesIO(raw), 1):
         def error(reason: str) -> None:
             raise ManifestError(f"line {line_no}: {reason}")
-        if len(line) > MAX_LINE_BYTES:
+        if len(line.rstrip(b"\r\n")) > MAX_LINE_BYTES:
             error("manifest record exceeds 16 KiB limit")
+        if not line.strip():
+            continue
         if len(records) >= MAX_RECORDS:
             error("manifest exceeds 10000 record limit")
         try:
-            row = json.loads(line.decode("utf-8"), object_pairs_hook=_unique_keys)
-        except (json.JSONDecodeError, UnicodeError, ValueError) as exc:
+            row = json.loads(line.decode("utf-8"), object_pairs_hook=_unique_keys,
+                             parse_constant=_reject_constant, parse_float=_finite_json_float)
+            # Reject lone escaped UTF-16 surrogates even in optional metadata.
+            json.dumps(row, ensure_ascii=False, allow_nan=False).encode("utf-8")
+        except (UnicodeError, ValueError, RecursionError) as exc:
             raise ManifestError(f"line {line_no}: invalid or duplicate-key JSON") from exc
         if not isinstance(row, dict):
             error("manifest entry must be a JSON object")
