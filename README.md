@@ -15,11 +15,11 @@ The experimental web client builds separately using Node/npm; a committed
 npm dependency lockfile is still pending. The local API is not for public
 hosting and the neural research is not a release-ready original model.
 
-## Next source-only candidate (v0.0.2)
+## Source-only v0.0.2 pre-release
 
-The next software pre-release is under preparation, not published.
-The candidate includes the local audio analysis and research changes on
-main, plus an updated source-build verification gate. See the
+The second software pre-release, **[v0.0.2](https://github.com/sanskarIN/sonumio/releases/tag/v0.0.2)**,
+is published. It includes the local audio analysis and research changes plus
+an updated source-build verification gate. See the historical
 [v0.0.2 candidate checklist](docs/V0_0_2_SOURCE_CANDIDATE.md).
 
 Generate a local procedural demo and its verification report:
