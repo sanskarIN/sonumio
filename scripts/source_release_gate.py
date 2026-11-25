@@ -42,6 +42,7 @@ BANNED_SUFFIXES = frozenset({
     ".pth", ".ckpt", ".safetensors", ".onnx", ".pkl", ".pickle",
     ".h5", ".hdf5", ".exe", ".dll", ".dylib", ".so",
     ".pem", ".key", ".p12", ".pfx", ".sqlite", ".db",
+    ".scorpus", ".stcheckpoint", ".partial",
 })
 MAX_FILES = 2000
 MAX_FILE_BYTES = 2 * 1024 * 1024
