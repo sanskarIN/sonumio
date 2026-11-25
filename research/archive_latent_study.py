@@ -1,0 +1,249 @@
+"""Private reviewed-corpus crop latent velocity diffusion research.
+
+Bounded group-balanced codec and denoiser training, a frozen codec, train-only
+streamed calibration, aggregate held-out validation and in-memory generation.
+No audio, private identifiers, checkpoint or weights are exported.
+"""
+from __future__ import annotations
+
+import argparse
+from dataclasses import asdict, dataclass
+import hashlib
+import json
+import math
+from pathlib import Path
+import statistics
+
+import torch
+
+from research.archive_latent_access import AuditedCropAccess, counter_generator, hash_tensor
+from research.archive_latent_validation import validate_latent
+from research.archive_readiness import audit_archive
+from research.archive_sampler import CounterGroupSampler
+from research.corpus_archive import CorpusArchiveReader
+from research.corpus_archive_format import ArchiveError, canonical_json, require_sha256
+from research.crop_codec import CropAudioCodec, codec_loss
+from research.crop_codec_packet import BITS, payload_rate_report
+from research.crop_latent import (CropLatentDenoiser, encode_native, fit_calibration,
+                                  reverse_indices, velocity_loss)
+from research.crop_latent_study import _generated
+from research.wave_diffusion import CLIP_FRAMES, CATEGORIES, DiffusionSchedule
+from research.weight_ema import model_state_sha256
+
+PROTOCOL = "sonumio-private-archive-latent-study-v1"
+MAX_TRAIN_EXAMPLES = 40_000
+MAX_VALIDATION_PREDICTIONS = 400_000
+MAX_GENERATION_FORWARDS = 20_000
+
+
+@dataclass(frozen=True, slots=True)
+class ArchiveLatentPlan:
+    seed: int = 17
+    codec_steps: int = 32
+    diffusion_updates: int = 64
+    batch_size: int = 4
+    bits: int | None = 8
+    width: int = 32
+    schedule_steps: int = 32
+    reverse_steps: int = 8
+    validation_seed: int = 301
+    validation_repeats: int = 2
+    validation_batch_size: int = 8
+    generation_seeds: tuple[int, ...] = (701,709)
+
+    def __post_init__(self):
+        for value, lo, hi, name in (
+            (self.seed,0,2**32-1,"seed"),(self.codec_steps,1,500,"codec steps"),
+            (self.diffusion_updates,1,2000,"diffusion updates"),(self.batch_size,1,16,"batch size"),
+            (self.schedule_steps,8,256,"schedule steps"),(self.validation_seed,0,2**32-1,"validation seed"),
+            (self.validation_repeats,1,4,"validation repeats"),(self.validation_batch_size,1,16,"validation batch size"),
+        ):
+            if type(value) is not int or not lo <= value <= hi:
+                raise ArchiveError("Invalid private latent " + name)
+        if self.bits is not None and (type(self.bits) is not int or self.bits not in BITS):
+            raise ArchiveError("Invalid private latent precision")
+        if type(self.width) is not int or self.width not in (16,32,48,64):
+            raise ArchiveError("Invalid private latent model width")
+        reverse_indices(self.schedule_steps,self.reverse_steps)
+        if (type(self.generation_seeds) is not tuple or not 2 <= len(self.generation_seeds) <= 8
+                or any(type(x) is not int or not 0 <= x < 2**32 for x in self.generation_seeds)
+                or len(set(self.generation_seeds)) != len(self.generation_seeds)):
+            raise ArchiveError("Invalid private latent generation seeds")
+        if self.training_examples > MAX_TRAIN_EXAMPLES or self.generation_forwards > MAX_GENERATION_FORWARDS:
+            raise ArchiveError("Private latent training or generation workload exceeds budget")
+
+    @property
+    def training_examples(self):
+        return (self.codec_steps+self.diffusion_updates)*self.batch_size
+
+    @property
+    def generation_forwards(self):
+        return len(self.generation_seeds)*len(CATEGORIES)*self.reverse_steps*4
+
+    def validation_predictions(self, count):
+        if type(count) is not int or not 1 <= count <= 4096:
+            raise ArchiveError("Invalid private latent validation clip count")
+        work = count*3*self.validation_repeats*(len(CATEGORIES)+1)
+        if work > MAX_VALIDATION_PREDICTIONS:
+            raise ArchiveError("Private latent validation workload exceeds budget")
+        return work
+
+
+def _optimizer(model):
+    return torch.optim.AdamW(model.parameters(), lr=.001, foreach=False, fused=False)
+
+
+def _loss_report(losses, sampler, trace):
+    if not losses or not all(math.isfinite(x) for x in losses):
+        raise ArchiveError("Invalid private latent training loss summary")
+    return {"steps":len(losses),"first_loss":losses[0],"last_loss":losses[-1],
+            "mean_loss":statistics.fmean(losses),"sampler":sampler.describe(),
+            "training_trace_sha256":trace.hexdigest()}
+
+
+def train_codec(access, plan, codec):
+    sampler = CounterGroupSampler(access.ready,seed=plan.seed)
+    optimizer = _optimizer(codec)
+    trace = hashlib.sha256(b"sonumio-private-latent-codec-trace-v1\0")
+    losses = []
+    codec.train()
+    for _ in range(plan.codec_steps):
+        indices, wave, _ = access.sample(sampler,plan.batch_size)
+        trace.update(indices.astype("<i8",copy=False).tobytes())
+        optimizer.zero_grad(set_to_none=True)
+        loss = codec_loss(wave,codec(wave,plan.bits),frames=CLIP_FRAMES)
+        loss.backward()
+        torch.nn.utils.clip_grad_norm_(codec.parameters(),1.,error_if_nonfinite=True)
+        optimizer.step()
+        losses.append(float(loss.detach()))
+    codec.eval().requires_grad_(False)
+    return _loss_report(losses,sampler,trace)
+
+
+def train_denoiser(access, plan, codec, calibration, model, schedule):
+    if codec.training or any(p.requires_grad for p in codec.parameters()):
+        raise ArchiveError("Private latent denoising requires frozen codec")
+    sampler = CounterGroupSampler(access.ready,seed=plan.seed)
+    optimizer = _optimizer(model)
+    trace = hashlib.sha256(b"sonumio-private-latent-denoiser-trace-v1\0")
+    losses = []
+    null_examples = 0
+    model.train()
+    for step in range(plan.diffusion_updates):
+        indices, wave, labels = access.sample(sampler,plan.batch_size)
+        with torch.no_grad():
+            clean = calibration.normalize(encode_native(codec,wave,plan.bits))
+        timesteps = torch.randint(schedule.steps,(len(wave),),generator=counter_generator(plan.seed,b"time",step))
+        noise = torch.randn(clean.shape,generator=counter_generator(plan.seed,b"noise",step),dtype=torch.float32)
+        dropped = torch.rand(len(wave),generator=counter_generator(plan.seed,b"dropout",step)) < .1
+        condition = torch.where(dropped,model.classes,labels)
+        null_examples += int(dropped.sum())
+        trace.update(indices.astype("<i8",copy=False).tobytes())
+        for value,dtype in ((timesteps,"<i8"),(noise,"<f4"),(condition,"<i8")):
+            hash_tensor(trace,value,dtype)
+        optimizer.zero_grad(set_to_none=True)
+        loss = velocity_loss(model,schedule,clean,timesteps,noise,condition)
+        loss.backward()
+        torch.nn.utils.clip_grad_norm_(model.parameters(),1.,error_if_nonfinite=True)
+        optimizer.step()
+        losses.append(float(loss.detach()))
+    return {**_loss_report(losses,sampler,trace),"null_examples":null_examples}
+
+
+def run_archive_latent(path, *, expected_sha256, plan=None):
+    require_sha256(expected_sha256)
+    plan = ArchiveLatentPlan() if plan is None else plan
+    if not isinstance(plan,ArchiveLatentPlan):
+        raise ArchiveError("Expected ArchiveLatentPlan")
+    if torch.get_default_dtype() != torch.float32:
+        raise ArchiveError("Private latent study requires default float32")
+    with CorpusArchiveReader(path,expected_sha256=expected_sha256) as reader:
+        ready = audit_archive(reader)
+        access = AuditedCropAccess(reader,ready)
+        validation_work = plan.validation_predictions(access.count("validation"))
+        plan_sha = hashlib.sha256(canonical_json({
+            "protocol":PROTOCOL,"configuration":asdict(plan),"archive_sha256":ready.archive_sha256,
+            "eligible_train":ready.eligible_fingerprints["train"],
+            "eligible_validation":ready.eligible_fingerprints["validation"],
+        })).hexdigest()
+        with torch.random.fork_rng(devices=[]):
+            torch.random.default_generator.manual_seed(plan.seed)
+            with torch.device("cpu"):
+                codec = CropAudioCodec(CLIP_FRAMES)
+            initial_codec = model_state_sha256(codec)
+            codec_report = train_codec(access,plan,codec)
+            trained_codec = model_state_sha256(codec)
+            if initial_codec == trained_codec:
+                raise ArchiveError("Private crop codec did not train")
+            # No held-out rows, cached dataset, or materialized latent corpus.
+            # Scan calibration one eligible clip at a time so its Float64
+            # reduction order does not change with shard or optimizer batch.
+            calibration = fit_calibration(codec,(wave for _,wave in access.scan("train",1)),bits=plan.bits)
+            if calibration.clips != access.count("train"):
+                raise ArchiveError("Private latent calibration coverage changed")
+            torch.random.default_generator.manual_seed(plan.seed)
+            with torch.device("cpu"):
+                model = CropLatentDenoiser(CLIP_FRAMES,plan.width)
+                schedule = DiffusionSchedule(plan.schedule_steps,profile="cosine_zero_terminal_v1")
+            initial_model = model_state_sha256(model)
+            training = train_denoiser(access,plan,codec,calibration,model,schedule)
+            trained_model = model_state_sha256(model)
+            if initial_model == trained_model:
+                raise ArchiveError("Private latent denoiser did not train")
+            validation = validate_latent(access,codec,model,schedule,calibration,bits=plan.bits,
+                                         seed=plan.validation_seed,repeats=plan.validation_repeats,
+                                         batch_size=plan.validation_batch_size)
+            generated = _generated(plan,codec,model,schedule,calibration)
+            if (model_state_sha256(codec) != trained_codec or model_state_sha256(model) != trained_model):
+                raise ArchiveError("Private latent frozen state changed during evaluation")
+        reader.report()
+    return {
+        "protocol":PROTOCOL,"configuration":asdict(plan),"study_plan_sha256":plan_sha,
+        "archive_sha256":ready.archive_sha256,"eligible_split_fingerprints":ready.eligible_fingerprints.copy(),
+        "eligible_training_clips":access.count("train"),"eligible_validation_clips":access.count("validation"),
+        "training_examples":plan.training_examples,"validation_prediction_rows":validation_work,
+        "generation_forward_calls":plan.generation_forwards,
+        "codec":{"initial_sha256":initial_codec,"trained_sha256":trained_codec,"training":codec_report,
+                 "calibration":calibration.report(),"frozen_during_diffusion":True,
+                 "rate":payload_rate_report(CLIP_FRAMES,plan.bits) if plan.bits is not None else None},
+        "denoiser":{"initial_sha256":initial_model,"trained_sha256":trained_model,"training":training,
+                    "objective":"velocity","schedule":"cosine_zero_terminal_v1",
+                    "parameter_count":sum(p.numel() for p in model.parameters()),
+                    "terminal_alpha_bar":float(schedule.alpha_bars[-1])},
+        "validation":validation,"generation":generated,
+        "calibration_train_only":True,"latent_corpus_materialized":False,
+        "bounded_archive_batches":True,"test_split_scored":False,
+        "recording_identifiers_exported":False,"audio_or_weights_written":False,
+        "perceptual_quality_established":False,"model_publication_authorized":False,
+        "original_sonumio_1":False,
+    }
+
+
+def main(argv=None):
+    parser=argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("archive",type=Path)
+    parser.add_argument("--expected-sha256",required=True)
+    defaults=ArchiveLatentPlan()
+    for name in ("seed","codec_steps","diffusion_updates","batch_size","width","schedule_steps",
+                 "reverse_steps","validation_seed","validation_repeats","validation_batch_size"):
+        parser.add_argument("--"+name.replace("_","-"),type=int,default=getattr(defaults,name))
+    parser.add_argument("--bits",choices=("float","2","4","6","8"),default="8")
+    parser.add_argument("--generation-seeds",default="701,709")
+    args=parser.parse_args(argv)
+    try:
+        settings={key:getattr(args,key) for key in ArchiveLatentPlan.__dataclass_fields__}
+        settings["bits"]=None if args.bits=="float" else int(args.bits)
+        parts=args.generation_seeds.split(",")
+        if any(not x.isascii() or not x.isdecimal() or len(x)>10 or str(int(x))!=x for x in parts):
+            raise ArchiveError("Invalid canonical generation seed list")
+        settings["generation_seeds"]=tuple(map(int,parts))
+        report=run_archive_latent(args.archive,expected_sha256=args.expected_sha256,
+                                  plan=ArchiveLatentPlan(**settings))
+    except (ValueError,RuntimeError,OSError) as exc:
+        parser.exit(2,f"Private archive latent experiment: {exc}\n")
+    print(json.dumps(report,sort_keys=True,allow_nan=False))
+    return 0
+
+
+if __name__=="__main__":
+    raise SystemExit(main())
