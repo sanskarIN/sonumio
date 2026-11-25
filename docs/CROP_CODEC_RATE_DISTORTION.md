@@ -56,3 +56,15 @@ produce identical audio for different seeds, including deterministic
 ambient synthesis. Seed disjointness alone is insufficient. Exact PCM
 overlap checks remain mandatory; different crop offsets do not establish
 independent recordings or real-world generalization.
+
+
+### Event-aware source revision (v2)
+
+The first seeded-window recipe still selected silence before thunder's
+attack. The new two-second source uses prespecified category-specific
+window ranges, with a separate seed-derived crop offset. Thunder and
+forest windows include their acoustic events; every crop must pass a
+centered RMS floor. No noise is added to make duplicated PCM appear
+unique. Exact overlap checks remain in both studies. The source recipe
+identifier changes to sonumio-event-aware-crop-v2, so old experimental
+results must not be pooled with the new recipe.
