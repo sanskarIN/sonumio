@@ -23,6 +23,9 @@ from research.archive_conditioning_assay import (
     PROTOCOL as ASSAY_PROTOCOL, LEVELS,
 )
 from research.archive_readiness import audit_archive
+from research.archive_generated_assay import GenerationConfig, evaluate_generated
+from research.archive_signal_reference import fit_reference, validation_reference_report
+from research.archive_generated_study import preflight_generation, summarize_generated_study
 from research.archive_sampler import CounterGroupSampler
 from research.archive_study_plan import (
     StudyPlan, ARMS, PROTOCOL, corruption_batch, update_trace, parse_seeds,
@@ -136,7 +139,7 @@ def summarize_runs(runs,plan:StudyPlan):
     }
 
 
-def _single_run(reader,ready,plan,seed):
+def _single_run(reader,ready,plan,seed,generation=None,reference=None,reference_validation=None):
     sampler=CounterGroupSampler(ready,seed=seed)
     eligible={item.row.index:item for item in ready.eligible["train"]}
     assay_config=AssayConfig(plan.assay_seed,plan.assay_repeats,plan.assay_batch_size)
@@ -147,6 +150,8 @@ def _single_run(reader,ready,plan,seed):
             schedule=DiffusionSchedule(plan.diffusion_steps,profile=plan.diffusion_profile)
         initial_hash=model_fingerprint(initial)
         initialization=evaluate_conditioning(reader,ready,initial,schedule,config=assay_config)
+        initial_generation=(evaluate_generated(initial,schedule,reference,reference_validation,config=generation)
+                            if generation is not None else None)
         models={name:copy.deepcopy(initial) for name in ARMS}
         del initial
         optimizers={name:make_archive_optimizer(model) for name,model in models.items()}
@@ -202,9 +207,12 @@ def _single_run(reader,ready,plan,seed):
                 "first_loss":first[name],"last_loss":last[name],"mean_loss":totals[name]/plan.steps,
                 "assay":assay,
             }
+            if generation is not None:
+                arms[name]["generation"]=evaluate_generated(model,schedule,reference,reference_validation,config=generation)
         _paired_deltas(initialization,arms["matched"]["assay"],arms["random_label"]["assay"])
         return {
             "seed":seed,"initialization":initialization,"arms":arms,
+            "initial_generation":initial_generation,
             "training_trace_sha256":trace.hexdigest(),"sampler":sampler.describe(),
             "shared_null_examples":null_count,"non_null_examples":non_null,
             "random_label_accidental_matches":matches,
@@ -215,11 +223,12 @@ def _single_run(reader,ready,plan,seed):
         }
 
 
-def run_study(archive,*,expected_sha256,plan:StudyPlan|None=None):
+def run_study(archive,*,expected_sha256,plan:StudyPlan|None=None,generation:GenerationConfig|None=None):
     require_sha256(expected_sha256)
     plan=StudyPlan() if plan is None else plan
     if not isinstance(plan,StudyPlan):
         raise ArchiveError("Expected StudyPlan")
+    generation_work=preflight_generation(plan,generation) if generation is not None else 0
     runtime=runtime_identity()
     started=perf_counter()
     with CorpusArchiveReader(archive,expected_sha256=expected_sha256) as reader:
@@ -229,13 +238,17 @@ def run_study(archive,*,expected_sha256,plan:StudyPlan|None=None):
         validation_work=plan.assay_predictions(len(ready.eligible["validation"]))
         fingerprint=plan.fingerprint(ready.archive_sha256,ready.eligible_fingerprints["train"],
                                      ready.eligible_fingerprints["validation"])
-        runs=[_single_run(reader,ready,plan,seed) for seed in plan.seeds]
+        reference=fit_reference(reader,ready) if generation is not None else None
+        reference_validation=validation_reference_report(reader,ready,reference) if reference is not None else None
+        runs=[_single_run(reader,ready,plan,seed,generation,reference,reference_validation) for seed in plan.seeds]
         summary=summarize_runs(runs,plan)
+        generated_summary=summarize_generated_study(runs,plan,generation) if generation is not None else None
         reader.report()
     return {
         "protocol":PROTOCOL,"study_plan":plan.as_dict(),"study_plan_sha256":fingerprint,
         "archive_sha256":ready.archive_sha256,"eligible_split_fingerprints":ready.eligible_fingerprints,
         "runtime":runtime,"arms":list(ARMS),"runs":runs,"paired_seed_summaries":summary,
+        "generated_signal_study":generated_summary,"generation_forward_calls":generation_work,
         "training_examples_across_arms":plan.train_examples,"validation_prediction_rows":validation_work,
         "elapsed_seconds":round(perf_counter()-started,3),
         "summary_unit":"independent_model_initialization_seed",
@@ -257,11 +270,16 @@ def main(argv=None):
         parser.add_argument("--"+field.replace("_","-"),type=int,default=getattr(defaults,field))
     parser.add_argument("--diffusion-profile",choices=DiffusionSchedule.PROFILES,default=defaults.diffusion_profile)
     parser.add_argument("--drop-condition",type=float,default=defaults.drop_condition)
+    parser.add_argument("--evaluate-generated",action="store_true")
+    parser.add_argument("--generation-seeds",default="701,709,727")
+    parser.add_argument("--reverse-steps",type=int,default=8)
     args=parser.parse_args(argv)
     try:
         settings={key:getattr(args,key) for key in StudyPlan.__dataclass_fields__ if key!="seeds"}
         plan=StudyPlan(seeds=parse_seeds(args.seeds),**settings)
-        result=run_study(args.archive,expected_sha256=args.expected_sha256,plan=plan)
+        generation=(GenerationConfig(seeds=parse_seeds(args.generation_seeds),reverse_steps=args.reverse_steps)
+                    if args.evaluate_generated else None)
+        result=run_study(args.archive,expected_sha256=args.expected_sha256,plan=plan,generation=generation)
     except (ValueError,OSError,RuntimeError) as exc:
         parser.exit(2,f"Paired archive study: {exc}\n")
     print(json.dumps(result,sort_keys=True,allow_nan=False))
