@@ -1,8 +1,8 @@
-# v0.0.4 source-only target — 1 December 2026
+# v0.0.3 source-only target — 1 December 2026
 
 Planning target, not a release approval. The latest published release
-at planning time is v0.0.2; v0.0.3 is an optional intermediate source
-candidate, not a published or authorized release.
+at planning time is v0.0.2; v0.0.3 is the intended next source-only candidate, not a published or
+authorized release.
 
 ## Scope
 
@@ -21,7 +21,7 @@ errors or weakening test coverage.
   confirm no private artifacts appear in source exports.
 - 29 November: freeze feature scope; inspect reproducibility and
   compatibility, CLI/API/web changes and known limitations.
-- 30 November: align Python and private web metadata to 0.0.4 on the
+- 30 November: align Python and private web metadata to 0.0.3 on the
   intended candidate, verify all required post-merge checks and the
   exact full commit.
 - 1 December: owner review and explicit approval of the source-only
@@ -34,7 +34,7 @@ errors or weakening test coverage.
 - Dedicated codec tests exercise active source crops, split isolation,
   true optimizer updates and exact completed-stage handoff equivalence.
 - Source-only build gate passes all Linux/Windows matrix jobs, both
-  archive formats and clean installation with expected version 0.0.4.
+  archive formats and clean installation with expected version 0.0.3.
 - Archive gate rejects known private/binary formats by suffix and
   recognizable content signature, even when mislabeled. This is not
   a comprehensive secret scanner.
@@ -45,7 +45,7 @@ errors or weakening test coverage.
 Run the existing gate from the exact committed candidate:
 
 ```bash
-python scripts/source_release_gate.py --expected-version 0.0.4 --smoke
+python scripts/source_release_gate.py --expected-version 0.0.3 --smoke
 ```
 
 Record the full candidate SHA, workflow URLs, matrix results and known
