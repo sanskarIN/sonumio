@@ -114,3 +114,26 @@ offsets beyond 128 ms, time stretching, sample-rate edits, mixing,
 complex processing and semantically similar recordings may evade the gate.
 It cannot prove recording independence, legal rights or model quality.
 Human review remains mandatory.
+
+
+## Bounded local snapshot and corpus allocation
+
+Manifest and WAV reads use a regular-file snapshot helper, rejecting leaf
+symlinks, FIFOs and other special files before opening and enforcing a hard
+byte cap during reads. Path and descriptor identity/metadata are compared
+before and after reading, using platform-specific snapshot semantics.
+Resolved WAV paths must remain inside the configured root. This is best-effort
+local filesystem protection, not a sandbox against a hostile directory owner.
+The approved source WAV SHA256 remains mandatory. Optional JSON metadata must
+also be finite and UTF-8 encodable.
+
+Before opening WAV assets, the loader plans all model-input crop counts and
+rejects any corpus above the 256 MiB materialized float32 PCM budget.
+Each split receives one preallocated array; leakage indexes reference the
+stored rows instead of a second stack of the entire corpus. The limit does
+not include Python metadata, leakage index objects, temporary source decoding,
+or model/training allocations. Large-scale dataset sharding is a separate
+future feature. The report records planned PCM bytes and the configured cap.
+Existing crop geometry, waveform checks and provenance fingerprint are retained.
+No real recordings, rights approvals, checkpoints or model quality claims
+are produced by this change.
