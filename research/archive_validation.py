@@ -14,7 +14,7 @@ import struct
 import numpy as np
 import torch
 
-from research.archive_readiness import ArchiveReadinessResult
+from research.archive_readiness import ArchiveReadinessResult, eligible_fingerprint
 from research.audio_dataset import _cropped_clip_digest
 from research.corpus_archive import CorpusArchiveReader
 from research.corpus_archive_format import ArchiveError
@@ -102,6 +102,9 @@ def evaluate_archive_validation(
         raise ArchiveError("Archive validation is currently CPU-only")
     eligible = {clip.row.index: clip for clip in readiness.eligible["validation"]}
     eligible_hash = readiness.eligible_fingerprints["validation"]
+    if (eligible_fingerprint(readiness.eligible["validation"]) != eligible_hash
+            or readiness.report["eligible_split_fingerprints"]["validation"] != eligible_hash):
+        raise ArchiveError("Validation eligibility fingerprint changed")
     if not eligible:
         raise ArchiveError("No eligible archive validation rows")
     model_before = model_fingerprint(model)
