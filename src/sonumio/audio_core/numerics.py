@@ -64,16 +64,46 @@ class Decibel:
         return Decibel(self.value - other.value)
 
 
+_ARITHMETIC_BATCH_FRAMES = 65_536
+
+
+def _channel_view(samples: np.ndarray) -> np.ndarray:
+    """Validate source data without widening or copying a complete clip."""
+    data = check_audio(samples)
+    return data[None, :] if data.ndim == 1 else data
+
+
+def _peak64(row: np.ndarray) -> float:
+    # Signed extrema avoid allocating an absolute-value array.
+    return max(abs(float(np.min(row))), abs(float(np.max(row))))
+
+
+def _scaled_rms(row: np.ndarray, peak: float) -> float:
+    if peak == 0:
+        return 0.0
+    energy = 0.0
+    for start in range(0, row.size, _ARITHMETIC_BATCH_FRAMES):
+        block = np.array(row[start:start + _ARITHMETIC_BATCH_FRAMES],
+                         dtype=np.float64, copy=True)
+        # Scale before squaring: valid float64 PCM can otherwise overflow
+        # or underflow even when its true RMS is representable.
+        with np.errstate(under="ignore"):
+            block /= peak
+            energy += float(np.dot(block, block))
+    return peak * math.sqrt(min(1.0, energy / row.size))
+
+
 def stable_peak(samples: np.ndarray, *, per_channel: bool = False):
-    data = as_channel_first(check_audio(samples), float64=True)
-    peaks = np.max(np.abs(data), axis=1)
+    data = _channel_view(samples)
+    peaks = np.array([_peak64(row) for row in data], dtype=np.float64)
     return peaks if per_channel else float(np.max(peaks))
 
 
 def stable_rms(samples: np.ndarray, *, per_channel: bool = False):
-    data = as_channel_first(check_audio(samples), float64=True)
-    levels = np.sqrt(np.mean(np.square(data), axis=1))
-    return levels if per_channel else float(np.sqrt(np.mean(np.square(levels))))
+    data = _channel_view(samples)
+    levels = np.array([_scaled_rms(row, _peak64(row)) for row in data],
+                      dtype=np.float64)
+    return levels if per_channel else _scaled_rms(levels, _peak64(levels))
 
 
 def finite_clamp(value: float, minimum: float, maximum: float) -> float:
@@ -139,7 +169,8 @@ def mix_accumulate(inputs: Sequence[np.ndarray],
     """
     if not isinstance(inputs, (list, tuple)) or not 1 <= len(inputs) <= 64:
         raise AudioContractError("Expected 1..64 source audio arrays")
-    converted = [as_channel_first(check_audio(x), float64=True) for x in inputs]
+    # Keep views of validated inputs; do not retain 64 widened copies.
+    converted = [_channel_view(x) for x in inputs]
     channels = converted[0].shape[0]
     if any(x.shape[0] != channels for x in converted):
         raise AudioContractError("All sources need equal channel counts")
@@ -156,17 +187,26 @@ def mix_accumulate(inputs: Sequence[np.ndarray],
         raise AudioContractError("Expected one gain per source")
     if normalize not in ("none", "peak", "equal_power"):
         raise AudioContractError("Unknown explicit mix normalization")
+    gains = [db_to_gain(gain) for gain in gains_db]
     result = np.zeros((channels, max_frames), dtype=np.float64)
-    for array, gain in zip(converted, gains_db):
-        length = min(array.shape[1], max_frames)
-        result[:, :length] += array[:, :length] * db_to_gain(gain)
-    if normalize == "equal_power":
-        result /= math.sqrt(len(converted))
-    elif normalize == "peak":
-        high = float(np.max(np.abs(result)))
-        if high > 1:
-            result /= high
-    return result.astype(np.float32)
+    try:
+        with np.errstate(over="raise", invalid="raise", under="ignore"):
+            for array, gain in zip(converted, gains):
+                length = min(array.shape[1], max_frames)
+                for start in range(0, length, _ARITHMETIC_BATCH_FRAMES):
+                    stop = min(length, start + _ARITHMETIC_BATCH_FRAMES)
+                    block = array[:, start:stop].astype(np.float64)
+                    block *= gain
+                    result[:, start:stop] += block
+            if normalize == "equal_power":
+                result /= math.sqrt(len(converted))
+            elif normalize == "peak":
+                high = max(_peak64(row) for row in result)
+                if high > 1:
+                    result /= high
+    except FloatingPointError as exc:
+        raise AudioContractError("Mix exceeds finite float64 arithmetic") from exc
+    return as_channel_first(result, copy=False)
 
 
 def lerp(a: np.ndarray, b: np.ndarray, t: float) -> np.ndarray:
