@@ -23,7 +23,8 @@ from research.crop_latent import (
     CropLatentDenoiser,encode_native,fit_calibration,restore_for_decoder,
     velocity_loss,sample_latent,reverse_indices,
 )
-from research.wave_diffusion import dataset,CATEGORIES,CLIP_FRAMES,DiffusionSchedule
+from research.wave_diffusion import CATEGORIES,CLIP_FRAMES,DiffusionSchedule
+from research.crop_source_data import dataset, PROTOCOL as SOURCE_PROTOCOL
 from research.velocity_prediction import velocity_target,decode_velocity
 from research.weight_ema import model_state_sha256
 
@@ -280,7 +281,7 @@ def run_study(plan=None):
         "protocol":PROTOCOL,"configuration":asdict(plan),
         "training_data_sha256":train_hash,"validation_data_sha256":val_hash,
         "training_clips":len(train),"validation_clips":len(validation),
-        "exact_cross_split_crop_overlap":False,
+        "exact_cross_split_crop_overlap":False, "source_recipe":SOURCE_PROTOCOL,
         "codec":{"initial_sha256":codec_initial,"trained_sha256":codec_final,"training":codec_training,
                  "frozen_during_diffusion":True,"calibration":calibration.report(),
                  "rate":payload_rate_report(CLIP_FRAMES,plan.bits) if plan.bits is not None else None},

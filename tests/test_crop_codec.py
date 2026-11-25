@@ -177,3 +177,21 @@ def test_summary_rejects_seed_drift(study):
     runs[0]["seed"]=99
     with pytest.raises(CropCodecError):
         summarize(runs,plan)
+
+
+def test_seeded_crop_source_no_exact_overlap_and_preserves_rng():
+    from research.crop_source_data import dataset
+    from research.wave_diffusion import CATEGORIES
+    before = torch.get_rng_state().clone()
+    train, labels, pin = dataset((0, 1, 2))
+    validation, _, other = dataset((101, 102))
+    replay, replay_labels, again = dataset((0, 1, 2))
+    assert torch.equal(train, replay) and torch.equal(labels, replay_labels)
+    assert torch.equal(before, torch.get_rng_state())
+    assert pin == again and pin != other
+    assert labels.tolist() == [i for i in range(len(CATEGORIES)) for _ in range(3)]
+    hashes = [hashlib.sha256(x.numpy().tobytes()).hexdigest() for x in train]
+    heldout = [hashlib.sha256(x.numpy().tobytes()).hexdigest() for x in validation]
+    assert len(set(hashes)) == len(hashes)
+    assert len(set(heldout)) == len(heldout)
+    assert not set(hashes) & set(heldout)
