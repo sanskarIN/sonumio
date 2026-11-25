@@ -16,9 +16,33 @@ import numpy as np
 
 from .contracts import (
     AudioBuffer, AudioSpec, check_rate, as_channel_first,
-    validate_allocation, MAX_BYTES,
+    validate_allocation, check_audio, MAX_BYTES,
 )
 from .errors import AudioContractError, AudioLimitError
+
+# Cap the number of cells in each kernel matrix, independent of rate ratio
+# and user-requested chunk size. Several float64 temporaries coexist.
+_MAX_KERNEL_CELLS = 262_144
+_LINEAR_BATCH_FRAMES = 65_536
+_FLOAT32_MAX = float(np.finfo(np.float32).max)
+
+
+def _working_pcm(source: np.ndarray) -> np.ndarray:
+    """Validate both the input and the wider working allocation before copying."""
+    check_audio(source)
+    channels, frames = (1, source.shape[0]) if source.ndim == 1 else source.shape
+    validate_allocation(int(channels), int(frames), itemsize=8)
+    if float(source.min()) < -_FLOAT32_MAX or float(source.max()) > _FLOAT32_MAX:
+        raise AudioContractError("PCM input cannot be represented as finite float32")
+    return as_channel_first(source, float64=True)
+
+
+def _finite_float32(values: np.ndarray) -> np.ndarray:
+    if not np.isfinite(values).all() or (
+        float(values.min()) < -_FLOAT32_MAX or float(values.max()) > _FLOAT32_MAX
+    ):
+        raise AudioContractError("Resampler output cannot be represented as finite float32")
+    return values.astype(np.float32)
 
 
 @dataclass(frozen=True, slots=True)
@@ -71,18 +95,24 @@ def linear_resample(source: np.ndarray, in_rate: int, out_rate: int,
         raise AudioContractError(
             "Linear interpolation downsampling aliases; pass allow_aliasing=True explicitly"
         )
-    data = as_channel_first(source, float64=True)
+    data = _working_pcm(source)
     n = output_frames(data.shape[1], in_rate, out_rate)
     validate_allocation(data.shape[0], n)
     if in_rate == out_rate:
         return data.astype(np.float32)
-    positions = np.arange(n, dtype=np.float64) * (in_rate / out_rate)
-    positions = np.minimum(positions, data.shape[1] - 1)
-    left = np.floor(positions).astype(np.int64)
-    right = np.minimum(left + 1, data.shape[1] - 1)
-    a = positions - left
-    return ((1 - a)[None, :] * data[:, left]
-            + a[None, :] * data[:, right]).astype(np.float32)
+    result = np.empty((data.shape[0], n), dtype=np.float32)
+    for start in range(0, n, _LINEAR_BATCH_FRAMES):
+        stop = min(n, start + _LINEAR_BATCH_FRAMES)
+        positions = np.arange(start, stop, dtype=np.float64) * (in_rate / out_rate)
+        positions = np.minimum(positions, data.shape[1] - 1)
+        left = np.floor(positions).astype(np.int64)
+        right = np.minimum(left + 1, data.shape[1] - 1)
+        a = positions - left
+        for channel in range(data.shape[0]):
+            result[channel, start:stop] = _finite_float32(
+                (1 - a) * data[channel, left] + a * data[channel, right]
+            )
+    return result
 
 
 def _window(distances: np.ndarray, radius: float, method: str,
@@ -104,15 +134,18 @@ def sinc_resample(source: np.ndarray, in_rate: int, out_rate: int, *,
 
     The centered windowed-sinc kernel is normalized per output sample,
     preserving DC including at clip boundaries. For downsampling, cutoff
-    is reduced to the target Nyquist; upsampling keeps original Nyquist.
+    is reduced to the target Nyquist and the support expands inversely
+    with the cutoff; upsampling keeps original Nyquist. The internal
+    kernel-cell budget can reduce the requested batch length.
     """
     check_rate(in_rate)
     check_rate(out_rate)
     if settings is None:
         settings = ResampleSettings(out_rate)
-    if settings.target_rate != out_rate or settings.method != "sinc":
+    if (not isinstance(settings, ResampleSettings)
+            or settings.target_rate != out_rate or settings.method != "sinc"):
         raise AudioContractError("Sinc settings must match target sample rate")
-    data = as_channel_first(source, float64=True)
+    data = _working_pcm(source)
     frames = output_frames(data.shape[1], in_rate, out_rate)
     channels = data.shape[0]
     validate_allocation(channels, frames)
@@ -121,12 +154,16 @@ def sinc_resample(source: np.ndarray, in_rate: int, out_rate: int, *,
     if channels * frames * 8 > MAX_BYTES:
         raise AudioLimitError("Resample output exceeds double working budget")
     result = np.empty((channels, frames), dtype=np.float32)
-    width = settings.lobes
-    taps = np.arange(-width + 1, width + 1, dtype=np.int64)
     cutoff = min(1.0, out_rate / in_rate)
-    radius = float(width)
-    for start in range(0, frames, settings.chunk_frames):
-        stop = min(frames, start + settings.chunk_frames)
+    # A lobe is measured on the cutoff-scaled sinc, not on the input
+    # sample grid. A fixed input-grid width destroys stopband rejection
+    # and passband response when the target clock is much lower.
+    radius = settings.lobes / cutoff
+    width = math.ceil(radius)
+    taps = np.arange(-width + 1, width + 1, dtype=np.int64)
+    batch = min(settings.chunk_frames, max(1, _MAX_KERNEL_CELLS // taps.size))
+    for start in range(0, frames, batch):
+        stop = min(frames, start + batch)
         pos = (np.arange(start, stop, dtype=np.float64)
                * (in_rate / out_rate))
         centers = np.floor(pos).astype(np.int64)
@@ -144,11 +181,9 @@ def sinc_resample(source: np.ndarray, in_rate: int, out_rate: int, *,
         safe = np.clip(positions, 0, data.shape[1] - 1)
         for channel in range(channels):
             # Matrix row (out-frame) reductions do not mix channels.
-            result[channel, start:stop] = np.sum(
+            result[channel, start:stop] = _finite_float32(np.sum(
                 data[channel, safe] * kernel, axis=1, dtype=np.float64
-            ).astype(np.float32)
-    if not np.isfinite(result).all():
-        raise AudioContractError("Sinc resampler produced nonfinite output")
+            ))
     return result
 
 
@@ -191,6 +226,7 @@ def resample_report(original: AudioBuffer, converted: AudioBuffer,
                     settings: ResampleSettings) -> dict:
     if (not isinstance(original, AudioBuffer)
             or not isinstance(converted, AudioBuffer)
+            or not isinstance(settings, ResampleSettings)
             or converted.sample_rate != settings.target_rate
             or original.channels != converted.channels):
         raise AudioContractError("Inconsistent resample report inputs")
@@ -203,6 +239,8 @@ def resample_report(original: AudioBuffer, converted: AudioBuffer,
         "target_seconds": converted.seconds,
         "duration_difference_seconds": converted.seconds - original.seconds,
         "method": settings.method,
-        "anti_alias_filter_applied": settings.method == "sinc",
+        "anti_alias_filter_applied": (
+            settings.method == "sinc" and original.sample_rate != converted.sample_rate
+        ),
         "neural_training_data_modified": False,
     }
