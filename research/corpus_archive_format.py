@@ -120,7 +120,11 @@ class ArchiveRow:
             raise ArchiveError("Nonconsecutive archive row index")
         label = _integer(row["label"], 0, len(CATEGORIES) - 1, "label")
         caption = _text(row["caption"], 800, "caption")
-        if caption_category(caption) != label:
+        try:
+            category = caption_category(caption)
+        except ValueError as exc:
+            raise ArchiveError("Invalid archive caption category") from exc
+        if category != label:
             raise ArchiveError("Archive caption does not match label")
         asset = _text(row["asset_id"], 16_384, "asset ID")
         group = _text(row["group_id"], 16_384, "group ID")

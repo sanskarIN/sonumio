@@ -17,6 +17,8 @@ checkpoints/
 # Local reviewed audio recordings must never be committed.
 recordings/
 private-data/
+*.scorpus
+.sonumio-corpus-*.partial
 # Web dev/build artifacts
 web/node_modules/
 web/dist/
