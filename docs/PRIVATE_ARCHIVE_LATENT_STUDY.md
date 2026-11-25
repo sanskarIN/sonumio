@@ -34,7 +34,7 @@ contains data/plan/model fingerprints and aggregate calibration values;
 treat it as private when the input corpus is private.
 
 Limits include 4096 eligible crops per train/validation split, 16 clips
-per optimizer batch, at most 40,000 combined training draws and separate
+per optimizer batch, at most 32,000 combined training draws and separate
 validation and generation forward-call budgets. This is CPU research,
 not a large-scale corpus trainer, a production codec, or Sonumio-1.
 It does not include optimizer checkpoint recovery or GPU support yet.
