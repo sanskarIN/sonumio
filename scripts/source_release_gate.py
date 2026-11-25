@@ -44,6 +44,22 @@ BANNED_SUFFIXES = frozenset({
     ".pem", ".key", ".p12", ".pfx", ".sqlite", ".db",
     ".scorpus", ".stcheckpoint", ".partial",
 })
+# Check known binary signatures independently of extensions. These are
+# narrow format guards, not general secret scanning or authenticity checks.
+PRIVATE_ARTIFACT_MAGIC = (
+    b"SCORPUS1", b"STCP0001", b"SLHAND01", b"SLCROP01",
+    b"\x93NUMPY", b"PK\x03\x04", b"PK\x05\x06", b"PK\x07\x08",
+)
+
+def reject_artifact_contents(path: str, data: bytes) -> None:
+    if data.startswith(PRIVATE_ARTIFACT_MAGIC):
+        raise RuntimeError(f"Binary artifact signature in source entry: {path}")
+    if (len(data) >= 12 and data[:4] in (b"RIFF", b"RF64", b"RIFX")
+            and data[8:12] == b"WAVE"):
+        raise RuntimeError(f"Binary artifact signature in source entry: {path}")
+    if data.startswith((b"fLaC", b"OggS")):
+        raise RuntimeError(f"Binary artifact signature in source entry: {path}")
+
 MAX_FILES = 2000
 MAX_FILE_BYTES = 2 * 1024 * 1024
 MAX_TOTAL_BYTES = 32 * 1024 * 1024
@@ -165,6 +181,7 @@ class SourceEntries:
         data = read()
         if len(data) != size:
             raise RuntimeError(f"Source archive entry changed: {relative}")
+        reject_artifact_contents(relative, data)
         self.files[canonical] = data
 
 
