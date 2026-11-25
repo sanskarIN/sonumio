@@ -300,3 +300,18 @@ def test_installed_demo_smoke_rejects_false_model_provenance(tmp_path):
     report["original_model_inference"] = True
     with pytest.raises(RuntimeError, match="demo provenance"):
         gate._check_demo_smoke(report, destination, "0.0.2")
+
+
+@pytest.mark.parametrize("filename", [
+    "research/private.scorpus", "research/private.SCORPUS",
+    "research/state.stcheckpoint", "research/state.STCHECKPOINT",
+    "research/.sonumio-train-abc.partial",
+])
+def test_source_gate_refuses_private_training_artifacts(filename):
+    candidate = gate.SourceCandidate("a"*40, "0.0.2")
+    entries = gate.SourceEntries(candidate)
+    def forbidden():
+        pytest.fail("private artifact should be rejected before its contents are read")
+    with pytest.raises(RuntimeError, match="Binary or sensitive artifact"):
+        entries.accept(candidate.prefix+filename, directory=False, regular=True,
+                       size=1, read=forbidden)
