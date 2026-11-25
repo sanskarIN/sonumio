@@ -258,7 +258,7 @@ def test_archive_training_deterministic_in_memory_and_bounded_batches(corpus, mo
 
 def test_training_readiness_fails_before_optimizer(tmp_path, monkeypatch):
     splits = fixture()
-    splits["train"].clips[3] = 0  # last eligible crop from a rain group
+    splits["train"].clips[3] = .025  # distinct constant, not a cross-split silent duplicate
     path = tmp_path / "inadequate.scorpus"
     report = build(path,splits)
     monkeypatch.setattr("research.archive_wave_training.training_step",
