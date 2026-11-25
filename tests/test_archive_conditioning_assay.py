@@ -137,3 +137,41 @@ def test_panel_bounds():
     assert timestep_panel(1000)==(0,499,999)
     with pytest.raises(ArchiveError):
         timestep_panel(7)
+
+
+def test_matched_seeded_initialization_comparison(corpus,tmp_path):
+    path,sha=corpus
+    checkpoint=tmp_path/"trained.stcheckpoint"
+    training=ArchiveTrainingConfig(steps=2,channels=8,diffusion_steps=8,batch_size=2,
+                                   validation_repeats=1,validation_batch_size=3)
+    report=train_archive(path,expected_sha256=sha,config=training,
+                         checkpoint=CheckpointOptions(final_path=checkpoint))
+    result=assay_checkpoint(path,archive_sha256=sha,checkpoint=checkpoint,
+                            checkpoint_sha256=report["checkpoint_receipts"][0]["sha256"],
+                            training=training,config=AssayConfig(repeats=1),compare_initial=True)
+    initial=result["initialization_assay"]
+    comparison=result["initialization_comparison"]
+    assert initial["model_sha256"]==report["initial_model_sha256"]
+    assert comparison["trained_model_sha256"]==report["trained_model_sha256"]
+    assert initial["noise_trace_sha256"]==result["noise_trace_sha256"]
+    assert comparison["matched_corruption_trace_verified"]
+    assert comparison["clip_weighted"]["matched_mse"]==(
+        result["clip_weighted"]["matched_mse"]-initial["clip_weighted"]["matched_mse"])
+    assert comparison["group_macro"]["hardest_wrong_minus_matched"]==(
+        result["group_macro"]["hardest_wrong_minus_matched"]-
+        initial["group_macro"]["hardest_wrong_minus_matched"])
+    assert comparison["statistical_significance_claimed"] is False
+    assert comparison["generated_audio_semantics_established"] is False
+
+
+def test_comparison_rejects_unpaired_noise_trace(corpus):
+    from research.archive_conditioning_assay import compare_initialization
+    path,sha=corpus
+    with CorpusArchiveReader(path,expected_sha256=sha) as reader:
+        ready=audit_archive(reader)
+        result=evaluate_conditioning(reader,ready,TinyWaveDenoiser(8),DiffusionSchedule(8),
+                                     config=AssayConfig(repeats=1))
+    equal=compare_initialization(result,result)
+    assert all(x==0 for x in equal["clip_weighted"].values())
+    with pytest.raises(ArchiveError,match="different assay panel"):
+        compare_initialization(result,{**result,"noise_trace_sha256":"0"*64})

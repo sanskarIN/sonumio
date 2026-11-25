@@ -36,3 +36,17 @@ This assay measures teacher-forced prediction, not semantic accuracy of
 generated audio, naturalness, statistical significance, or Sonumio-1
 readiness. It is a diagnostic for choosing further controlled research.
 No trained weights or real recordings are part of this contribution.
+
+
+## Matched initialization control
+
+Add `--compare-initial` to the same command to reconstruct the checkpoint's
+original seeded model initialization and evaluate it with the identical
+validation corruption panel before restoring trained parameters. The output
+contains the initialization assay and trained-minus-initial deltas for
+each available scalar metric, category, timestep and group-macro summary.
+A changed noise trace, configuration, or coverage is rejected. Positive
+margin changes favor matched conditioning; negative rank changes favor the
+matched category. Lower matched MSE alone does not prove conditioning
+improved. This comparison is one initialization, not an independent
+multi-seed statistical study.
