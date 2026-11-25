@@ -248,13 +248,57 @@ def evaluate_conditioning(
     }
 
 
+
+def compare_initialization(initial: dict, trained: dict) -> dict:
+    """Compute paired descriptive deltas; do not rank or infer significance."""
+    pins = ("protocol", "archive_sha256", "eligible_validation_sha256", "seed",
+            "repeats", "batch_size", "diffusion_profile", "diffusion_steps",
+            "timesteps", "eligible_validation_clips", "prediction_rows",
+            "noise_trace_sha256", "condition_columns", "truth_rows",
+            "tie_absolute_tolerance")
+    if any(initial[key] != trained[key] for key in pins):
+        raise ArchiveError("Initialization comparison uses a different assay panel")
+    keys = ("matched_mse", "mean_wrong_mse", "hardest_wrong_mse", "null_mse",
+            "mean_wrong_minus_matched", "hardest_wrong_minus_matched",
+            "null_minus_matched", "mean_rank", "strict_win_fraction")
+
+    def difference(a, b):
+        if a.get("cases") != b.get("cases") or a.get("recording_groups") != b.get("recording_groups"):
+            raise ArchiveError("Initialization comparison coverage changed")
+        return {key: (b[key]-a[key] if a[key] is not None and b[key] is not None else None)
+                for key in keys if key in a and key in b}
+
+    return {
+        "initial_model_sha256": initial["model_sha256"],
+        "trained_model_sha256": trained["model_sha256"],
+        "noise_trace_sha256": trained["noise_trace_sha256"],
+        "delta_convention": "trained_minus_initial",
+        "clip_weighted": difference(initial["clip_weighted"], trained["clip_weighted"]),
+        "group_macro": difference(initial["group_macro"], trained["group_macro"]),
+        "by_category": {name: difference(initial["by_category"][name], trained["by_category"][name])
+                        for name in CATEGORIES},
+        "by_noise_level": {
+            level: {kind: difference(initial["by_noise_level"][level][kind],
+                                     trained["by_noise_level"][level][kind])
+                    for kind in ("clip_weighted", "group_macro")}
+            for level in LEVELS
+        },
+        "matched_corruption_trace_verified": True,
+        "statistical_significance_claimed": False,
+        "generated_audio_semantics_established": False,
+    }
+
+
 def assay_checkpoint(archive, *, archive_sha256, checkpoint, checkpoint_sha256,
-                     training: ArchiveTrainingConfig, config: AssayConfig | None = None):
+                     training: ArchiveTrainingConfig, config: AssayConfig | None = None,
+                     compare_initial: bool = False):
     """Evaluate one digest-pinned training checkpoint without updating it."""
     require_sha256(archive_sha256)
     require_sha256(checkpoint_sha256)
     if not isinstance(training,ArchiveTrainingConfig):
         raise ArchiveError("Expected ArchiveTrainingConfig")
+    if type(compare_initial) is not bool:
+        raise ArchiveError("Expected boolean initialization comparison flag")
     with CorpusArchiveReader(archive,expected_sha256=archive_sha256) as reader:
         readiness = audit_archive(reader)
         with torch.random.fork_rng(devices=[]):
@@ -263,15 +307,20 @@ def assay_checkpoint(archive, *, archive_sha256, checkpoint, checkpoint_sha256,
                 model = TinyWaveDenoiser(training.channels)
                 schedule = DiffusionSchedule(training.diffusion_steps,profile=training.diffusion_profile)
             optimizer = make_archive_optimizer(model)
+            initial_hash = model_fingerprint(model)
+            initial = (evaluate_conditioning(reader, readiness, model, schedule, config=config)
+                       if compare_initial else None)
             restored = restore_training_checkpoint(
                 checkpoint,expected_sha256=checkpoint_sha256,config=training,
-                readiness=readiness,initial_model_sha256=model_fingerprint(model),
+                readiness=readiness,initial_model_sha256=initial_hash,
                 model=model,optimizer=optimizer,
             )
             result = evaluate_conditioning(reader,readiness,model,schedule,config=config)
     return {**result,"checkpoint_sha256":restored.sha256,
             "completed_training_steps":restored.progress.completed_steps,
-            "files_written":0,"original_sonumio_1":False}
+            "files_written":0,"original_sonumio_1":False,
+            "initialization_assay": initial,
+            "initialization_comparison": compare_initialization(initial,result) if initial is not None else None}
 
 
 def main(argv=None):
@@ -288,12 +337,14 @@ def main(argv=None):
     parser.add_argument("--assay-seed",type=int,default=301)
     parser.add_argument("--assay-repeats",type=int,default=2)
     parser.add_argument("--assay-batch-size",type=int,default=4)
+    parser.add_argument("--compare-initial",action="store_true",help="Evaluate matched seeded initialization before checkpoint restore")
     args=parser.parse_args(argv)
     try:
         training=ArchiveTrainingConfig(**{key:getattr(args,key) for key in ArchiveTrainingConfig.__dataclass_fields__})
         result=assay_checkpoint(args.archive,archive_sha256=args.archive_sha256,
                                checkpoint=args.checkpoint,checkpoint_sha256=args.checkpoint_sha256,
-                               training=training,config=AssayConfig(args.assay_seed,args.assay_repeats,args.assay_batch_size))
+                               training=training,config=AssayConfig(args.assay_seed,args.assay_repeats,args.assay_batch_size),
+                               compare_initial=args.compare_initial)
     except (ValueError,OSError,RuntimeError) as exc:
         parser.exit(2,f"Archive conditioning assay: {exc}\n")
     print(json.dumps(result,sort_keys=True,allow_nan=False))
