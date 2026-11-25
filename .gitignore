@@ -23,3 +23,7 @@ private-data/
 web/node_modules/
 web/dist/
 web/coverage/
+
+# Private local optimizer checkpoints
+*.stcheckpoint
+.sonumio-train-*.partial
