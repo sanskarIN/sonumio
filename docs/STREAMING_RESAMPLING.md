@@ -18,6 +18,17 @@ report = resample_wav_file(
 print(report.as_dict())
 ```
 
+Command-line equivalent:
+
+```bash
+sonumio wav-resample input.wav --output converted.wav --target-rate 16000 --output-bits 24
+```
+
+Use `--expected-sha256` and `--expected-output-sha256` to require exact
+trusted digests, `--dither-seed` for seeded TPDF, or `--clip-policy hard`
+to explicitly allow clipping. Successful publication emits a JSON report;
+a validation or integrity error emits no JSON and returns exit code 2.
+
 The processor accepts up to 8192 source frames per call and retains only
 the filter context required for subsequent output. Destination packets
 are limited to 65536 frames. Kernel matrices respect the existing cell

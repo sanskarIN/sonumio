@@ -83,6 +83,17 @@ limits, PCM formats, reproducibility and benchmarks, read
 [the audio-core architecture record](docs/AUDIO_CORE_DEEP_DEVELOPMENT.md).
 
 
+### Verified streaming WAV resampling
+
+```bash
+sonumio wav-resample input.wav --output converted.wav --target-rate 16000 --output-bits 24
+```
+
+The converter retains bounded filter history, verifies the full source
+SHA256 before atomic publication, and rejects clipping unless explicitly
+requested. See [streaming resampling](docs/STREAMING_RESAMPLING.md) for
+the supported canonical PCM limits and reproducibility controls.
+
 ### Verified WAV inspection (numerical signal health)
 
 Use `sonumio wav-inspect existing.wav --expected-sha256 SHA256` to compute

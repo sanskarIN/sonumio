@@ -14,6 +14,8 @@ from .audio_core.wave_pipeline import (
 from .atomic_cli_wav import publish_generated_wav
 from .audio_core.quality import QualityLimits
 from .audio_core.stream_quality import inspect_wav_quality
+from .audio_core.resample import ResampleSettings
+from .audio_core.wave_resample import resample_wav_file
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="sonumio", description="Imagine it. Hear it.")
@@ -75,6 +77,23 @@ def main(argv: list[str] | None = None) -> int:
                       help="Require full output WAV digest before publication")
     post.add_argument("--overwrite", action="store_true")
     post.add_argument("--create-parent", action="store_true")
+    convert = sub.add_parser(
+        "wav-resample", help="Convert canonical PCM WAV to another sample clock with SHA verification",
+    )
+    convert.add_argument("input", type=Path)
+    convert.add_argument("--output", type=Path, required=True)
+    convert.add_argument("--target-rate", type=int, required=True)
+    convert.add_argument("--lobes", type=int, default=24)
+    convert.add_argument("--window", choices=("kaiser", "hann", "blackman"), default="kaiser")
+    convert.add_argument("--beta", type=float, default=8.6)
+    convert.add_argument("--packet-frames", type=int, default=4096)
+    convert.add_argument("--output-bits", type=int, choices=(8, 16, 24, 32))
+    convert.add_argument("--dither-seed", type=int)
+    convert.add_argument("--clip-policy", choices=("reject", "hard"), default="reject")
+    convert.add_argument("--expected-sha256", help="Trusted full input WAV SHA256")
+    convert.add_argument("--expected-output-sha256", help="Require exact output digest before publication")
+    convert.add_argument("--overwrite", action="store_true")
+    convert.add_argument("--create-parent", action="store_true")
     inspect = sub.add_parser(
         "wav-inspect",
         help="Verify a canonical local PCM WAV and inspect signal health with bounded memory",
@@ -117,6 +136,23 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "serve":
         import uvicorn
         uvicorn.run("sonumio.api:app", host="127.0.0.1", port=args.port)
+        return 0
+    if args.command == "wav-resample":
+        try:
+            settings = ResampleSettings(
+                args.target_rate, lobes=args.lobes, window=args.window, beta=args.beta,
+            )
+            report = resample_wav_file(
+                args.input, args.output, settings=settings, packet_frames=args.packet_frames,
+                output_bits=args.output_bits, dither_seed=args.dither_seed,
+                clip_policy=args.clip_policy, expected_source_sha256=args.expected_sha256,
+                expected_output_sha256=args.expected_output_sha256,
+                overwrite=args.overwrite, create_parent=args.create_parent,
+            )
+        except (OSError, ValueError, TypeError, RuntimeError) as exc:
+            print(f"Sonumio WAV resampling: {exc}", file=sys.stderr)
+            return 2
+        print(json.dumps(report.as_dict(), sort_keys=True, allow_nan=False))
         return 0
     if args.command == "wav-inspect":
         try:
