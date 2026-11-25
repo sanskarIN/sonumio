@@ -49,3 +49,24 @@ a Gaussian initial sample may mismatch the terminal training distribution
 (particularly for short linear schedules). No claim is made that this
 mismatch has been solved. The evaluator uses bounded, fixed-size CPU
 samples; it does not support long-form generation or GPU inference.
+
+
+## Optional integration with the paired multi-seed study
+
+```bash
+python -m research.archive_label_study private.scorpus --expected-sha256 APPROVED_ARCHIVE \
+  --seeds 17,29,41 --steps 64 --channels 16 --diffusion-steps 32 \
+  --evaluate-generated --generation-seeds 701,709,727 --reverse-steps 8
+```
+
+The same train-only reference is fitted once and applied to each seeded
+initialization, matched-supervision arm and random-label control. All
+models share the exact generated-noise panel. Each per-seed comparison
+pairs the requested category, initial noise seed and guidance strength
+before averaging differences; across-seed summaries retain missing-value
+counts explicitly. Strict-win fractions include unscorable outputs as
+non-wins. Continuous differences use only pairs with both defined values,
+so inspect defined counts and do not treat incomplete comparisons as
+complete evidence. This optional path is bounded before training by
+100,000 total model forward calls for generation. No samples or weights
+are written.
