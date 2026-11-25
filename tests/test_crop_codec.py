@@ -195,3 +195,16 @@ def test_seeded_crop_source_no_exact_overlap_and_preserves_rng():
     assert len(set(hashes)) == len(hashes)
     assert len(set(heldout)) == len(heldout)
     assert not set(hashes) & set(heldout)
+
+
+@pytest.mark.parametrize("category",["rain","thunder","wind","forest","ocean","ambient"])
+def test_event_aware_crop_has_active_signal_and_valid_offset(category):
+    from research.crop_source_data import render_crop, WINDOWS, MIN_CENTERED_RMS
+    for seed in (0,1,2,101,102):
+        wave, offset = render_crop(category,seed)
+        assert WINDOWS[category][0] <= offset <= WINDOWS[category][1]
+        assert wave.shape == (2048,)
+        assert np.std(wave.astype(np.float64)) >= MIN_CENTERED_RMS
+        replay, other = render_crop(category,seed)
+        np.testing.assert_array_equal(wave,replay)
+        assert offset == other
