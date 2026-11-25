@@ -452,3 +452,158 @@ def test_cli_checkpoint_receipt_and_no_private_paths(trained, tmp_path, capsys):
     assert receipt["filename"] == target.name
     assert str(tmp_path) not in output
     assert target.read_bytes() == prefix.read_bytes()
+
+
+def test_read_only_checkpoint_audit_preserves_rng_and_files(trained, monkeypatch):
+    from research.archive_checkpoint_audit import audit_checkpoints, CheckpointReference
+    archive, sha, config, prefix, report = trained
+    def forbidden(*args, **kwargs):
+        pytest.fail("Checkpoint audit must not train")
+    monkeypatch.setattr(torch.optim.AdamW, "step", forbidden)
+    rng = torch.get_rng_state().clone()
+    original = prefix.read_bytes()
+    before = sorted(prefix.parent.iterdir())
+    audit = audit_checkpoints(
+        archive, archive_sha256=sha, config=config,
+        primary=CheckpointReference(prefix, report["checkpoint_receipts"][0]["sha256"]),
+    )
+    assert audit["primary"]["model_sha256"] == report["trained_model_sha256"]
+    assert audit["primary"]["progress"]["completed_steps"] == config.steps
+    assert audit["primary"]["resume_contract_verified"]
+    assert len(audit["primary"]["optimizer_sha256"]) == 64
+    assert audit["comparison"] is None
+    assert audit["same_step"] is None
+    assert audit["identical_same_step_state"] is None
+    assert audit["optimizer_steps_executed"] == audit["files_written"] == 0
+    assert not audit["ancestry_proven"]
+    assert not audit["model_quality_established"]
+    assert torch.equal(torch.get_rng_state(), rng)
+    assert prefix.read_bytes() == original
+    assert sorted(prefix.parent.iterdir()) == before
+
+
+def test_audit_exact_same_step_comparison(trained, tmp_path):
+    from research.archive_checkpoint_audit import audit_checkpoints, CheckpointReference
+    archive, sha, config, prefix, report = trained
+    duplicate = tmp_path/"copy.stcheckpoint"
+    duplicate.write_bytes(prefix.read_bytes())
+    pin = report["checkpoint_receipts"][0]["sha256"]
+    audit = audit_checkpoints(
+        archive, archive_sha256=sha, config=config,
+        primary=CheckpointReference(prefix, pin), comparison=CheckpointReference(duplicate, pin),
+    )
+    assert audit["same_step"] is True
+    assert audit["identical_same_step_state"] is True
+    assert all(audit["component_matches"].values())
+    assert audit["primary"] == audit["comparison"]
+    assert not audit["ancestry_proven"]
+
+
+def test_audit_detects_different_numeric_optimizer_state(trained, tmp_path):
+    from research.archive_checkpoint_audit import audit_checkpoints, CheckpointReference
+    archive, sha, config, prefix, report = trained
+    # This intentionally creates another internally valid numeric state. The
+    # digest pin identifies it, but cannot prove that it was trained honestly.
+    altered = mutate_tensor(prefix.read_bytes(), lambda n: n.endswith("/exp_avg"),
+                            lambda a: a.fill(.25))
+    path = tmp_path/"different.stcheckpoint"
+    path.write_bytes(altered)
+    audit = audit_checkpoints(
+        archive, archive_sha256=sha, config=config,
+        primary=CheckpointReference(prefix, report["checkpoint_receipts"][0]["sha256"]),
+        comparison=CheckpointReference(path, digest(altered)),
+    )
+    assert audit["same_step"]
+    assert audit["identical_same_step_state"] is False
+    assert not audit["component_matches"]["optimizer_sha256"]
+    assert audit["component_matches"]["model_sha256"]
+    assert audit["component_matches"]["sampler"]
+    assert not audit["ancestry_proven"]
+
+
+def test_audit_different_steps_not_equivalence_claim(trained, tmp_path):
+    from research.archive_checkpoint_audit import audit_checkpoints, CheckpointReference
+    archive, sha, config, prefix, report = trained
+    continuation = tmp_path/"later.stcheckpoint"
+    next_config = replace(config, steps=config.steps+1)
+    pin = report["checkpoint_receipts"][0]["sha256"]
+    continued = train_archive(
+        archive, expected_sha256=sha, config=next_config,
+        checkpoint=CheckpointOptions(resume_from=prefix, resume_sha256=pin, final_path=continuation),
+    )
+    audit = audit_checkpoints(
+        archive, archive_sha256=sha, config=next_config,
+        primary=CheckpointReference(prefix, pin),
+        comparison=CheckpointReference(continuation, continued["checkpoint_receipts"][0]["sha256"]),
+    )
+    assert audit["same_step"] is False
+    assert audit["identical_same_step_state"] is None
+    assert audit["component_matches"] is None
+    assert not audit["ancestry_proven"]
+
+
+def test_audit_requires_external_pin_for_each_file(trained):
+    from research.archive_checkpoint_audit import audit_checkpoints, CheckpointReference
+    archive, sha, config, prefix, report = trained
+    valid = CheckpointReference(prefix, report["checkpoint_receipts"][0]["sha256"])
+    with pytest.raises(ArchiveError, match="lowercase SHA256"):
+        CheckpointReference(prefix, "wrong")
+    with pytest.raises(ArchiveError, match="SHA256 mismatch"):
+        audit_checkpoints(
+            archive, archive_sha256=sha, config=config, primary=valid,
+            comparison=CheckpointReference(prefix, "0"*64),
+        )
+
+
+def _audit_cli_args(trained):
+    archive, sha, config, prefix, report = trained
+    return [
+        str(archive), "--archive-sha256", sha, str(prefix),
+        "--checkpoint-sha256", report["checkpoint_receipts"][0]["sha256"],
+        "--steps", str(config.steps), "--batch-size", str(config.batch_size),
+        "--channels", str(config.channels), "--diffusion-steps", str(config.diffusion_steps),
+        "--validation-repeats", str(config.validation_repeats),
+        "--validation-batch-size", str(config.validation_batch_size),
+    ]
+
+
+def test_audit_cli_same_step_gate_and_privacy(trained, capsys):
+    from research.archive_checkpoint_audit import main as audit_main
+    _, _, _, prefix, report = trained
+    pin = report["checkpoint_receipts"][0]["sha256"]
+    args = _audit_cli_args(trained)
+    assert audit_main(args+["--compare", str(prefix), "--compare-sha256", pin,
+                            "--require-identical"]) == 0
+    output = capsys.readouterr().out
+    result = json.loads(output)
+    assert result["identical_same_step_state"]
+    assert str(prefix.parent) not in output
+    assert "private-train" not in output
+
+
+def test_audit_cli_rejects_incomplete_comparison(trained, capsys):
+    from research.archive_checkpoint_audit import main as audit_main
+    args = _audit_cli_args(trained)
+    with pytest.raises(SystemExit) as error:
+        audit_main(args+["--require-identical"])
+    assert error.value.code == 2
+    assert "requires a comparison" in capsys.readouterr().err
+    with pytest.raises(SystemExit) as error:
+        audit_main(args+["--compare-sha256", "a"*64])
+    assert error.value.code == 2
+
+
+def test_audit_cli_fails_nonidentical_same_step_gate(trained, tmp_path, capsys):
+    from research.archive_checkpoint_audit import main as audit_main
+    _, _, _, prefix, _ = trained
+    altered = mutate_tensor(prefix.read_bytes(), lambda n: n.endswith("/exp_avg"),
+                            lambda a: a.fill(.5))
+    path = tmp_path/"other.stcheckpoint"
+    path.write_bytes(altered)
+    assert audit_main(_audit_cli_args(trained)+[
+        "--compare", str(path), "--compare-sha256", digest(altered),
+        "--require-identical",
+    ]) == 2
+    output = json.loads(capsys.readouterr().out)
+    assert output["same_step"] is True
+    assert output["identical_same_step_state"] is False

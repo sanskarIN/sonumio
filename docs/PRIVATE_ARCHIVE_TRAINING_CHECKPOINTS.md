@@ -96,3 +96,34 @@ python -m pytest -q tests/test_archive_checkpoint.py tests/test_archive_training
 
 No claim of perceptual model quality, commercial training readiness, or
 Sonumio-1 completion follows from these tests.
+
+
+## Read-only checkpoint audit
+
+Validate a recovery file without running training:
+
+```bash
+python -m research.archive_checkpoint_audit private.scorpus \
+  --archive-sha256 ARCHIVE_SHA256 prefix.stcheckpoint \
+  --checkpoint-sha256 CHECKPOINT_SHA256 \
+  --steps 20 --batch-size 4 --channels 8 --diffusion-steps 8
+```
+
+The audit performs a fresh corpus readiness pass, reconstructs trusted
+model and AdamW state, verifies the sampler replay and returns only
+aggregate fingerprints and progress. It does not write anything.
+
+To compare interrupted and uninterrupted runs at the same completed
+step, add `--compare second.stcheckpoint --compare-sha256 SECOND_SHA256`.
+An optional `--require-identical` returns a nonzero exit code unless all
+same-step numerical state matches. The comparison checks model, optimizer,
+CPU RNG, sampler, progress, initialization and dataset/configuration pins
+separately, rather than mistaking an equal model fingerprint for equal
+optimizer state. Different-step snapshots return a null equivalence
+result. A successful check does not prove ancestry, rights, or quality.
+
+All options except the target total steps must match the original run.
+The specified steps must be at least the largest completed step among
+the audited files. This tool never imports pickle or executes an optimizer
+update; caller CPU RNG state is preserved. Do not use the aggregate report
+to publish the underlying private artifacts.
