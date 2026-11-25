@@ -31,9 +31,9 @@ from research.wave_diffusion import CLIP_FRAMES, CATEGORIES, DiffusionSchedule
 from research.weight_ema import model_state_sha256
 
 PROTOCOL = "sonumio-private-archive-latent-study-v1"
-MAX_TRAIN_EXAMPLES = 40_000
-MAX_VALIDATION_PREDICTIONS = 400_000
-MAX_GENERATION_FORWARDS = 20_000
+MAX_TRAIN_EXAMPLES = 32_000
+MAX_VALIDATION_PREDICTIONS = 300_000
+MAX_GENERATION_FORWARDS = 10_000
 
 
 @dataclass(frozen=True, slots=True)
