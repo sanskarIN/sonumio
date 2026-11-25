@@ -29,9 +29,14 @@ def check_rate(rate: int) -> int:
 
 def finite_float(value: float, name: str, *, minimum: float | None = None,
                  maximum: float | None = None) -> float:
-    if type(value) not in (float, int) or not math.isfinite(value):
+    if type(value) not in (float, int):
         raise AudioContractError(name + " must be a finite number")
-    result = float(value)
+    try:
+        result = float(value)
+    except OverflowError as exc:
+        raise AudioContractError(name + " must be a finite number") from exc
+    if not math.isfinite(result):
+        raise AudioContractError(name + " must be a finite number")
     if minimum is not None and result < minimum:
         raise AudioContractError(name + " below minimum")
     if maximum is not None and result > maximum:
@@ -88,7 +93,9 @@ def as_channel_first(samples: np.ndarray, *,
     A mono 1-D input is interpreted as one channel. A 2-D array is
     channel-first unless channels_last=True is explicit. There is no
     automatic guessed transpose; ambiguous 2-D inputs fail the channel
-    limit rather than silently interleaving audio.
+    limit rather than silently interleaving audio. copy=False permits
+    sharing storage when possible, but permits a necessary conversion or
+    layout copy too, consistently on NumPy 1.x and 2.x.
     """
     if not isinstance(samples, np.ndarray) or samples.ndim not in (1, 2):
         raise AudioContractError("Audio array must have one or two dimensions")
@@ -98,12 +105,19 @@ def as_channel_first(samples: np.ndarray, *,
         raise AudioContractError("Floating PCM dtype is required")
     samples = samples.T if channels_last else samples
     check_audio(samples)
-    dtype = np.float64 if float64 else np.float32
-    out = np.array(samples, dtype=dtype, copy=copy, order="C")
+    dtype = np.dtype(np.float64 if float64 else np.float32)
+    channels, frames = (1, samples.shape[0]) if samples.ndim == 1 else samples.shape
+    validate_allocation(int(channels), int(frames), itemsize=dtype.itemsize)
+    if dtype == np.dtype(np.float32) and samples.dtype == np.dtype(np.float64):
+        limit = float(np.finfo(np.float32).max)
+        if float(samples.min()) < -limit or float(samples.max()) > limit:
+            raise AudioContractError("PCM cannot be represented as finite float32")
+    if copy:
+        out = np.array(samples, dtype=dtype, copy=True, order="C")
+    else:
+        out = np.asarray(samples, dtype=dtype, order="C")
     if out.ndim == 1:
         out = out.reshape(1, -1)
-    if not out.flags.c_contiguous:
-        out = np.ascontiguousarray(out)
     return out
 
 
@@ -237,7 +251,7 @@ class AudioBuffer:
     def mutable_copy(self, *, dtype: str = "float32") -> np.ndarray:
         if dtype not in ("float32", "float64"):
             raise AudioContractError("Unsupported working buffer dtype")
-        return np.array(self.samples, dtype=dtype, copy=True, order="C")
+        return as_channel_first(self.samples, copy=True, float64=dtype == "float64")
 
     def copy_with(self, samples: np.ndarray, *,
                   source_note: str | None = None) -> "AudioBuffer":
@@ -261,12 +275,14 @@ def make_buffer(samples: np.ndarray, sample_rate: int, *,
                 layout: AudioLayout | None = None,
                 source_note: str = "") -> AudioBuffer:
     check_rate(sample_rate)
-    array = as_channel_first(samples, channels_last=channels_last)
+    array = as_channel_first(samples, channels_last=channels_last, copy=False)
     if array.shape[1] > int(sample_rate * MAX_SECONDS):
         raise AudioLimitError("Audio exceeds maximum in-memory duration")
     actual_layout = layout if layout is not None else AudioLayout.for_channels(
         array.shape[0]
     )
+    if not isinstance(actual_layout, AudioLayout):
+        raise AudioContractError("Expected AudioLayout")
     if actual_layout.channels != array.shape[0]:
         raise AudioContractError("Declared layout does not match PCM channels")
     spec = AudioSpec(sample_rate, actual_layout, array.shape[1])
