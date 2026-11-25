@@ -18,13 +18,14 @@ import torch
 
 from research.archive_latent_access import AuditedCropAccess, counter_generator, hash_tensor
 from research.archive_latent_validation import validate_latent
+from research.archive_latent_calibration import fit_archive_calibration, MODES
 from research.archive_readiness import audit_archive
 from research.archive_sampler import CounterGroupSampler
 from research.corpus_archive import CorpusArchiveReader
 from research.corpus_archive_format import ArchiveError, canonical_json, require_sha256
 from research.crop_codec import CropAudioCodec, codec_loss
 from research.crop_codec_packet import BITS, payload_rate_report
-from research.crop_latent import (CropLatentDenoiser, encode_native, fit_calibration,
+from research.crop_latent import (CropLatentDenoiser, encode_native,
                                   reverse_indices, velocity_loss)
 from research.crop_latent_study import _generated
 from research.wave_diffusion import CLIP_FRAMES, CATEGORIES, DiffusionSchedule
@@ -50,6 +51,7 @@ class ArchiveLatentPlan:
     validation_repeats: int = 2
     validation_batch_size: int = 8
     generation_seeds: tuple[int, ...] = (701,709)
+    calibration_mode: str = "group_balanced"
 
     def __post_init__(self):
         for value, lo, hi, name in (
@@ -64,6 +66,8 @@ class ArchiveLatentPlan:
             raise ArchiveError("Invalid private latent precision")
         if type(self.width) is not int or self.width not in (16,32,48,64):
             raise ArchiveError("Invalid private latent model width")
+        if type(self.calibration_mode) is not str or self.calibration_mode not in MODES:
+            raise ArchiveError("Invalid private latent calibration mode")
         reverse_indices(self.schedule_steps,self.reverse_steps)
         if (type(self.generation_seeds) is not tuple or not 2 <= len(self.generation_seeds) <= 8
                 or any(type(x) is not int or not 0 <= x < 2**32 for x in self.generation_seeds)
@@ -178,7 +182,9 @@ def run_archive_latent(path, *, expected_sha256, plan=None):
             # No held-out rows, cached dataset, or materialized latent corpus.
             # Scan calibration one eligible clip at a time so its Float64
             # reduction order does not change with shard or optimizer batch.
-            calibration = fit_calibration(codec,(wave for _,wave in access.scan("train",1)),bits=plan.bits)
+            calibration, calibration_weights = fit_archive_calibration(
+                access,codec,bits=plan.bits,mode=plan.calibration_mode,
+            )
             if calibration.clips != access.count("train"):
                 raise ArchiveError("Private latent calibration coverage changed")
             torch.random.default_generator.manual_seed(plan.seed)
@@ -204,7 +210,7 @@ def run_archive_latent(path, *, expected_sha256, plan=None):
         "training_examples":plan.training_examples,"validation_prediction_rows":validation_work,
         "generation_forward_calls":plan.generation_forwards,
         "codec":{"initial_sha256":initial_codec,"trained_sha256":trained_codec,"training":codec_report,
-                 "calibration":calibration.report(),"frozen_during_diffusion":True,
+                 "calibration":{**calibration.report(),"weighting":calibration_weights},"frozen_during_diffusion":True,
                  "rate":payload_rate_report(CLIP_FRAMES,plan.bits) if plan.bits is not None else None},
         "denoiser":{"initial_sha256":initial_model,"trained_sha256":trained_model,"training":training,
                     "objective":"velocity","schedule":"cosine_zero_terminal_v1",
@@ -229,6 +235,7 @@ def main(argv=None):
         parser.add_argument("--"+name.replace("_","-"),type=int,default=getattr(defaults,name))
     parser.add_argument("--bits",choices=("float","2","4","6","8"),default="8")
     parser.add_argument("--generation-seeds",default="701,709")
+    parser.add_argument("--calibration-mode",choices=MODES,default=defaults.calibration_mode)
     args=parser.parse_args(argv)
     try:
         settings={key:getattr(args,key) for key in ArchiveLatentPlan.__dataclass_fields__}
