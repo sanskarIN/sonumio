@@ -19,7 +19,8 @@ import torch
 
 from research.crop_codec import CropAudioCodec,codec_loss,reconstruction_metrics,quantize_latent
 from research.crop_codec_packet import CropCodecError,BITS,payload_rate_report
-from research.wave_diffusion import dataset,CATEGORIES,CLIP_FRAMES
+from research.wave_diffusion import CATEGORIES,CLIP_FRAMES
+from research.crop_source_data import dataset, PROTOCOL as SOURCE_PROTOCOL
 from research.weight_ema import model_state_sha256
 
 PROTOCOL="sonumio-crop-codec-rate-distortion-v1"
@@ -80,7 +81,7 @@ def _split_data(plan):
     return train,train_labels,validation,val_labels,{
         "training_source_sha256":train_hash,"validation_source_sha256":val_hash,
         "training_clips":len(train),"validation_clips":len(validation),
-        "exact_cross_split_clip_overlap":False,"source_kind":"first_party_synthetic_dsp",
+        "exact_cross_split_clip_overlap":False,"source_kind":"first_party_synthetic_dsp", "source_recipe":SOURCE_PROTOCOL,
     }
 
 
