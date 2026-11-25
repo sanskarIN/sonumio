@@ -60,7 +60,8 @@ class TrainingProgress:
         if type(self.completed_steps) is not int or not 0 <= self.completed_steps <= MAX_TRAINING_STEPS:
             raise ArchiveError("Invalid completed training step count")
         if not self.completed_steps:
-            if self.first_loss is not None or self.last_loss is not None or self.loss_total != 0:
+            if (self.first_loss is not None or self.last_loss is not None
+                    or type(self.loss_total) not in (int, float) or self.loss_total != 0):
                 raise ArchiveError("Empty progress must not contain training losses")
         else:
             values = (self.first_loss, self.last_loss, self.loss_total)
