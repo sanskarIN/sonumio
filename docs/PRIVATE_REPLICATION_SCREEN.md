@@ -141,3 +141,27 @@ Use these descriptive controls to develop hypotheses. Any chosen threshold
 must be frozen and assessed on a separate independent corpus before making
 claims of detector sensitivity, specificity, or model memorization safety.
 The synthetic fixture CI is not evidence of real-world calibration.
+
+
+## Cross-representation agreement
+
+The checkpoint report now distinguishes a query for which both independent
+nearest similarities exceed their respective thresholds from one for which
+a single eligible training crop exceeds both thresholds simultaneously.
+The difference is reported as independent-maxima-only, not joint evidence.
+Undefined similarities cannot contribute to same-reference agreement.
+
+The control-study report adds a joint_same_reference panel. For each
+gallery crop with two defined scores, take their minimum; then maximize
+that joint score across the gallery. The known-source version takes the
+minimum of the two similarities against the original source. At a shared
+threshold t, this statistic counts precisely those queries for which
+at least one individual reference meets both criteria. It is not a new
+calibrated similarity measure or a requirement that both metrics agree
+before human review. A single-metric candidate remains a review trigger.
+
+This avoids incorrectly combining maxima from two different recordings.
+The tests include deliberately conflicting nearest references and missing
+spectral measurements. No matching identity or per-query evidence is
+exported. Neither agreement nor disagreement establishes copying or
+absence of memorization.
