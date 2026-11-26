@@ -99,6 +99,17 @@ def _mag(wave, fft):
                       center=False, return_complex=True).abs() / math.sqrt(fft)
 
 
+def _smooth_residual_norm(energy):
+    """Stable sqrt(energy+EPS)-sqrt(EPS), including exact zero.
+
+    Rationalization avoids subtracting nearly equal float32 quantities
+    and prevents a nonzero identity error from mismatched rounding of
+    Python and tensor square roots.
+    """
+    epsilon = energy.new_tensor(EPS)
+    return energy / (torch.sqrt(energy + epsilon) + torch.sqrt(epsilon))
+
+
 def native_metrics(source, restored):
     """Per-example numeric diagnostics; never interprets a zero band as fidelity.
 
@@ -128,9 +139,9 @@ def native_metrics(source, restored):
         residual = (a-b).square()*weights
         spec_l1.append((torch.log1p(a)-torch.log1p(b)).abs().mean((1, 2)))
         # Smooth near-zero denominators and numerator to keep gradients finite.
-        convergence.append((torch.sqrt(residual.sum((1, 2))+EPS)-math.sqrt(EPS))
+        convergence.append(_smooth_residual_norm(residual.sum((1, 2)))
                            / torch.sqrt(energy_a+EPS))
-        high_error.append((torch.sqrt(residual[:, high].sum((1, 2))+EPS)-math.sqrt(EPS))
+        high_error.append(_smooth_residual_norm(residual[:, high].sum((1, 2)))
                           / torch.sqrt(energy_a+EPS))
         source_fraction.append((band_a/energy_a.clamp_min(EPS)).clamp(0, 1))
         restored_fraction.append((band_b/energy_b.clamp_min(EPS)).clamp(0, 1))
