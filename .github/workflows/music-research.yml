@@ -7,6 +7,11 @@ on:
       - 'src/sonumio/arrangement*.py'
       - 'src/sonumio/music*.py'
       - 'tests/test_music*.py'
+      - 'src/sonumio/nature*.py'
+      - 'src/sonumio/soundtrack*.py'
+      - 'research/nature_sound_study.py'
+      - 'tests/test_nature*.py'
+      - 'tests/test_soundtrack.py'
       - '.github/workflows/music-research.yml'
   push:
     branches: [main]
@@ -16,6 +21,11 @@ on:
       - 'src/sonumio/arrangement*.py'
       - 'src/sonumio/music*.py'
       - 'tests/test_music*.py'
+      - 'src/sonumio/nature*.py'
+      - 'src/sonumio/soundtrack*.py'
+      - 'research/nature_sound_study.py'
+      - 'tests/test_nature*.py'
+      - 'tests/test_soundtrack.py'
       - '.github/workflows/music-research.yml'
 permissions:
   contents: read
@@ -34,8 +44,10 @@ jobs:
       - run: |
           python -m pip install -e '.[test]'
           python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
-      - run: python -m pytest -q tests/test_music_arrangement.py tests/test_music_instruments_mix.py tests/test_music_interchange.py tests/test_music_melody_research.py tests/test_music_structure_research.py
+      - run: python -m pytest -q tests/test_music_arrangement.py tests/test_music_instruments_mix.py tests/test_music_interchange.py tests/test_music_melody_research.py tests/test_music_structure_research.py tests/test_music_edit.py tests/test_music_edit_cli.py tests/test_nature_synthesis_scene.py tests/test_nature_analysis_interchange.py tests/test_soundtrack.py
       - name: Train and evaluate original melody model on three seeds
         run: python -m research.music_melody_study --model-seeds 17,29,41 --training-seeds 0,1,2,3,4,5,6,7,8,9,10,11 --development-seeds 101,102,103 --updates 128 --batch-size 8 --width 48 --bars 8 --sample-seeds 701,709
       - name: Train and evaluate factorized harmony and rhythm model
         run: python -m research.music_structure_study --model-seeds 17,29,41 --training-seeds 0,1,2,3,4,5,6,7,8,9,10,11 --development-seeds 101,102,103 --bar-counts 6,8,12 --updates 128 --batch-size 8 --width 48 --sample-seeds 701,709
+      - name: Evaluate seven original nature sound control families
+        run: python -m research.nature_sound_study --seeds 17,29,41 --seconds 4
