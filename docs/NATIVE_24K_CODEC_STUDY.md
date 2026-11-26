@@ -63,3 +63,26 @@ Remaining steps: inspect the measured results, evaluate real rights-reviewed
 24 kHz clips and broader held-out sources, compare capacity/compute
 matched codec alternatives, and validate a separately versioned quantized
 packet format before attempting longer native-band latent diffusion.
+
+
+## Numerical correction from first CI run
+
+At commit a676f03749372c29ae02c22f7195f5454b2f0eb7,
+[the dedicated CPU job](https://github.com/sanskarIN/sonumio/actions/runs/45803426585)
+passed 18 tests and failed one: identical silent waveforms returned loss
+4.729372449219227e-08 instead of zero (tolerance 1e-8). The training pilot
+was skipped, so no three-seed outcome exists at that revision.
+
+The source of the problem is subtraction of two separately rounded square
+roots in the smoothed residual norm. The implementation now uses the
+algebraically equivalent rationalized expression
+
+    E / (sqrt(E + epsilon) + sqrt(epsilon))
+
+where E is nonnegative spectral residual energy and epsilon is 1e-8.
+The tensor epsilon is explicitly created in the input dtype. This produces
+exact zero for E=0 without subtractive cancellation and retains a finite
+derivative at zero. The original test tolerance is unchanged, and extra
+tests cover tiny positive energies, monotonicity, a float64 reference,
+finite derivatives and exact waveform identity at several amplitudes.
+The corrected-head hosted CI and training pilot remain separate gates.
