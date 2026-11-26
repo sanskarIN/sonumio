@@ -1,8 +1,10 @@
 """Phase-sensitive codec objective and controlled convergence regression tests."""
 import json
 import math
-import torch
 import pytest
+
+torch = pytest.importorskip("torch")
+pytest.importorskip("scipy")
 
 from research.native_codec import FRAMES, SAMPLE_RATE, Native24kCodec, native_loss
 from research.native_codec_convergence import (
