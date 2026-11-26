@@ -139,3 +139,30 @@ def test_cli_digest_and_budget_fail_without_json(corpus,capsys):
         assert err.value.code==2
         captured=capsys.readouterr()
         assert captured.out=="" and str(path) not in captured.err
+
+
+def test_control_joint_threshold_requires_same_gallery_crop(monkeypatch):
+    import research.archive_replication_controls as controls
+    monkeypatch.setattr(controls,"similarities",lambda a,b:b)
+    q=controls._Query("identity",object(),0)
+    q.compare((.9999,.80),0)
+    q.compare((.80,.9999),1)
+    report=controls._panel_report([q])
+    assert report["waveform"]["nearest_gallery"]["maximum"]==.9999
+    assert report["mel"]["nearest_gallery"]["maximum"]==.9999
+    assert report["joint_same_reference"]["nearest_gallery"]["maximum"]==.80
+    assert report["joint_same_reference"]["known_source"]["maximum"]==.80
+    assert all(x["candidate_count"]==0 for x in report["joint_same_reference"]["nearest_gallery"]["thresholds"])
+    q.compare((.9998,.997),2)
+    assert controls._panel_report([q])["joint_same_reference"]["nearest_gallery"]["maximum"]==.997
+
+
+def test_control_joint_undefined_scores_remain_unscorable(monkeypatch):
+    import research.archive_replication_controls as controls
+    monkeypatch.setattr(controls,"similarities",lambda a,b:b)
+    q=controls._Query("identity",object(),0)
+    q.compare((1.,None),0)
+    report=controls._panel_report([q])["joint_same_reference"]
+    assert report["nearest_gallery"]["unscorable"]==1
+    assert report["known_source"]["maximum"] is None
+    assert all(x["fraction_of_scorable"] is None for x in report["known_source"]["thresholds"])
