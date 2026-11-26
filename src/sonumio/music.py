@@ -37,7 +37,7 @@ class MusicPlan:
     seed: int = 0
 
     def __post_init__(self):
-        if self.style not in STYLES or self.mode not in MODES:
+        if type(self.style) is not str or type(self.mode) is not str or self.style not in STYLES or self.mode not in MODES:
             raise GenerationError("Unsupported music style or mode")
         for name,value,low,high in (("root",self.root,48,71),("bpm",self.bpm,60,160),
                                     ("bars",self.bars,1,MAX_BARS),("seed",self.seed,0,2**32-1)):
@@ -172,7 +172,7 @@ def compose(plan):
         root=_degree(plan,degree)-12
         bass_pattern=(0,16) if plan.style=="calm" else (0,8,16,24)
         for i,tick in enumerate(bass_pattern):
-            add("bass",root if i%2==0 else root+7,start+tick,
+            add("bass",root if i%2==0 else _degree(plan,degree+4)-12,start+tick,
                 14 if plan.style=="calm" else 7,.5)
         rhythm=(0,8,16,24) if plan.style!="rhythmic" else (0,6,12,16,22,28)
         for i,tick in enumerate(rhythm):
