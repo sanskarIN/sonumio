@@ -86,3 +86,68 @@ derivative at zero. The original test tolerance is unchanged, and extra
 tests cover tiny positive energies, monotonicity, a float64 reference,
 finite derivatives and exact waveform identity at several amplitudes.
 The corrected-head hosted CI and training pilot remain separate gates.
+
+
+## Verified three-seed pilot (2026-11-26)
+
+The corrected commit 8d200245152e64ffcc4fc5f67a1a31ec774955f3
+passed all five pull-request workflows. The dedicated
+[CPU workflow](https://github.com/sanskarIN/sonumio/actions/runs/45805960010)
+(job 139861154792) passed 24 tests and executed the 32-update experiment
+with 18 training crops, 12 held-out crops, and 768 total training examples.
+
+| Model seed | Base high-band magnitude error | Weighted high-band error | Base SNR (dB) | Weighted SNR (dB) |
+|---|---:|---:|---:|---:|
+| 17 | 0.1989403 | 0.1900079 | -0.03406 | -0.13694 |
+| 29 | 0.2147449 | 0.1887482 | -0.04828 | -0.09887 |
+| 41 | 0.2574940 | 0.2109717 | -0.21322 | -0.08654 |
+
+Mean paired high-band magnitude error delta: -0.02715049, with sample
+standard deviation 0.01882149. Mean paired SNR delta: -0.00893082 dB.
+Silence has mean SNR zero and high-band magnitude error 0.1880274;
+the anti-aliased low-band resampling control has mean SNR 28.9948 dB.
+Every trained arm has negative mean SNR. The extra high-band term
+reduces a numerical magnitude error but does not establish faithful
+reconstruction; two seeds have nearly no reconstructed high-band energy.
+The 15,027-parameter architecture is not yet suitable for quantized or
+generative deployment. The logged data are a small synthetic pilot, not
+a real-world listening study or independent test.
+
+## Extended phase-sensitive convergence protocol
+
+The next experiment preserves the exact architecture and initial weights
+within each seed. The three training objectives are:
+
+- pilot_highband: unchanged previous weighted magnitude objective.
+- balanced_wave: shared waveform and magnitude losses plus source-power
+  normalized waveform MSE (weight .5) and normalized DC error (.1).
+- balanced_phase: balanced_wave plus complex STFT residual energy (.25)
+  and complex high-band residual energy (.25), using one-sided energy
+  weighting and total source energy denominators. The source power floor
+  is 1e-6. This retains phase information instead of just magnitude.
+
+The prespecified plan uses 3 model seeds, 3 training source seeds, 2 new
+development source seeds (201 and 202), 128 updates and batch size 4.
+It evaluates at updates 32, 64 and 128, logging unchanged model
+fingerprints during evaluation, training losses, pre-clipping gradient
+norms, latent activity and per-category waveform/spectral diagnostics.
+All arms share the same batch order and initialization. No best-checkpoint
+selection occurs. The new panel is development data, not a final test.
+
+A conservative engineering gate requires every seed's final mean SNR
+to exceed zero, at least two thirds of its development clips to beat
+their own silence MSE strictly, and its mean complex high-band residual
+to be below the silence baseline. Failure is a valid scientific outcome,
+not a CI crash, and passing is not proof of perceptual quality.
+
+```bash
+python -m research.native_codec_convergence --model-seeds 17,29,41 \
+  --training-seeds 0,1,2 --validation-seeds 201,202 \
+  --updates 128 --batch-size 4 --checkpoints 32,64,128
+```
+
+This requires 4,608 training examples across the nine runs, with no
+audio or model state written. Before quantization, inspect whether the
+longer study clears the development gate. If it does not, investigate
+bottleneck capacity and decoder structure under separate controlled
+experiments. Do not choose a release model solely from these results.
