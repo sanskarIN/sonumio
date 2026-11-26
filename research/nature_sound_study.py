@@ -50,8 +50,8 @@ class NatureStudyPlan:
 
     @property
     def render_frames(self):
-        # Seven control renders and one replay, plus optional old baseline.
-        return self.frames*len(self.seeds)*sum(9 if k in COMMON else 8 for k in self.kinds)
+        # Seven control renders, baseline and replay, plus optional old baseline.
+        return self.frames*len(self.seeds)*sum(10 if k in COMMON else 9 for k in self.kinds)
 
 
 def _digest(samples):
