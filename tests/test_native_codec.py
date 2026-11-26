@@ -154,3 +154,29 @@ def test_band_fractions_always_in_unit_interval():
     for key in ("source_highband_fraction","restored_highband_fraction"):
         assert torch.all((metrics[key]>=0)&(metrics[key]<=1))
     assert metrics["source_highband_fraction"][2].item()==0
+
+
+def test_smoothed_residual_norm_is_exact_zero_monotone_and_differentiable():
+    from research.native_codec import _smooth_residual_norm, EPS
+    energy=torch.tensor([0.,1e-20,1e-12,1e-8,1e-4,1.,100.],
+                        dtype=torch.float32,requires_grad=True)
+    actual=_smooth_residual_norm(energy)
+    oracle=energy.detach().double()/(torch.sqrt(energy.detach().double()+EPS)
+                                     +math.sqrt(EPS))
+    assert actual[0].item()==0.
+    assert torch.all(actual[1:]>actual[:-1])
+    torch.testing.assert_close(actual.double(),oracle,rtol=2e-7,atol=0)
+    actual.sum().backward()
+    assert torch.isfinite(energy.grad).all()
+    assert torch.all(energy.grad>0)
+
+
+@pytest.mark.parametrize("amplitude",[0.,1e-7,1e-4,.2])
+def test_identical_native_audio_has_exact_zero_loss(amplitude):
+    x=tone(7000)*(amplitude/.2)
+    y=x.clone().requires_grad_()
+    loss=native_loss(x,y,.5)
+    assert loss.item()==0.
+    loss.backward()
+    assert torch.isfinite(y.grad).all()
+    assert torch.count_nonzero(y.grad).item()==0
