@@ -111,14 +111,19 @@ class _Nearest:
     signature: Signature | None
     waveform: float | None = None
     mel: float | None = None
+    jointly_scorable: bool = False
+    same_reference_candidate: bool = False
 
-    def compare(self, other):
+    def compare(self, other, policy):
         if self.signature is None or other is None:
             return
         wave, mel = similarities(self.signature, other)
         self.waveform = wave if self.waveform is None else max(self.waveform, wave)
         if mel is not None:
             self.mel = mel if self.mel is None else max(self.mel, mel)
+            self.jointly_scorable = True
+            if wave >= policy.waveform_threshold and mel >= policy.mel_threshold:
+                self.same_reference_candidate = True
 
 
 def _summarize(queries, policy):
@@ -132,6 +137,16 @@ def _summarize(queries, policy):
             "nearest_similarity_maximum": max(values) if values else None,
             "review_candidates": sum(x >= threshold for x in values),
         }
+    both = sum(q.waveform is not None and q.mel is not None
+               and q.waveform >= policy.waveform_threshold
+               and q.mel >= policy.mel_threshold for q in queries)
+    joint = sum(q.same_reference_candidate for q in queries)
+    result["cross_metric_agreement"] = {
+        "jointly_scorable_queries": sum(q.jointly_scorable for q in queries),
+        "both_independent_maxima_above_threshold": both,
+        "same_reference_above_both_thresholds": joint,
+        "independent_maxima_only": both - joint,
+    }
     return result
 
 
@@ -190,7 +205,7 @@ def evaluate_replication(reader, ready, model, schedule, *, generation=None, pol
         if reference is not None:
             scorable_gallery += 1
         for query in queries:
-            query.compare(reference)
+            query.compare(reference, policy)
     if gallery != train_count or model_fingerprint(model) != before:
         raise ValueError("Reference gallery or model identity changed")
     panels = {name: _summarize([q for q in queries if q.panel == name], policy)
