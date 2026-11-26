@@ -171,3 +171,35 @@ def test_real_private_checkpoint_screen(corpus, tmp_path, monkeypatch):
     with pytest.raises(ValueError):
         screen_checkpoint(path, archive_sha256=sha, checkpoint=checkpoint,
                           checkpoint_sha256="0"*64, training=training)
+
+
+def test_independent_maxima_do_not_imply_same_reference(monkeypatch):
+    import research.archive_replication_screen as screen
+    policy=ScreenPolicy()
+    query=screen._Nearest("control", object())
+    monkeypatch.setattr(screen,"similarities",lambda a,b:b)
+    query.compare((.9999,.80),policy)
+    query.compare((.80,.9999),policy)
+    report=screen._summarize([query],policy)["cross_metric_agreement"]
+    assert report=={
+        "jointly_scorable_queries":1,
+        "both_independent_maxima_above_threshold":1,
+        "same_reference_above_both_thresholds":0,
+        "independent_maxima_only":1,
+    }
+    query.compare((.9998,.997),policy)
+    report=screen._summarize([query],policy)["cross_metric_agreement"]
+    assert report["same_reference_above_both_thresholds"]==1
+    assert report["independent_maxima_only"]==0
+
+
+def test_joint_unscorable_is_not_a_match(monkeypatch):
+    import research.archive_replication_screen as screen
+    policy=ScreenPolicy()
+    query=screen._Nearest("control", object())
+    monkeypatch.setattr(screen,"similarities",lambda a,b:b)
+    query.compare((1.,None),policy)
+    silent=screen._Nearest("control",None)
+    silent.compare((1.,1.),policy)
+    report=screen._summarize([query,silent],policy)["cross_metric_agreement"]
+    assert all(value==0 for value in report.values())
