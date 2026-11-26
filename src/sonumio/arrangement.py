@@ -87,7 +87,7 @@ class Section:
     bars: int
 
     def __post_init__(self):
-        if self.kind not in SECTIONS:
+        if type(self.kind) is not str or self.kind not in SECTIONS:
             raise GenerationError("Unknown arrangement section")
         integer(self.first_bar,0,MAX_BARS-1,"section start")
         integer(self.bars,1,MAX_BARS,"section length")
@@ -143,6 +143,9 @@ class Arrangement:
                 or any(not isinstance(e,Event) or e.tick+e.length>self.plan.ticks
                        for e in self.events)):
             raise GenerationError("Invalid arrangement events")
+        if any(self.plan.frame(e.tick+e.length)-self.plan.frame(e.tick)>4*SAMPLE_RATE
+               for e in self.events):
+            raise GenerationError("Arrangement event exceeds instrument duration budget")
         if tuple(sorted(self.events,key=event_key))!=self.events:
             raise GenerationError("Arrangement events must be canonical")
         if len(set(self.events))!=len(self.events):
