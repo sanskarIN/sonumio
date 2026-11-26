@@ -132,8 +132,8 @@ def native_metrics(source, restored):
                            / torch.sqrt(energy_a+EPS))
         high_error.append((torch.sqrt(residual[:, high].sum((1, 2))+EPS)-math.sqrt(EPS))
                           / torch.sqrt(energy_a+EPS))
-        source_fraction.append(band_a/energy_a.clamp_min(EPS))
-        restored_fraction.append(band_b/energy_b.clamp_min(EPS))
+        source_fraction.append((band_a/energy_a.clamp_min(EPS)).clamp(0, 1))
+        restored_fraction.append((band_b/energy_b.clamp_min(EPS)).clamp(0, 1))
     metrics = {
         "waveform_mae": mae, "waveform_mse": mse,
         "log_spectral_mae": torch.stack(spec_l1).mean(0),
