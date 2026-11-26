@@ -146,3 +146,11 @@ def test_paired_native_training_smoke():
     assert not report["perceptual_quality_established"]
     assert report["files_written"]==0
     json.dumps(report,allow_nan=False)
+
+
+def test_band_fractions_always_in_unit_interval():
+    x=torch.cat((tone(1000),tone(7000),torch.zeros_like(tone(1000))))
+    metrics=native_metrics(x,x)
+    for key in ("source_highband_fraction","restored_highband_fraction"):
+        assert torch.all((metrics[key]>=0)&(metrics[key]<=1))
+    assert metrics["source_highband_fraction"][2].item()==0
