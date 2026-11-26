@@ -92,6 +92,8 @@ class _Query:
     nearest: list[float | None] = field(default_factory=lambda: [None, None])
     known: list[float | None] = field(default_factory=lambda: [None, None])
     seen_source: bool = False
+    best_joint: float | None = None
+    known_joint: float | None = None
 
     def compare(self, reference, index):
         own = self.source_index is not None and index == self.source_index
@@ -101,7 +103,13 @@ class _Query:
             self.seen_source = True
         if self.features is None or reference is None:
             return
-        for i, value in enumerate(similarities(self.features, reference)):
+        scores = similarities(self.features, reference)
+        if all(value is not None for value in scores):
+            joint = min(scores)
+            self.best_joint = joint if self.best_joint is None else max(self.best_joint, joint)
+            if own:
+                self.known_joint = joint
+        for i, value in enumerate(scores):
             if value is None:
                 continue
             if not math.isfinite(value):
@@ -134,6 +142,12 @@ def _panel_report(queries):
         if all(q.source_index is not None for q in queries):
             entry["known_source"] = _metric([q.known[i] for q in queries], THRESHOLDS)
         result[name] = entry
+    result["joint_same_reference"] = {
+        "nearest_gallery": _metric([q.best_joint for q in queries], THRESHOLDS),
+    }
+    if all(q.source_index is not None for q in queries):
+        result["joint_same_reference"]["known_source"] = _metric(
+            [q.known_joint for q in queries], THRESHOLDS)
     return result
 
 
