@@ -151,3 +151,62 @@ audio or model state written. Before quantization, inspect whether the
 longer study clears the development gate. If it does not, investigate
 bottleneck capacity and decoder structure under separate controlled
 experiments. Do not choose a release model solely from these results.
+
+
+## Verified extended convergence results
+
+The extended protocol at commit aec47c31593be6816c3f7b5d2cc3860d65399818
+passed all five CI workflows, including 54 dedicated tests and both
+training experiments. See [CPU job](https://github.com/sanskarIN/sonumio/actions/runs/45818664766)
+(job 139904897791). Final 128-update results on the development panel:
+
+| Objective | Mean SNR dB | Seed silence wins (12 clips each) | Mean complex high-band error |
+|---|---:|---|---:|
+| pilot_highband | 0.56081 | 8, 10, 4 | 0.11186184 |
+| balanced_wave | 2.53095 | 10, 10, 10 | 0.11197725 |
+| balanced_phase | 2.76714 | 9, 10, 10 | 0.11072338 |
+
+Silence high-band complex error: 0.11024651. All three objectives
+failed the prespecified complete gate. Balanced phase improved mean SNR
+and all its seeds beat silence on at least two-thirds of clips, but
+none improved complex high-band error over silence. A 24-to-8-to-24 kHz
+control still gives 28.87787 dB mean SNR, an unmatched bitrate comparison.
+Magnitude-only improvement must not be interpreted as high-band fidelity.
+
+## Block-transform architecture experiment
+
+The next experiment compares the existing convolutional model with two
+trainable rank-16 block analysis/synthesis models. Blocks have 192 native
+samples, and the complete latent is still 16 by 64. The block models
+have two trainable matrices (6,144 parameters in total) and no sample
+bypass or encoder-side state in the decoder. Input is projected and
+scaled by sqrt(192); coefficients are clipped to [-1,1]. The synthesis
+matrix reconstructs the 192 samples and the same output tanh is applied.
+
+Two initializations differ only in their analysis basis: a seeded random
+orthogonal basis, or 16 orthonormal DCT-II rows (bins 0 through 11 and
+72, 104, 144, 176). The latter allocates four initial basis vectors at
+or above 4.5 kHz. Both synthesis matrices start at the transpose of
+analysis. This is deliberately a small, non-overlapping transform
+hypothesis; block boundary artifacts and limited rank may impair quality.
+The deterministic DCT arm has the same initialization at every seed;
+its trials vary batch order rather than initialization. Neither arm is
+parameter- or compute-matched to the convolutional reference.
+
+All arms use the same balanced_phase loss, source data, batch order within
+each seed, optimizer, 128 updates and evaluation checkpoints. The existing
+development panel is reused and therefore is not an independent test.
+Projection orthogonality drift and analysis/synthesis disagreement are
+reported as diagnostics, not constrained to zero. The original gate is
+retained. Regression tests cover basis orthonormality, retained and
+discarded DCT bins, decoder independence, gradient updates and matched
+training. The native-band transform pilot is separate from the prior
+verified experiments; no new performance result is claimed before CI.
+
+```bash
+python -m research.native_codec_transform_study --model-seeds 17,29,41 \
+  --training-seeds 0,1,2 --validation-seeds 201,202 \
+  --updates 128 --batch-size 4 --checkpoints 32,64,128
+```
+
+No quantization or model publication is authorized by this experiment.
