@@ -210,3 +210,47 @@ python -m research.native_codec_transform_study --model-seeds 17,29,41 \
 ```
 
 No quantization or model publication is authorized by this experiment.
+
+
+## Verified block-transform results
+
+At commit 894d670ac7a355ae1e9c4744b9680de7951d1258 the dedicated
+[CPU job](https://github.com/sanskarIN/sonumio/actions/runs/45836775130)
+(job 139967620767) passed 63 tests and all three training protocols.
+
+| Architecture | Initial mean SNR dB | Final mean SNR dB | Silence wins | Final complex high-band error |
+|---|---:|---:|---:|---:|
+| Convolutional | -2.563439 | 2.767138 | 29/36 | 0.11072338 |
+| Random orthogonal | 0.361312 | 6.502064 | 36/36 | 0.11788317 |
+| Frequency stratified | 8.904980 | 9.034982 | 36/36 | 0.11114111 |
+
+Silence high-band error is 0.11024651. No final arm passed the full gate.
+At 32 updates the three frequency-stratified trials had lower high-band
+error than silence (0.10774, 0.10770, 0.10778). At 128 updates the
+error and Gram RMSE increased. This motivates anchoring, not a causal
+conclusion or post-hoc change to the final gate.
+
+## Training-only frequency subspace fitting and anchoring
+
+Fit uncentered DCT-II covariance in float64 on 18 training clips only,
+with inverse clip power weighting (1e-6 floor). Fit leading eigenvectors
+separately below and above 4.5 kHz to produce a rank-16 basis, and initialize
+synthesis at its transpose. Repeated eigenvalues need not yield unique
+eigenvectors across libraries. No mean vector or hidden side channel.
+
+Compare fixed analytic DCT and fitted 12+4 and 8+8 low/high allocations.
+Fine-tune the same fitted 12+4 initialization with and without penalties
+for squared row distance to anchor (.25), Gram deviation (.1), and
+analysis/synthesis disagreement (.1). Three batch-order seeds, 128
+updates each, 3,072 examples total; evaluate at 32, 64 and 128 on fresh
+development seeds 301 and 302. Fixed projections remain comparators.
+The original quality gate remains unchanged.
+
+```bash
+python -m research.native_codec_frequency_study --order-seeds 17,29,41 \
+  --training-seeds 0,1,2 --development-seeds 301,302 \
+  --updates 128 --batch-size 4 --checkpoints 32,64,128
+```
+
+This is not an independent test, perceptual study or production codec.
+No model or audio files are written. The new experiment is pending CI.
