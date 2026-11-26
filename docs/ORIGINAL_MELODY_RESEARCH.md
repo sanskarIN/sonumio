@@ -55,3 +55,54 @@ long-form structure, novelty or copyright clearance. Independent test
 scores, genuinely diverse rights-reviewed music, rhythm/harmony
 generation and listening studies remain future work. No external
 music or model weights are required or written.
+
+
+## Verified first training result
+
+The [dedicated CPU workflow](https://github.com/sanskarIN/sonumio/actions/runs/45841889713)
+at commit 0e19825f719d6656d40c31037ce88ab947efffe1 passed 154
+music tests and the three-seed study. It used 72 unique training
+arrangements and 18 development arrangements (624 held-out tokens).
+No exact relative pitch sequence crossed the split.
+
+| Model | Mean held-out NLL |
+|---|---:|
+| Uniform | 3.218876 |
+| Unigram | 2.771155 |
+| Conditional bigram | 2.251636 |
+| GRU seed 17 | 1.558139 |
+| GRU seed 29 | 1.602278 |
+| GRU seed 41 | 1.517601 |
+
+Each GRU has 19,177 parameters. Mean trained NLL is 1.559339.
+Unmasked free-running token validity is 0.85644, 0.84823 and 0.89381.
+Masked validity is 1 by construction. None of the generated sequences
+matched an entire training relative pitch sequence exactly; this does
+not rule out phrase reuse or establish copyright clearance.
+The learned melody is still a synthetic pilot.
+
+## Joint bar structure model
+
+A separate GRU factors chord/rhythm prediction into a causal chord
+head and a rhythm head conditioned on that bar's chord. It uses seven
+diatonic chord degrees and eight explicit lead-onset patterns. Context
+is style, mode, section, phrase position and final-bar indicator.
+Teacher-forced likelihood is unmasked; free-running sampling uses only
+its own history and optional cadence/nonempty-finale constraints.
+
+The source generator has finite structural variety, so exact structural
+overlap is expected despite disjoint source seeds. The report separates
+all development rows from novel full token sequences and reports null
+metrics for an empty novel subset. Rebuild pitched backing and lead
+rhythm from sampled tokens, with procedural pitches and instrument
+rendering; no target lead or harmony is reused. The chord/rhythm model
+does not yet jointly train with the melody model.
+
+```bash
+python -m research.music_structure_study
+```
+
+Uniform, unigram, context and conditional counts are train-only
+comparators. CI runs three seeds, 128 updates each, and an actual
+in-memory audio render per seed. The new model's performance is not
+established before running the experiment.
