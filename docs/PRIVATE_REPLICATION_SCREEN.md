@@ -101,3 +101,43 @@ nonmember recording groups on disjoint development data, then freeze the
 protocol before final testing. Add broader time-shift waveform comparison,
 multi-scale features, and independent listening review. None of those
 future results are claimed by this change.
+
+
+## Group-balanced threshold stress test
+
+An additional development-only CLI measures fixed threshold behavior using
+known transformed training members and validation nonmembers:
+
+```bash
+python -m research.archive_replication_controls private.scorpus \
+  --expected-sha256 ARCHIVE_SHA256 --seed 61 --pair-budget 50000
+```
+
+There is exactly one anchor (lowest eligible crop index) per recording group
+from each split. Every training anchor has eight deliberately related
+variants: identity, gain/DC/polarity, zero-padded shifts of 64 and 128
+frames, additive centered noise at 30 and 15 dB signal-to-noise ratios,
+a three-tap low-pass filter, and PCM16 quantization. Noise uses a
+deterministic seed derived from the study seed and crop index.
+
+Both these known-member variants and the validation nonmember anchors use
+the same full eligible training gallery. For each member query, report the
+known-source similarity separately from the maximum gallery similarity.
+For each representation and panel, report scorable counts, minima,
+medians, maxima and candidate fractions across the prespecified thresholds
+0.9, 0.95, 0.98, 0.99, 0.995, 0.999 and 0.9995. Undefined similarities
+remain undefined, with explicit counts. No threshold is selected or fitted.
+Validation nonmember hits are screening flags, not proven false positives,
+because independent recording rights and semantic independence are not established.
+
+Maximum 64 anchor groups per split and 100,000 complete comparisons;
+default budget 50,000. An excessive study fails instead of silently
+subsampling groups or gallery rows. Reports contain aggregate numbers and
+archive/eligibility digests, not private identifiers or individual scores.
+The test split is not scored, although archive readiness verifies it.
+No model runs and no output audio or weights are written.
+
+Use these descriptive controls to develop hypotheses. Any chosen threshold
+must be frozen and assessed on a separate independent corpus before making
+claims of detector sensitivity, specificity, or model memorization safety.
+The synthetic fixture CI is not evidence of real-world calibration.
