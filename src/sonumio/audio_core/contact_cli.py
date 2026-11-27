@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
 import sys
 
@@ -46,6 +47,8 @@ def run_contact_command(args):
                 raise ValueError("Pattern flags cannot override a JSON scene")
             if args.scene.resolve()==args.output.resolve():
                 raise ValueError("Contact plan and output must differ")
+            if args.output.exists() and os.path.samefile(args.scene,args.output):
+                raise ValueError("Contact plan and output share file identity")
             scene=load_contact_scene(args.scene)
         else:
             scene=pattern_scene(ContactPattern(material=args.material,excitation=args.excitation,

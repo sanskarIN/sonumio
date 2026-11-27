@@ -107,6 +107,33 @@ This is not a perceptual or prompt-adherence measurement. See
 [verified WAV inspection](docs/VERIFIED_WAV_QUALITY_INSPECTION.md).
 
 
+## Current development: original sound design and postproduction
+
+The following local commands are available on main, ahead of the planned
+v0.0.3 source-only pre-release. They are original numerical DSP tools,
+not new neural inference engines or claims of perceptual quality.
+
+```bash
+sonumio granular --nature rain --frames 24000 --grain-frames 256 --hop-frames 128 --stereo-spread .7 --output texture.wav
+sonumio contact-sound --material wood --excitation tap --count 3 --event-ms 120 --output taps.wav
+sonumio spatial-scene --plan spatial.json --source rain=rain.wav --output moving.wav
+sonumio master-inspect texture.wav
+sonumio wav-master texture.wav --peak-only --output mastered.wav
+sonumio sound-pack --plan library.json --output library.zip
+sonumio sound-pack-verify library.zip --replay
+sonumio sound-pack-select library.zip --asset rain --variant 1 --output selected.wav
+```
+
+Use the plan formats and numerical limits in
+[granular synthesis](docs/GRANULAR_SYNTHESIS.md),
+[contact sounds](docs/MODAL_CONTACT_SOUNDS.md),
+[spatial audio](docs/SPATIAL_MOTION.md),
+[offline mastering](docs/OFFLINE_MASTERING.md),
+[postproduction](docs/POSTPRODUCTION_PIPELINE.md) and
+[original sound packs](docs/ORIGINAL_SOUND_PACKS.md).
+WAV files, sound-pack ZIPs and generated model artifacts remain local;
+they are not included in the source-only software release.
+
 ## Original-model research scaffolding (development only)
 
 From the repository root, after installing the optional PyTorch research dependencies:

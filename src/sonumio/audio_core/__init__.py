@@ -1,7 +1,7 @@
 """Bounded, local-first signal processing primitives.
 
-This package is deliberately independent of the original procedural
-generator and all neural model training. Audio buffers are channel-first;
+The numerical core is independent of neural model training. Explicit
+procedural generation helpers reuse Sonumio's original local sources. Audio buffers are channel-first;
 no model weights, network calls, user audio uploads or implicit file writes.
 The existing API continues to use its historical renderer.
 """
@@ -75,7 +75,24 @@ from .postproduction_io import PostProductionExport, parse_postproduction_plan, 
 from .granular import GranularSettings, GrainEvent, GranularResult, GranularReport, grain_schedule, synthesize_grains
 from .granular_wav import GranularExportOptions, ProceduralGrainSource, GranularExport, export_granular_wav, export_procedural_grains
 
+from .modal_synthesis import ResonanceMode, Resonator, ContactEvent, ContactScene, ContactSceneResult, ContactSceneReport, material_resonator, render_contact_scene
+from .contact_patterns import ContactPattern, pattern_scene
+from .contact_io import ContactExport, parse_contact_scene, export_contact_scene
+from .spatial_motion import Position, MotionKey, Trajectory, Room, Receiver, MovingSource, SpatialScene, SpatialResult, SpatialReport, render_spatial_scene
+from .spatial_io import SpatialPlacement, SpatialPlan, SourceBinding, SpatialExport, parse_spatial_plan, export_spatial_plan
+from .asset_pack import AssetRecipe, PackQuality, SoundPackPlan, AssetRecord, plan_jobs, parse_pack_plan
+from .asset_archive import VerifiedPack, PublishedPack, create_pack_bytes, verify_pack_bytes, verify_pack_file, export_sound_pack
+from .asset_selection import SelectedAsset, select_asset, list_pack_assets, export_pack_asset
+
 __all__ = [
+    "ResonanceMode", "Resonator", "ContactEvent", "ContactScene", "ContactSceneResult", "ContactSceneReport",
+    "material_resonator", "render_contact_scene", "ContactPattern", "pattern_scene",
+    "ContactExport", "parse_contact_scene", "export_contact_scene",
+    "Position", "MotionKey", "Trajectory", "Room", "Receiver", "MovingSource", "SpatialScene", "SpatialResult", "SpatialReport", "render_spatial_scene",
+    "SpatialPlacement", "SpatialPlan", "SourceBinding", "SpatialExport", "parse_spatial_plan", "export_spatial_plan",
+    "AssetRecipe", "PackQuality", "SoundPackPlan", "AssetRecord", "plan_jobs", "parse_pack_plan",
+    "VerifiedPack", "PublishedPack", "create_pack_bytes", "verify_pack_bytes", "verify_pack_file", "export_sound_pack",
+    "SelectedAsset", "select_asset", "list_pack_assets", "export_pack_asset",
     "GranularSettings", "GrainEvent", "GranularResult", "GranularReport", "grain_schedule", "synthesize_grains",
     "GranularExportOptions", "ProceduralGrainSource", "GranularExport", "export_granular_wav", "export_procedural_grains",
     "PostProductionPlan", "PostProductionResult", "run_postproduction", "verify_postproduction_manifest",
