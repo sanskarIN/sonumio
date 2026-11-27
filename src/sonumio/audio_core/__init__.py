@@ -69,7 +69,12 @@ from .lookahead_limiter import LookaheadSettings, LimiterResult, LimiterReport, 
 from .mastering import MasteringSettings, MasteringResult, MasteringReport, SignalMeasurement, MasteringMeasurement, measure_mastering, master_audio
 from .mastering_wav import MasteringWavOptions, VerifiedMasteringInspection, VerifiedMasteringExport, inspect_mastering_wav, master_wav_file
 
+from .postproduction import PostProductionPlan, PostProductionResult, run_postproduction, verify_postproduction_manifest
+from .postproduction_io import PostProductionExport, parse_postproduction_plan, export_postproduction
+
 __all__ = [
+    "PostProductionPlan", "PostProductionResult", "run_postproduction", "verify_postproduction_manifest",
+    "PostProductionExport", "parse_postproduction_plan", "export_postproduction",
     "LoopSearchPlan", "LoopSearchResult", "LoopCandidate", "LoopScoreWeights", "search_loop", "measure_loop_seam",
     "LoopRenderPlan", "LoopRenderResult", "LoopRenderReport", "render_loop", "circular_diagnostics",
     "VerifiedPcmSnapshot", "read_verified_pcm",
