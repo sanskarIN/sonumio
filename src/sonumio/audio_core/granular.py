@@ -231,7 +231,8 @@ def _preflight(audio, settings):
         raise AudioContractError("Grain panning supports mono and stereo only")
     layout = AudioLayout.for_channels(2) if stereo else audio.spec.layout
     spec = AudioSpec(audio.sample_rate,layout,settings.output_frames)
-    work = settings.count*settings.grain_frames*audio.channels*96
+    maximum_rate = 2**((abs(settings.pitch_semitones)+settings.pitch_jitter_semitones)/12)
+    work = settings.count*settings.grain_frames*audio.channels*2*math.ceil(12*maximum_rate)
     if settings.count > MAX_GRAINS or work > MAX_GRAIN_PRODUCTS:
         raise AudioLimitError("Granular interpolation work exceeds budget")
     memory = settings.output_frames*(layout.channels*24+16)+65536*48

@@ -72,7 +72,12 @@ from .mastering_wav import MasteringWavOptions, VerifiedMasteringInspection, Ver
 from .postproduction import PostProductionPlan, PostProductionResult, run_postproduction, verify_postproduction_manifest
 from .postproduction_io import PostProductionExport, parse_postproduction_plan, export_postproduction
 
+from .granular import GranularSettings, GrainEvent, GranularResult, GranularReport, grain_schedule, synthesize_grains
+from .granular_wav import GranularExportOptions, ProceduralGrainSource, GranularExport, export_granular_wav, export_procedural_grains
+
 __all__ = [
+    "GranularSettings", "GrainEvent", "GranularResult", "GranularReport", "grain_schedule", "synthesize_grains",
+    "GranularExportOptions", "ProceduralGrainSource", "GranularExport", "export_granular_wav", "export_procedural_grains",
     "PostProductionPlan", "PostProductionResult", "run_postproduction", "verify_postproduction_manifest",
     "PostProductionExport", "parse_postproduction_plan", "export_postproduction",
     "LoopSearchPlan", "LoopSearchResult", "LoopCandidate", "LoopScoreWeights", "search_loop", "measure_loop_seam",

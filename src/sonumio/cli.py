@@ -20,6 +20,7 @@ from .audio_core.transform_cli import add_transform_parser, run_transform_comman
 from .audio_core.loop_cli import register_loop_commands, run_loop_command
 from .audio_core.mastering_cli import register_mastering_commands, run_mastering_command
 from .audio_core.postproduction_cli import register_postproduction_command, run_postproduction_command
+from .audio_core.granular_cli import register_granular_command, run_granular_command
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="sonumio", description="Imagine it. Hear it.")
@@ -133,10 +134,13 @@ def main(argv: list[str] | None = None) -> int:
     register_loop_commands(sub)
     register_mastering_commands(sub)
     register_postproduction_command(sub)
+    register_granular_command(sub)
     sub.add_parser("models", help="Inspect provenance and weights licenses")
     serve = sub.add_parser("serve", help="Start a local REST API")
     serve.add_argument("--port", type=int, default=8000)
     args = parser.parse_args(argv)
+    if args.command == "granular":
+        return run_granular_command(args)
     if args.command == "wav-postproduce":
         return run_postproduction_command(args)
     if args.command in ("loop-search", "loop-render"):
