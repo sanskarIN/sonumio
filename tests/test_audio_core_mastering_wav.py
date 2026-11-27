@@ -86,7 +86,7 @@ def test_encoding_guard_deterministic_second_attempt():
     ceiling=10.7/128
     x=make_buffer(np.array([level],dtype=np.float32),8000)
     settings=MasteringSettings(target_rms_dbfs=None,
-        estimated_peak_ceiling_dbfs=20*np.log10(ceiling))
+        estimated_peak_ceiling_dbfs=float(20*np.log10(ceiling)))
     q=QuantizationSettings(bits=8)
     with pytest.raises(AudioProcessingError,match="Encoded WAV exceeds"):
         encode_mastered_audio(x,quantization=q,settings=settings,policy="reject")

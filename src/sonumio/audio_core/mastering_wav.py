@@ -156,7 +156,7 @@ def quantization_peak_reserve(quantization, peak):
     lsb = 1/(1 << (quantization.bits-1))
     bound = (1.5 if quantization.dither else 1.)*lsb+2*np.finfo(np.float32).eps
     multiplier = max(1., *(float(np.abs(k).sum()) for k in interpolation_kernels(peak)))
-    return bound*multiplier
+    return float(bound*multiplier)
 
 
 def _encode_and_measure(audio, quantization, settings):

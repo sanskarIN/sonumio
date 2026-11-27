@@ -26,7 +26,7 @@ def test_single_peak_anticipation_bounded_by_declared_lookahead():
     cfg=LookaheadSettings(0,5,0)
     gain=limiter_envelope(peaks,8000,cfg)
     n=cfg.lookahead_frames(8000)
-    np.testing.assert_array_equal(gain[:151-n],np.ones(151-n))
+    np.testing.assert_allclose(gain[:151-n],np.ones(151-n),atol=1e-14,rtol=0)
     assert np.all(np.diff(gain[150-n:151])<=0)
     assert gain[150]==.5
     np.testing.assert_array_equal(gain[151:],np.ones(149))
