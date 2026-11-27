@@ -118,7 +118,7 @@ def _geometry(audio, target_frames, settings):
     # One padded source, one accumulation buffer, normalization weights and
     # conservative space for FFT/correlation scratch; do not allocate a
     # complete spectrogram or a sliding-window candidate matrix.
-    pad = size + settings.search_frames
+    pad = 2 * size + settings.search_frames
     source_size = audio.frames + 2 * pad
     output_size = (count - 1) * hop + size
     estimate = (8 * audio.channels * (source_size + output_size)

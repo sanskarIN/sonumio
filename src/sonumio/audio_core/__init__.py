@@ -56,7 +56,14 @@ from .spectral_effects import (
     spectral_eq, spectral_tilt, heuristic_harmonic_percussive,
 )
 
+from .time_scale import TimeScaleSettings, TimeScaleResult, TimeScaleReport, stretch_audio, target_frames_for_ratio
+from .pitch_shift import PitchShiftSettings, PitchShiftResult, PitchShiftReport, pitch_shift
+from .wav_transform import WavTransformConfig, WavTransformReport, transform_wav_file
+
 __all__ = [
+    "TimeScaleSettings", "TimeScaleResult", "TimeScaleReport", "stretch_audio", "target_frames_for_ratio",
+    "PitchShiftSettings", "PitchShiftResult", "PitchShiftReport", "pitch_shift",
+    "WavTransformConfig", "WavTransformReport", "transform_wav_file",
     "WavPacketSpec", "WavPacketResult", "WavPacketWriter",
     "StreamingSincResampler", "WavResampleResult", "resample_wav_file",
     "StreamDitherQuantizer", "STREAM_TPDF_VERSION",
