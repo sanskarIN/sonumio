@@ -87,9 +87,19 @@ def update_trace(trace,indices,timesteps,noise,condition):
 
 
 def validate_losses(losses,plan):
-    if (type(losses) is not list or not 1<=len(losses)<=plan.diffusion_updates
-            or any(type(x) not in (int,float) or not math.isfinite(x) or x<0 for x in losses)):
+    if type(losses) is not list or not 1<=len(losses)<=plan.diffusion_updates:
         raise ArchiveError("Invalid latent checkpoint loss history")
+    for value in losses:
+        # JSON integers can exceed the representable range of a Python float.
+        # Normalize conversion failures to the same archive validation error.
+        if type(value) not in (int,float) or value<0:
+            raise ArchiveError("Invalid latent checkpoint loss history")
+        try:
+            finite=math.isfinite(value)
+        except OverflowError as exc:
+            raise ArchiveError("Invalid latent checkpoint loss history") from exc
+        if not finite:
+            raise ArchiveError("Invalid latent checkpoint loss history")
 
 
 @dataclass(slots=True)
