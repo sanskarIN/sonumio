@@ -10,7 +10,7 @@ torch=pytest.importorskip("torch")
 pytest.importorskip("scipy")
 
 from research.archive_latent_study import run_archive_latent,main
-from research.archive_latent_checkpoint import tensor_specs
+from research.archive_latent_checkpoint import tensor_specs,validate_losses
 from research.archive_checkpoint_format import decode_checkpoint,encode_checkpoint
 from research.crop_latent import CropLatentDenoiser
 from research.corpus_archive_format import ArchiveError
@@ -80,7 +80,7 @@ def test_bad_digest_and_no_clobber(checkpoint_case):
     assert hashlib.sha256(ckpt.read_bytes()).hexdigest()==pin
 
 
-@pytest.mark.parametrize("change",["step","second_moment","trace","losses","runtime","model","publication"])
+@pytest.mark.parametrize("change",["step","second_moment","trace","losses","overflow_loss","runtime","model","publication"])
 def test_rehashed_inconsistent_checkpoint_rejected(checkpoint_case,tmp_path,change):
     archive,sha,plan,ckpt,_,_=checkpoint_case
     with torch.random.fork_rng(devices=[]):
@@ -94,6 +94,7 @@ def test_rehashed_inconsistent_checkpoint_rejected(checkpoint_case,tmp_path,chan
         arrays[key]=-np.ones_like(arrays[key])
     elif change=="trace": metadata["progress"]["trace_sha256"]="0"*64
     elif change=="losses": metadata["progress"]["losses"]=[]
+    elif change=="overflow_loss": metadata["progress"]["losses"][0]=10**400
     elif change=="runtime": metadata["identity"]["runtime"]["num_threads"]+=1
     elif change=="model": metadata["trained_model_sha256"]="0"*64
     else: metadata["publication_authorized"]=True
@@ -125,3 +126,13 @@ def test_checkpoint_can_use_codec_handoff(checkpoint_case,tmp_path):
 def test_invalid_options_before_archive_access(options):
     with pytest.raises(ArchiveError,match="latent checkpoint options"):
         run_archive_latent("missing.scorpus",expected_sha256="0"*64,plan=small_plan(),**options)
+
+
+@pytest.mark.parametrize("losses", [[], [True], [float("nan")], [float("inf")], [-1], [10**400], [0]*5])
+def test_loss_history_rejects_invalid_numeric_values(losses):
+    with pytest.raises(ArchiveError,match="Invalid latent checkpoint loss history"):
+        validate_losses(losses,small_plan(diffusion_updates=4))
+
+
+def test_loss_history_accepts_finite_nonnegative_values():
+    validate_losses([0,0.5,1e-20,1e200],small_plan(diffusion_updates=4))
