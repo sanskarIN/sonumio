@@ -74,3 +74,19 @@ generators again and requires byte-identical encoded WAVs. Replay can
 fail across numerical runtimes even for equivalent audio. Neither mode
 establishes perceptual quality or a cryptographic signature. Asset count,
 total frames, payload bytes, manifest bytes and archive bytes are bounded.
+
+## Select individual verified assets
+
+The list command filters the verified archive by recipe tags and source.
+Multiple tags are an AND match. The select command checks the entire archive,
+selects the exact asset identifier and numbered variant, optionally verifies
+its WAV SHA256, and publishes one caller-selected local destination without
+extracting ZIP paths.
+
+```bash
+python -m sonumio.audio_core.asset_pack_cli sound-pack-list library.zip --tag ambient --tag rain
+python -m sonumio.audio_core.asset_pack_cli sound-pack-select library.zip --asset rain --variant 2 --output rain-02.wav
+```
+
+Existing WAV destinations require explicit overwrite; an invalid identifier,
+missing variant or failed digest leaves the output unchanged.

@@ -9,6 +9,7 @@ import sys
 
 from .asset_archive import load_pack_plan,export_sound_pack,verify_pack_file
 from .asset_pack import plan_jobs
+from .asset_selection import list_pack_file,export_pack_asset
 
 
 def register_asset_pack_commands(sub):
@@ -23,6 +24,20 @@ def register_asset_pack_commands(sub):
     inspect.add_argument("--expected-sha256")
     inspect.add_argument("--replay",action="store_true",
                          help="Regenerate each original sound and require exact WAV bytes")
+    listing=sub.add_parser("sound-pack-list",help="List verified assets by tag and source")
+    listing.add_argument("input",type=Path)
+    listing.add_argument("--tag",action="append",default=[])
+    listing.add_argument("--source",choices=("nature","procedural"))
+    listing.add_argument("--expected-sha256")
+    select=sub.add_parser("sound-pack-select",help="Publish one verified WAV without archive extraction")
+    select.add_argument("input",type=Path)
+    select.add_argument("--asset",required=True)
+    select.add_argument("--variant",type=int,default=1)
+    select.add_argument("--output",type=Path,required=True)
+    select.add_argument("--expected-sha256")
+    select.add_argument("--expected-wav-sha256")
+    select.add_argument("--overwrite",action="store_true")
+    select.add_argument("--create-parent",action="store_true")
     preview=sub.add_parser("sound-pack-plan",help="Validate and display jobs without synthesis")
     preview.add_argument("--plan",required=True,type=Path)
 
@@ -41,6 +56,13 @@ def run_asset_pack_command(args):
                     "frames":job.recipe.frames,"source":job.recipe.source,
                 } for job in plan_jobs(plan)],
             }
+        elif args.command=="sound-pack-list":
+            report=list_pack_file(args.input,tags=tuple(args.tag),source=args.source,
+                                  expected_archive_sha256=args.expected_sha256)
+        elif args.command=="sound-pack-select":
+            report=export_pack_asset(args.input,args.output,args.asset,args.variant,
+                expected_archive_sha256=args.expected_sha256,expected_wav_sha256=args.expected_wav_sha256,
+                overwrite=args.overwrite,create_parent=args.create_parent)
         elif args.command=="sound-pack-verify":
             report=verify_pack_file(args.input,expected_sha256=args.expected_sha256,
                                     replay=args.replay).as_dict()
