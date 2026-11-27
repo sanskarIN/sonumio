@@ -94,6 +94,7 @@ class LoopSearchPlan:
 @dataclass(frozen=True, slots=True)
 class SeamMetrics:
     sample_jump: float
+    raw_boundary_step: float
     slope_jump: float
     rms_mismatch: float
     shape_correlation: float
@@ -191,22 +192,18 @@ def _endpoint(values):
 
 def _metrics(head, tail, blend):
     scale = max(head.rms, tail.rms, .0001)
+    incoming = tail.values[:, -1]-tail.values[:, -2]
+    outgoing = head.values[:, 1]-head.values[:, 0]
+    wrap = head.values[:, 0]-tail.values[:, -1]
+    raw = float(np.sqrt(np.mean(wrap**2))) / scale
+    # A legitimate periodic waveform need not have equal neighboring
+    # samples. Penalize the deviation from the local predicted step,
+    # rather than forcing a flat join at every zero crossing.
+    jump = float(np.sqrt(np.mean((wrap-.5*(incoming+outgoing))**2))) / scale
+    slope = float(np.sqrt(np.mean((incoming-outgoing)**2))) / scale
     if blend:
-        # After a correctly constructed crossfade cycle, the wrap follows
-        # adjacent head samples. Score overlap mismatch rather than promise
-        # a zero-amplitude jump at the original cut. Downweight the raw
-        # boundary mismatch because the rendered cycle has a different wrap.
-        jump = float(np.sqrt(np.mean((head.values[:, 0]-tail.values[:, -1])**2))) / scale
-        slope = float(np.sqrt(np.mean((
-            (head.values[:, 1]-head.values[:, 0])
-            - (tail.values[:, -1]-tail.values[:, -2]))**2))) / scale
         jump *= .25
         slope *= .25
-    else:
-        jump = float(np.sqrt(np.mean((head.values[:, 0]-tail.values[:, -1])**2))) / scale
-        slope = float(np.sqrt(np.mean((
-            (head.values[:, 1]-head.values[:, 0])
-            - (tail.values[:, -1]-tail.values[:, -2]))**2))) / scale
     rms = abs(head.rms-tail.rms)/scale
     if min(head.energy, tail.energy) > _EPS:
         corr = float(np.clip(np.sum(head.centered*tail.centered) /
@@ -217,7 +214,7 @@ def _metrics(head, tail, blend):
         corr = 0.
     shape = float(.5*np.abs(head.distribution-tail.distribution).sum())
     silence = max(0., 1-max(head.rms, tail.rms)/.001)
-    return SeamMetrics(jump, slope, rms, corr, shape, head.rms, tail.rms, silence)
+    return SeamMetrics(jump, raw, slope, rms, corr, shape, head.rms, tail.rms, silence)
 
 
 def measure_loop_seam(audio, start_frame, stop_frame, *, context_frames=256,
