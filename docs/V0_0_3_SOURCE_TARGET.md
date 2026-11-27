@@ -31,6 +31,9 @@ errors or weakening test coverage.
 
 - No open blocker from either dependency stack included in the release.
 - All applicable general, DSP, corpus, CPU research and web tests pass.
+- Clean-install smoke exercises the primary CLI for granular synthesis,
+  modal contacts, spatial propagation, mastering and original sound-pack
+  creation, replay and selection. Generated outputs remain disposable.
 - Dedicated codec tests exercise active source crops, split isolation,
   true optimizer updates and exact completed-stage handoff equivalence.
 - Source-only build gate passes all Linux/Windows matrix jobs, both
