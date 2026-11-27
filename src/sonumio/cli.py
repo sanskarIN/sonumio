@@ -16,6 +16,7 @@ from .audio_core.quality import QualityLimits
 from .audio_core.stream_quality import inspect_wav_quality
 from .audio_core.resample import ResampleSettings
 from .audio_core.wave_resample import resample_wav_file
+from .audio_core.transform_cli import add_transform_parser, run_transform_command
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="sonumio", description="Imagine it. Hear it.")
@@ -125,10 +126,13 @@ def main(argv: list[str] | None = None) -> int:
     inspect.add_argument("--max-channel-imbalance-db", type=float, default=24.0)
     inspect.add_argument("--min-active-fraction", type=float, default=0.001)
     inspect.add_argument("--activity-floor-dbfs", type=float, default=-70.0)
+    add_transform_parser(sub)
     sub.add_parser("models", help="Inspect provenance and weights licenses")
     serve = sub.add_parser("serve", help="Start a local REST API")
     serve.add_argument("--port", type=int, default=8000)
     args = parser.parse_args(argv)
+    if args.command == "wav-transform":
+        return run_transform_command(args)
     if args.command == "models":
         for model in list_models():
             print(f"{model['id']} | {model['model_kind']} | {model['license']}")
