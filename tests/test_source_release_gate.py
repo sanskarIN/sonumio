@@ -351,3 +351,46 @@ def test_format_documentation_is_not_rejected():
     entries.accept(candidate.prefix+"docs/format.md",directory=False,regular=True,
                    size=len(source),read=lambda:source)
     assert entries.files["docs/format.md"] == source
+
+
+def test_sound_design_pcm_receipt_uses_actual_bytes(tmp_path):
+    import hashlib
+    import wave
+    target = tmp_path / "contact.wav"
+    with wave.open(str(target), "wb") as writer:
+        writer.setnchannels(2)
+        writer.setsampwidth(2)
+        writer.setframerate(8000)
+        writer.writeframes(b"\x01\x00\x02\x00" * 20)
+    digest = hashlib.sha256(target.read_bytes()).hexdigest()
+    report = {"output_sha256": digest}
+    assert gate._check_generated_pcm(report, target, (8000, 2, 2, 20)) == digest
+    with pytest.raises(RuntimeError, match="geometry"):
+        gate._check_generated_pcm(report, target, (8000, 1, 2, 20))
+    with pytest.raises(RuntimeError, match="digest"):
+        gate._check_generated_pcm({"output_sha256": "0"*64}, target, (8000, 2, 2, 20))
+
+
+def test_pack_smoke_cross_checks_actual_archive_and_selection(tmp_path):
+    from copy import deepcopy
+    from sonumio.audio_core.asset_pack import AssetRecipe, SoundPackPlan
+    from sonumio.audio_core.asset_archive import create_pack_bytes, verify_pack_bytes
+    from sonumio.audio_core.asset_selection import select_asset
+    raw, receipt = create_pack_bytes(SoundPackPlan(
+        "smoke", (AssetRecipe("rain", 2400, variants=2),)))
+    archive = tmp_path / "pack.zip"
+    archive.write_bytes(raw)
+    selection = select_asset(raw, "rain", 2)
+    target = tmp_path / "selected.wav"
+    target.write_bytes(selection.wav)
+    created = json.loads(json.dumps(receipt.as_dict()))
+    verified = json.loads(json.dumps(verify_pack_bytes(raw, replay=True).as_dict()))
+    selected = {**selection.as_dict(), "output_sha256": selection.record["wav_sha256"]}
+    assert gate._check_pack_smoke(created, verified, selected, archive, target) == selected["output_sha256"]
+    wrong = deepcopy(verified)
+    wrong["replayed_assets"] = 1
+    with pytest.raises(RuntimeError, match="verification"):
+        gate._check_pack_smoke(created, wrong, selected, archive, target)
+    target.write_bytes(select_asset(raw, "rain", 1).wav)
+    with pytest.raises(RuntimeError, match="differs from archive"):
+        gate._check_pack_smoke(created, verified, selected, archive, target)

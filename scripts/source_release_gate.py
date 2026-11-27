@@ -32,6 +32,10 @@ REQUIRED = frozenset({
     "web/package.json", "scripts/source_release_gate.py",
     "src/sonumio/demo.py", "src/sonumio/audio_core/stream_spectrum.py",
     "src/sonumio/audio_core/spectrum_cli.py",
+    "src/sonumio/audio_core/granular.py", "src/sonumio/audio_core/modal_synthesis.py",
+    "src/sonumio/audio_core/spatial_motion.py", "src/sonumio/audio_core/mastering.py",
+    "src/sonumio/audio_core/asset_pack.py", "src/sonumio/audio_core/asset_archive.py",
+    "src/sonumio/audio_core/asset_selection.py",
 })
 BANNED_PARTS = frozenset({
     ".git", "node_modules", "dist", "build", "outputs", "checkpoints",
@@ -375,12 +379,147 @@ def _smoke_archive(archive: Path, work: Path, candidate: SourceCandidate) -> dic
     ], cwd=work, env=env).stdout)
     if (repeat != demo or repeated.read_bytes() != demo_path.read_bytes()):
         raise RuntimeError("Installed source procedural demo is not reproducible")
+    sound_design = _smoke_sound_design(console, work, env, destination, digest)
     return {
+        **sound_design,
         "installed_version": reported, "source_install": "isolated non-editable",
         "generated_wav_frames": 12_000,
         "verified_wav_inspection": True, "verified_spectrum": True,
         "verified_demo": True, "demo_repeat_identical": True,
         "demo_wav_sha256": demo["wav_sha256"], "uploaded_artifacts": 0,
+    }
+
+
+def _check_generated_pcm(report, destination, geometry):
+    """Independently verify the installed CLI's encoded PCM file."""
+    data = destination.read_bytes()
+    digest = hashlib.sha256(data).hexdigest()
+    if report.get("output_sha256") != digest:
+        raise RuntimeError("Installed sound design output digest mismatch")
+    with wave.open(str(destination), "rb") as source:
+        actual = (source.getframerate(), source.getnchannels(),
+                  source.getsampwidth(), source.getnframes())
+        if actual != geometry or source.getcomptype() != "NONE":
+            raise RuntimeError("Installed sound design PCM geometry mismatch")
+        payload = source.readframes(source.getnframes())
+    if len(payload) != geometry[1]*geometry[2]*geometry[3] or not any(payload):
+        raise RuntimeError("Installed sound design output is empty or silent")
+    return digest
+
+
+def _check_pack_smoke(created, verified, selected, archive, destination):
+    """Cross-check the original library report with ZIP and WAV bytes."""
+    digest = hashlib.sha256(archive.read_bytes()).hexdigest()
+    if (created.get("archive_sha256") != digest
+            or verified.get("archive_sha256") != digest
+            or selected.get("archive_sha256") != digest
+            or verified.get("replayed_assets") != 2
+            or verified.get("recipe_replay_verified") is not True
+            or verified.get("signature_verified") is not False):
+        raise RuntimeError("Installed original sound pack verification mismatch")
+    manifest = verified["manifest"]
+    if (manifest.get("asset_count") != 2
+            or manifest.get("total_frames") != 4800
+            or manifest.get("model_inference") is not False
+            or manifest.get("recording_sources_used") is not False
+            or created.get("manifest") != manifest):
+        raise RuntimeError("Installed original sound pack provenance mismatch")
+    expected_names = ["manifest.json", "audio/rain-001.wav", "audio/rain-002.wav"]
+    with zipfile.ZipFile(archive, "r") as zipped:
+        if zipped.namelist() != expected_names:
+            raise RuntimeError("Installed sound pack member mismatch")
+        embedded = zipped.read("manifest.json")
+        if (json.loads(embedded) != manifest
+                or hashlib.sha256(embedded).hexdigest() != verified.get("manifest_sha256")):
+            raise RuntimeError("Installed sound pack manifest mismatch")
+        for record in manifest["assets"]:
+            member = zipped.read(record["member"])
+            if (hashlib.sha256(member).hexdigest() != record.get("wav_sha256")
+                    or len(member) != record.get("bytes")):
+                raise RuntimeError("Installed sound pack asset checksum mismatch")
+        if destination.read_bytes() != zipped.read(expected_names[-1]):
+            raise RuntimeError("Installed selected WAV differs from archive")
+    if selected.get("asset") != manifest["assets"][1]:
+        raise RuntimeError("Installed selected asset receipt mismatch")
+    return _check_generated_pcm(selected, destination, (24000, 1, 2, 2400))
+
+
+def _smoke_sound_design(console, work, env, source, source_digest):
+    """Exercise new primary CLI workflows in each clean source installation.
+
+    All generated files live in the disposable install workspace, never
+    in the committed source archive. Exact hashes are compared within
+    one environment; different numerical dependencies may differ.
+    """
+    def run(*args):
+        return json.loads(_run([str(console), *map(str, args)], cwd=work, env=env).stdout)
+
+    grains = work / "granular.wav"
+    granular = run("granular", "--input", source, "--expected-sha256", source_digest,
+                   "--frames", 2400, "--grain-frames", 128, "--hop-frames", 64,
+                   "--stereo-spread", ".5", "--seed", 12, "--output", grains)
+    grain_digest = _check_generated_pcm(granular, grains, (24000, 2, 2, 2400))
+    if granular["source"].get("source_sha256") != source_digest:
+        raise RuntimeError("Installed granular source digest mismatch")
+
+    contact_path = work / "contact.wav"
+    contact = run("contact-sound", "--material", "wood", "--excitation", "tap",
+                  "--count", 2, "--event-ms", 80, "--interval-ms", 150,
+                  "--sample-rate", 8000, "--output", contact_path)
+    contact_digest = _check_generated_pcm(contact, contact_path, (8000, 2, 2, 1840))
+    if len(contact["render"]["event_reports"]) != 2:
+        raise RuntimeError("Installed contact event count mismatch")
+
+    plan = work / "spatial-plan.json"
+    plan.write_text(json.dumps({
+        "sample_rate": 24000,
+        "placements": [{"source_id": "rain", "trajectory": {
+            "keys": [{"frame": 0, "position": {"x": 0, "y": 4}}]}}],
+        "receiver": {"spacing_m": 0, "sound_speed": 320},
+    }), encoding="utf-8")
+    spatial_path = work / "spatial.wav"
+    spatial = run("spatial-scene", "--plan", plan, "--source", f"rain={source}",
+                  "--source-sha256", f"rain={source_digest}", "--output", spatial_path)
+    spatial_digest = _check_generated_pcm(spatial, spatial_path, (24000, 2, 2, 12300))
+    if (spatial["sources"]["rain"].get("source_sha256") != source_digest
+            or any(p["truncated"] for p in spatial["render"]["paths"])):
+        raise RuntimeError("Installed spatial propagation receipt mismatch")
+
+    master_path = work / "master.wav"
+    master = run("wav-master", grains, "--peak-only", "--peak-ceiling-dbfs", -3,
+                 "--expected-sha256", grain_digest, "--output", master_path)
+    master_digest = _check_generated_pcm(master, master_path, (24000, 2, 2, 2400))
+    if (master.get("source_sha256") != grain_digest
+            or master.get("encoded_peak_reverified") is not True
+            or master["encoded_measurement"]["peak"]["estimated_peak"] > 10**(-3/20)):
+        raise RuntimeError("Installed mastering encoded-peak verification mismatch")
+
+    pack_plan = work / "pack-plan.json"
+    pack_plan.write_text(json.dumps({
+        "pack_id": "smoke-library", "seed": 7,
+        "recipes": [{"asset_id": "rain", "frames": 2400, "variants": 2,
+                     "tags": ["rain"]}],
+    }), encoding="utf-8")
+    pack_path = work / "library.zip"
+    preview = run("sound-pack-plan", "--plan", pack_plan)
+    if preview.get("asset_count") != 2 or preview.get("total_frames") != 4800:
+        raise RuntimeError("Installed sound pack planning mismatch")
+    created = run("sound-pack", "--plan", pack_plan, "--output", pack_path)
+    verified = run("sound-pack-verify", pack_path, "--expected-sha256",
+                   created["archive_sha256"], "--replay")
+    listing = run("sound-pack-list", pack_path, "--tag", "rain")
+    if listing.get("matched_assets") != 2:
+        raise RuntimeError("Installed sound pack filtering mismatch")
+    selected_path = work / "selected.wav"
+    selected = run("sound-pack-select", pack_path, "--asset", "rain", "--variant", 2,
+                   "--expected-sha256", created["archive_sha256"], "--output", selected_path)
+    selected_digest = _check_pack_smoke(created, verified, selected, pack_path, selected_path)
+    return {
+        "granular_wav_sha256": grain_digest, "contact_wav_sha256": contact_digest,
+        "spatial_wav_sha256": spatial_digest, "master_wav_sha256": master_digest,
+        "sound_pack_sha256": created["archive_sha256"],
+        "selected_wav_sha256": selected_digest, "sound_pack_replayed_assets": 2,
+        "verified_installed_sound_design": True,
     }
 
 
