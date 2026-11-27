@@ -60,7 +60,24 @@ from .time_scale import TimeScaleSettings, TimeScaleResult, TimeScaleReport, str
 from .pitch_shift import PitchShiftSettings, PitchShiftResult, PitchShiftReport, pitch_shift
 from .wav_transform import WavTransformConfig, WavTransformReport, transform_wav_file
 
+from .loop_analysis import LoopSearchPlan, LoopSearchResult, LoopCandidate, LoopScoreWeights, search_loop, measure_loop_seam
+from .loop_render import LoopRenderPlan, LoopRenderResult, LoopRenderReport, render_loop, circular_diagnostics
+from .wave_snapshot import VerifiedPcmSnapshot, read_verified_pcm
+from .interpolated_peak import PeakEstimateSettings, InterpolatedPeakAccumulator, InterpolatedPeakReport, estimate_interpolated_peak
+from .gated_energy import GatedEnergySettings, GatedEnergyAccumulator, GatedEnergyReport, measure_gated_energy
+from .lookahead_limiter import LookaheadSettings, LimiterResult, LimiterReport, limit_audio
+from .mastering import MasteringSettings, MasteringResult, MasteringReport, SignalMeasurement, MasteringMeasurement, measure_mastering, master_audio
+from .mastering_wav import MasteringWavOptions, VerifiedMasteringInspection, VerifiedMasteringExport, inspect_mastering_wav, master_wav_file
+
 __all__ = [
+    "LoopSearchPlan", "LoopSearchResult", "LoopCandidate", "LoopScoreWeights", "search_loop", "measure_loop_seam",
+    "LoopRenderPlan", "LoopRenderResult", "LoopRenderReport", "render_loop", "circular_diagnostics",
+    "VerifiedPcmSnapshot", "read_verified_pcm",
+    "PeakEstimateSettings", "InterpolatedPeakAccumulator", "InterpolatedPeakReport", "estimate_interpolated_peak",
+    "GatedEnergySettings", "GatedEnergyAccumulator", "GatedEnergyReport", "measure_gated_energy",
+    "LookaheadSettings", "LimiterResult", "LimiterReport", "limit_audio",
+    "MasteringSettings", "MasteringResult", "MasteringReport", "SignalMeasurement", "MasteringMeasurement", "measure_mastering", "master_audio",
+    "MasteringWavOptions", "VerifiedMasteringInspection", "VerifiedMasteringExport", "inspect_mastering_wav", "master_wav_file",
     "TimeScaleSettings", "TimeScaleResult", "TimeScaleReport", "stretch_audio", "target_frames_for_ratio",
     "PitchShiftSettings", "PitchShiftResult", "PitchShiftReport", "pitch_shift",
     "WavTransformConfig", "WavTransformReport", "transform_wav_file",
