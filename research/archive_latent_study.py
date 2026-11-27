@@ -16,7 +16,12 @@ import statistics
 
 import torch
 
-from research.archive_latent_access import AuditedCropAccess, counter_generator, hash_tensor
+from research.archive_latent_access import AuditedCropAccess
+from research.archive_latent_checkpoint import (
+    Prefix, TRACE_DOMAIN, counter_inputs, update_trace, destination,
+    save_latent_checkpoint, restore_latent_checkpoint,
+)
+from research.archive_training_contracts import make_archive_optimizer
 from research.archive_latent_validation import validate_latent
 from research.archive_latent_handoff import save_codec_stage, load_codec_stage
 from research.archive_latent_calibration import fit_archive_calibration, MODES
@@ -125,38 +130,38 @@ def train_codec(access, plan, codec):
     return _loss_report(losses,sampler,trace)
 
 
-def train_denoiser(access, plan, codec, calibration, model, schedule):
+def train_denoiser(access, plan, codec, calibration, model, schedule, *,
+                   optimizer=None, prefix=None):
     if codec.training or any(p.requires_grad for p in codec.parameters()):
         raise ArchiveError("Private latent denoising requires frozen codec")
-    sampler = CounterGroupSampler(access.ready,seed=plan.seed)
-    optimizer = _optimizer(model)
-    trace = hashlib.sha256(b"sonumio-private-latent-denoiser-trace-v1\0")
-    losses = []
-    null_examples = 0
+    if (optimizer is None)!=(prefix is None):
+        raise ArchiveError("Latent optimizer and progress must be supplied together")
+    if prefix is None:
+        optimizer = make_archive_optimizer(model)
+        prefix = Prefix(CounterGroupSampler(access.ready,seed=plan.seed),
+                        hashlib.sha256(TRACE_DOMAIN),0,[])
     model.train()
-    for step in range(plan.diffusion_updates):
-        indices, wave, labels = access.sample(sampler,plan.batch_size)
+    for step in range(len(prefix.losses),plan.diffusion_updates):
+        indices,wave,labels=access.sample(prefix.sampler,plan.batch_size)
         with torch.no_grad():
-            clean = calibration.normalize(encode_native(codec,wave,plan.bits))
-        timesteps = torch.randint(schedule.steps,(len(wave),),generator=counter_generator(plan.seed,b"time",step))
-        noise = torch.randn(clean.shape,generator=counter_generator(plan.seed,b"noise",step),dtype=torch.float32)
-        dropped = torch.rand(len(wave),generator=counter_generator(plan.seed,b"dropout",step)) < .1
-        condition = torch.where(dropped,model.classes,labels)
-        null_examples += int(dropped.sum())
-        trace.update(indices.astype("<i8",copy=False).tobytes())
-        for value,dtype in ((timesteps,"<i8"),(noise,"<f4"),(condition,"<i8")):
-            hash_tensor(trace,value,dtype)
+            clean=calibration.normalize(encode_native(codec,wave,plan.bits))
+        times,noise,condition,dropped=counter_inputs(plan,model,labels,step)
         optimizer.zero_grad(set_to_none=True)
-        loss = velocity_loss(model,schedule,clean,timesteps,noise,condition)
+        loss=velocity_loss(model,schedule,clean,times,noise,condition)
         loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(),1.,error_if_nonfinite=True)
         optimizer.step()
-        losses.append(float(loss.detach()))
-    return {**_loss_report(losses,sampler,trace),"null_examples":null_examples}
+        update_trace(prefix.trace,indices,times,noise,condition)
+        prefix.null_examples+=dropped
+        prefix.losses.append(float(loss.detach()))
+    report={**_loss_report(prefix.losses,prefix.sampler,prefix.trace),
+            "null_examples":prefix.null_examples}
+    return report,optimizer,prefix
 
 
 def run_archive_latent(path, *, expected_sha256, plan=None, codec_out=None,
-                       codec_in=None, codec_sha256=None, codec_only=False):
+                       codec_in=None, codec_sha256=None, codec_only=False,
+                       latent_out=None, latent_in=None, latent_sha256=None):
     require_sha256(expected_sha256)
     plan = ArchiveLatentPlan() if plan is None else plan
     if not isinstance(plan,ArchiveLatentPlan):
@@ -167,6 +172,14 @@ def run_archive_latent(path, *, expected_sha256, plan=None, codec_out=None,
         raise ArchiveError("Invalid private codec handoff options")
     if codec_sha256 is not None:
         require_sha256(codec_sha256)
+    if ((latent_in is None)!=(latent_sha256 is None)
+            or (codec_only and (latent_in is not None or latent_out is not None))):
+        raise ArchiveError("Invalid latent checkpoint options")
+    if latent_sha256 is not None:
+        require_sha256(latent_sha256)
+        destination(latent_in,writing=False)
+    if latent_out is not None:
+        destination(latent_out,writing=True)
     if torch.get_default_dtype() != torch.float32:
         raise ArchiveError("Private latent study requires default float32")
     with CorpusArchiveReader(path,expected_sha256=expected_sha256) as reader:
@@ -226,7 +239,20 @@ def run_archive_latent(path, *, expected_sha256, plan=None, codec_out=None,
                 model = CropLatentDenoiser(CLIP_FRAMES,plan.width)
                 schedule = DiffusionSchedule(plan.schedule_steps,profile="cosine_zero_terminal_v1")
             initial_model = model_state_sha256(model)
-            training = train_denoiser(access,plan,codec,calibration,model,schedule)
+            optimizer = prefix = None
+            if latent_in is not None:
+                model,optimizer,prefix=restore_latent_checkpoint(
+                    latent_in,expected_sha256=latent_sha256,access=access,plan=plan,
+                    codec=codec,calibration=calibration,model=model,
+                )
+            restored_steps=0 if prefix is None else len(prefix.losses)
+            training,optimizer,prefix=train_denoiser(access,plan,codec,calibration,model,schedule,
+                                                      optimizer=optimizer,prefix=prefix)
+            latent_receipt=None
+            if latent_out is not None:
+                latent_receipt=save_latent_checkpoint(latent_out,access=access,plan=plan,
+                    codec=codec,calibration=calibration,model=model,optimizer=optimizer,
+                    initial_sha256=initial_model,prefix=prefix)
             trained_model = model_state_sha256(model)
             if initial_model == trained_model:
                 raise ArchiveError("Private latent denoiser did not train")
@@ -249,9 +275,12 @@ def run_archive_latent(path, *, expected_sha256, plan=None, codec_out=None,
                     "parameter_count":sum(p.numel() for p in model.parameters()),
                     "terminal_alpha_bar":float(schedule.alpha_bars[-1])},
         "validation":validation,"generation":generated,
+        "latent_checkpoint":{"restored_steps":restored_steps,
+                             "executed_steps":plan.diffusion_updates-restored_steps,
+                             "receipt":latent_receipt,"full_denoiser_optimizer_resume_supported":True},
         "calibration_train_only":True,"latent_corpus_materialized":False,
         "bounded_archive_batches":True,"test_split_scored":False,
-        "recording_identifiers_exported":False,"audio_or_weights_written":codec_out is not None,
+        "recording_identifiers_exported":False,"audio_or_weights_written":codec_out is not None or latent_out is not None,
         "perceptual_quality_established":False,"model_publication_authorized":False,
         "original_sonumio_1":False,
     }
@@ -272,6 +301,9 @@ def main(argv=None):
     parser.add_argument("--codec-in",type=Path)
     parser.add_argument("--codec-sha256")
     parser.add_argument("--codec-only",action="store_true")
+    parser.add_argument("--latent-out",type=Path)
+    parser.add_argument("--latent-in",type=Path)
+    parser.add_argument("--latent-sha256")
     args=parser.parse_args(argv)
     try:
         settings={key:getattr(args,key) for key in ArchiveLatentPlan.__dataclass_fields__}
@@ -282,7 +314,8 @@ def main(argv=None):
         settings["generation_seeds"]=tuple(map(int,parts))
         report=run_archive_latent(args.archive,expected_sha256=args.expected_sha256,
                                   plan=ArchiveLatentPlan(**settings),codec_out=args.codec_out,
-                                  codec_in=args.codec_in,codec_sha256=args.codec_sha256,codec_only=args.codec_only)
+                                  codec_in=args.codec_in,codec_sha256=args.codec_sha256,codec_only=args.codec_only,
+                                  latent_out=args.latent_out,latent_in=args.latent_in,latent_sha256=args.latent_sha256)
     except (ValueError,RuntimeError,OSError) as exc:
         parser.exit(2,f"Private archive latent experiment: {exc}\n")
     print(json.dumps(report,sort_keys=True,allow_nan=False))
