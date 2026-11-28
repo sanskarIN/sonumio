@@ -45,7 +45,7 @@ Every mutation requires an explicit destination and refuses to overwrite by defa
 2. Scores and controllers are immutable typed values; optimistic edit actions pin their source digests.
 3. All event times use integer ticks and all audio transport scheduling uses explicit rational time conversion.
 4. SMPTE MIDI timing is supported for inspection and timing analysis, but not losslessly represented in the separate PPQN-based editable `Score` object. This is an explicit limitation.
-5. Imported MIDI CC, aftertouch, SysEx and program changes are never silently interpreted as equivalent symbolic score events. Some workflows refuse such conversions rather than inventing semantics.
+5. Imported MIDI CC, aftertouch and SysEx are never silently interpreted as equivalent symbolic score events. MIDI program changes are refused by default. An explicit `midi-import --allow-patch-rechannel` option can preserve note/program groups by assigning additional fixed patches to unused non-percussion MIDI channels; it records every reassignment, refuses drum-kit changes and refuses channel exhaustion. Such reassignment changes channel routing and is not a byte-identical MIDI roundtrip.
 6. A key-on/key-off interval and a sustain-extended audible interval are distinct.
 7. A decoded score or model is never proof that a melody is original, licensed or free of copyright. Pattern generator inputs are supplied by the user.
 8. SHA-256 chains provide corruption detection, not authorship proof or authentication.

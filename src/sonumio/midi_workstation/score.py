@@ -301,11 +301,59 @@ def from_midi(
     route_patches: dict[int, set[tuple[int, int, int]]] = {}
     for (_, channel, msb, lsb, patch) in grouping:
         route_patches.setdefault(channel, set()).add((msb, lsb, patch))
-    if any(len(items) > 1 for items in route_patches.values()):
-        raise MidiWorkstationError("MIDI channel program changes cannot be represented as fixed score tracks")
+    changing_channels = {
+        channel: patches for channel, patches in route_patches.items()
+        if len(patches) > 1
+    }
+    if changing_channels and not allow_patch_changes:
+        raise MidiWorkstationError(
+            "MIDI channel changes patches; explicitly enable channel "
+            "reassignment to import this as fixed-patch score tracks"
+        )
+    # A fixed-patch score cannot reproduce multiple patches on one shared
+    # MIDI channel. The opt-in policy allocates each *additional* patch
+    # a free channel, retaining the initial patch on its original channel.
+    # Do not steal channels used by unrelated source material or route a
+    # pitched instrument onto General MIDI percussion channel 9.
+    reassigned: dict[tuple[int, tuple[int, int, int]], int] = {}
+    if changing_channels:
+        free_channels = [ch for ch in range(16)
+                         if ch != 9 and ch not in route_patches]
+        for channel in sorted(changing_channels):
+            if channel == 9:
+                raise MidiWorkstationError(
+                    "Changing drum kits on MIDI channel 9 cannot be rechanneled "
+                    "without altering percussion meaning"
+                )
+            first_seen: dict[tuple[int, int, int], tuple[int, int]] = {}
+            for span in performance.notes:
+                if span.channel == channel:
+                    patch = (span.bank_msb, span.bank_lsb, span.program)
+                    location = (span.start, span.track)
+                    if patch not in first_seen or location < first_seen[patch]:
+                        first_seen[patch] = location
+            ordered = sorted(changing_channels[channel],
+                             key=lambda patch: (first_seen[patch], patch))
+            for patch in ordered[1:]:
+                if not free_channels:
+                    raise MidiLimitError(
+                        "Not enough unoccupied MIDI channels for patch reassignment"
+                    )
+                reassigned[(channel, patch)] = free_channels.pop(0)
+    remapping_ledger = [
+        {
+            "source_channel": channel,
+            "output_channel": output_channel,
+            "bank_msb": patch[0],
+            "bank_lsb": patch[1],
+            "program": patch[2],
+        }
+        for (channel, patch), output_channel in sorted(reassigned.items())
+    ]
     tracks = []
     truncated = 0
     for (track_idx, channel, msb, lsb, program), spans in sorted(grouping.items()):
+        output_channel = reassigned.get((channel, (msb, lsb, program)), channel)
         name = midi.tracks[track_idx].name or f"Track {track_idx + 1}"
         notes = []
         for ordinal, span in enumerate(spans):
@@ -319,8 +367,9 @@ def from_midi(
                 span.release_velocity,
             ))
         tracks.append(ScoreTrack(
-            f"t{track_idx}-{channel}-{program}", name[:MAX_LABEL], channel,
-            program, msb, lsb, tuple(sorted(notes, key=note_sort_key)),
+            f"t{track_idx}-{output_channel}-{program}", name[:MAX_LABEL],
+            output_channel, program, msb, lsb,
+            tuple(sorted(notes, key=note_sort_key)),
         ))
     if not tracks:
         tracks = [ScoreTrack("empty", "Empty MIDI", 0, 0, 0, 0, ())]
@@ -336,7 +385,9 @@ def from_midi(
         "zero_duration_omitted": truncated,
         "original_sustain_applied": audible_duration,
         "performance_controller_messages_not_represented": True,
-        "source_program_changes_supported": False,
+        "source_program_changes_supported": bool(reassigned),
+        "source_program_changes_rechanneled": bool(reassigned),
+        "program_channel_reassignments": remapping_ledger,
         "opaque_sysex_preserved": False,
         "key_signature_preserved": False,
         "source_audio_rendered": False,

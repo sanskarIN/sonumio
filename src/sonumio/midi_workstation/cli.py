@@ -68,6 +68,8 @@ def make_parser() -> argparse.ArgumentParser:
     to_json.add_argument("--title", default="Imported original MIDI")
     to_json.add_argument("--use-audible-duration", action="store_true")
     to_json.add_argument("--close-dangling", action="store_true")
+    to_json.add_argument("--allow-patch-rechannel", action="store_true",
+                         help="Opt in to reassigning program changes to free MIDI channels")
     _source_digest(to_json)
     _destination(to_json)
 
@@ -155,7 +157,8 @@ def _midi_import(args) -> dict:
         dangling_note_on="close" if args.close_dangling else "reject",
     )
     score, ledger = from_midi(source.midi, title=args.title, settings=settings,
-                              audible_duration=args.use_audible_duration)
+                              audible_duration=args.use_audible_duration,
+                              allow_patch_changes=args.allow_patch_rechannel)
     publication = publish_score(args.output, score, _publication(args),
                                 input_path=args.source)
     return {
