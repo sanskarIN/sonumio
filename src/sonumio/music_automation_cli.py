@@ -10,6 +10,7 @@ import sys
 from .atomic_cli_wav import publish_generated_wav
 from .errors import GenerationError
 from .music_automation import generate_automated_music, read_automation
+from .music_blockwise_automation import generate_blockwise_automated_music
 from .music_score_io import read_score
 
 
@@ -22,6 +23,7 @@ def register_automation_command(sub):
     command.add_argument("--output", type=Path, required=True)
     command.add_argument("--overwrite", action="store_true")
     command.add_argument("--expected-output-sha256")
+    command.add_argument("--block-frames",type=int,help="Use bounded two-pass rendering (256–16384 frames)")
     return command
 
 
@@ -41,7 +43,10 @@ def run_automation_command(args):
         if (args.expected_automation_sha256 is not None
                 and plan.sha256 != args.expected_automation_sha256):
             raise GenerationError("Automation plan SHA256 mismatch")
-        wav, report = generate_automated_music(score, plan)
+        if args.block_frames is None:
+            wav, report = generate_automated_music(score, plan)
+        else:
+            wav, report = generate_blockwise_automated_music(score, plan, block_frames=args.block_frames)
         receipt = publish_generated_wav(args.output, wav, overwrite=args.overwrite,
                                         expected_sha256=args.expected_output_sha256)
         report.update({"output_sha256": receipt.wav_sha256,
