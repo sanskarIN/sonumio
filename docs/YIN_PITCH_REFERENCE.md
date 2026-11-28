@@ -70,3 +70,15 @@ network access and no neural-model weights.
 Validation uses synthesized single-frequency and inverted-channel
 waveforms with known exact sample clocks. Real recordings require listening
 and independent annotations to evaluate musical accuracy.
+
+## Verified local WAV command
+
+```sh
+sonumio wav-pitch input.wav --min-hz 65 --max-hz 1400 --summary-only
+```
+
+Use `--expected-sha256` to bind the read to a trusted lowercase
+SHA-256 of the source WAV. The command verifies the original file via
+the canonical packet reader and prints one deterministic JSON object.
+Omit `--summary-only` to include all per-frame pitch observations.
+No output file is created, and the input file is not modified.
