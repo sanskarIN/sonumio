@@ -19,6 +19,8 @@ def register_room_command(sub):
     command.add_argument("--output-bits", type=int, choices=(8, 16, 24, 32), default=16)
     command.add_argument("--dither-seed", type=int)
     command.add_argument("--packet-frames", type=int, default=8192)
+    command.add_argument("--engine", choices=("matrix", "partitioned"), default="matrix",
+                         help="Explicit FIR backend (default preserves legacy replay)")
     command.add_argument("--overwrite", action="store_true")
     command.add_argument("--create-parent", action="store_true")
     return command
@@ -33,7 +35,7 @@ def run_room_command(args):
             expected_output_sha256=args.expected_output_sha256,
             output_bits=args.output_bits, dither_seed=args.dither_seed,
             packet_frames=args.packet_frames, overwrite=args.overwrite,
-            create_parent=args.create_parent,
+            create_parent=args.create_parent, engine=args.engine,
         )
     except (OSError, ValueError, TypeError, RuntimeError) as exc:
         print(f"Sonumio room response: {exc}", file=sys.stderr)
