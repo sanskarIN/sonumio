@@ -35,6 +35,8 @@ def publish_music_artifact(path,data,*,kind,overwrite=False,expected_sha256=None
                "project": (MAX_PROJECT_BYTES, ".sonumio"),
                "automation": (MAX_PLAN_BYTES, ".json"),
                "patch": (MAX_PATCH_BYTES, ".json"),
+               "render_recipe": (3 * 1024 * 1024, ".json"),
+               "render_bundle": (20 * 1024 * 1024, ".zip"),
                "stems": (MAX_STEM_PACK_BYTES, ".zip")}
     if type(kind) is not str or kind not in formats or type(overwrite) is not bool:
         raise GenerationError("Invalid music artifact publication mode")
