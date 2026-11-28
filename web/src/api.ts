@@ -1,3 +1,4 @@
+import { validateAutomation, parseAutomationReceipt, MAX_AUTOMATION_BYTES, type AutomationReceipt } from './music-automation-contract';
 import { validateScoreInput, validateMusicMix, parseMusicPlan, isDigest, type MusicScoreInput, type MusicRenderInput, type MusicPlan } from './music-contract';
 /** Typed same-origin client for the Sonumio local audio API. */
 export type ModelEntry = {
@@ -350,6 +351,7 @@ export function submitMusicJob(input: MusicRenderInput, options: JobSubmissionOp
   validateScoreInput(input);
   const error = validateMusicMix(input.mix);
   if (error) throw new Error(error);
+  validateAutomation(input);
   return submitJob('music', input, options);
 }
 
@@ -405,5 +407,62 @@ export async function exportMusic(input: MusicScoreInput, format: 'json' | 'midi
     if (digest !== response.headers.get('X-Sonumio-Content-SHA256'))
       throw new Error('Music export checksum mismatch.');
     return new Blob([buffer], { type });
+  });
+}
+
+
+export async function planMusicAutomation(input:MusicRenderInput,signal?:AbortSignal):Promise<AutomationReceipt> {
+  validateScoreInput(input);
+  const error=validateMusicMix(input.mix);
+  if(error)throw new Error(error);
+  validateAutomation(input);
+  if(!input.expected_score_sha256)throw new Error('Validate the score before planning automation.');
+  return withJobDeadline(signal,async pending=>{
+    const raw=await request<unknown>('/v1/music/automation/plan',{
+      method:'POST',body:JSON.stringify(input),signal:pending,redirect:'error',cache:'no-store',
+    });
+    return parseAutomationReceipt(raw,input);
+  });
+}
+export async function exportMusicAutomation(input:MusicRenderInput,signal?:AbortSignal):Promise<Blob> {
+  validateScoreInput(input);
+  const error=validateMusicMix(input.mix);
+  if(error)throw new Error(error);
+  validateAutomation(input);
+  if(!input.expected_score_sha256||!input.automation?.expected_automation_sha256)
+    throw new Error('Validate score and automation before exporting.');
+  return withJobDeadline(signal,async pending=>{
+    const response=await fetch('/v1/music/automation/export',{
+      method:'POST',body:JSON.stringify(input),signal:pending,redirect:'error',cache:'no-store',
+      credentials:'omit',headers:{'Content-Type':'application/json'},
+    });
+    if(!response.ok)throw new ApiError('Automation export failed (HTTP '+response.status+')',response.status);
+    if(response.headers.get('content-type')?.split(';')[0]!=='application/json'||
+      response.headers.get('X-Sonumio-Score-SHA256')!==input.expected_score_sha256||
+      response.headers.get('X-Sonumio-Automation-SHA256')!==input.automation?.expected_automation_sha256||
+      !isDigest(response.headers.get('X-Sonumio-Content-SHA256')))
+      throw new Error('Invalid automation export receipt.');
+    const size=Number(response.headers.get('content-length'));
+    if(!Number.isInteger(size)||size<1||size>MAX_AUTOMATION_BYTES||!response.body)
+      throw new Error('Invalid automation export length.');
+    const reader=response.body.getReader(), buffer=new Uint8Array(size);
+    let offset=0;
+    try {
+      while(true){
+        pending.throwIfAborted();
+        const {value,done}=await reader.read();
+        if(done)break;
+        if(offset+value.byteLength>size)throw new Error('Automation export exceeds declared length.');
+        buffer.set(value,offset);offset+=value.byteLength;
+      }
+    }finally{
+      try{await reader.cancel();}catch{/* already closed */}
+      reader.releaseLock();
+    }
+    if(offset!==size)throw new Error('Truncated automation export.');
+    const digest=[...new Uint8Array(await crypto.subtle.digest('SHA-256',buffer))]
+      .map(x=>x.toString(16).padStart(2,'0')).join('');
+    if(digest!==response.headers.get('X-Sonumio-Content-SHA256'))throw new Error('Automation export checksum mismatch.');
+    return new Blob([buffer],{type:'application/json'});
   });
 }
