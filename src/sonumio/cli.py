@@ -26,6 +26,7 @@ from .music_stem_cli import register_stem_commands, run_stem_command
 from .audio_core.spatial_cli import register_spatial_command, run_spatial_command
 from .audio_core.asset_pack_cli import register_asset_pack_commands, run_asset_pack_command
 from .music_automation_cli import register_automation_command, run_automation_command
+from .music_blockwise_cli import register_blockwise_music_command, run_blockwise_music_command
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="sonumio", description="Imagine it. Hear it.")
@@ -145,10 +146,13 @@ def main(argv: list[str] | None = None) -> int:
     register_spatial_command(sub)
     register_asset_pack_commands(sub)
     register_automation_command(sub)
+    register_blockwise_music_command(sub)
     sub.add_parser("models", help="Inspect provenance and weights licenses")
     serve = sub.add_parser("serve", help="Start a local REST API")
     serve.add_argument("--port", type=int, default=8000)
     args = parser.parse_args(argv)
+    if args.command == "music-render-blockwise":
+        return run_blockwise_music_command(args)
     if args.command == "music-automate":
         return run_automation_command(args)
     if args.command == "contact-sound":
