@@ -21,6 +21,8 @@ from .matrix_convolution import (
     ConvolutionGeometry, ImpulseMatrix, MAX_TAPS, convolve_matrix,
 )
 
+from .partitioned_convolution import convolve_partitioned
+
 MAX_ORDER = 4
 MAX_ROOM_LENGTH = 100.0
 MAX_PATHS = 32_000
@@ -249,11 +251,19 @@ def build_room_response(
     return RoomResponse(impulse, paths, config)
 
 
+def room_convolver(engine: str):
+    """Select an explicit backend; never silently fall back on resource errors."""
+    if type(engine) is not str or engine not in ("matrix", "partitioned"):
+        raise AudioContractError("Unknown room convolution engine")
+    return convolve_matrix if engine == "matrix" else convolve_partitioned
+
+
 def render_room(
     audio: AudioBuffer, room: ShoeboxRoom,
     sources: tuple[Point3D, ...], receivers: tuple[Point3D, ...],
     config: RoomConfig = RoomConfig(), *, include_tail: bool = True,
     output_layout: AudioLayout | None = None,
+    engine: str = "matrix",
 ) -> AudioBuffer:
     """Render source channels into receiver channels on the source clock."""
     if not isinstance(audio, AudioBuffer) or not isinstance(config, RoomConfig):
@@ -270,8 +280,9 @@ def render_room(
         or output_layout.channels != len(receivers)
     ):
         raise AudioContractError("Receiver layout does not match receiver positions")
+    convolver = room_convolver(engine)
     response = build_room_response(room, sources, receivers, config)
-    return convolve_matrix(
+    return convolver(
         audio, response.impulse, include_tail=include_tail,
         output_layout=output_layout,
     )
