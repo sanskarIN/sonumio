@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { ScoreNoteEditor } from './ScoreNoteEditor';
+import { MusicAutomationEditor } from './MusicAutomationEditor';
+import { parseAutomationFile, MAX_AUTOMATION_BYTES, type AutomationLane, type AutomationReceipt } from './music-automation-contract';
 import type { NoteEdits } from './music-note-editor';
 import { awaitJob, cancelJob, exportMusic, getJob, isClientJobId, isRejectedJobSubmission,
-  planMusic, submitMusicJob, type JobAudio, type JobStatus } from './api';
+  planMusic, submitMusicJob, planMusicAutomation, exportMusicAutomation, type JobAudio, type JobStatus } from './api';
 import { TRACKS, STYLES, MODES, defaultComposition, defaultMusicMix, compositionKey,
   previewFrames, validateComposition, validateMusicMix, SAMPLE_RATE,
   type Composition, type MusicMix, type MusicPlan, type Track } from './music-contract';
@@ -31,6 +33,8 @@ function errorMessage(error: unknown): string {
 export function MusicStudio({ connected }: { connected: boolean | null }) {
   const [composition, setComposition] = useState(defaultComposition);
   const [mix, setMix] = useState(defaultMusicMix);
+  const [lanes,setLanes] = useState<AutomationLane[]>([]);
+  const [automationReceipt,setAutomationReceipt] = useState<AutomationReceipt|null>(null);
   const [plan, setPlan] = useState<MusicPlan | null>(null);
   const [basePlan, setBasePlan] = useState<MusicPlan | null>(null);
   const [noteEdits, setNoteEdits] = useState<NoteEdits | null>(null);
@@ -77,11 +81,14 @@ export function MusicStudio({ connected }: { connected: boolean | null }) {
     setPlan(null);
     setBasePlan(null);
     setNoteEdits(null);
+    setLanes([]);
+    setAutomationReceipt(null);
     setNotice('');
   }
 
   function editMix(next: MusicMix) {
     setMix(next);
+    setAutomationReceipt(null);
     setNotice('');
   }
 
@@ -116,6 +123,7 @@ export function MusicStudio({ connected }: { connected: boolean | null }) {
 
   function changeNoteEdits(next: NoteEdits | null) {
     setNoteEdits(next);
+    setAutomationReceipt(null);
     setPlan(next ? null : basePlan);
     setNotice('');
   }
@@ -124,6 +132,7 @@ export function MusicStudio({ connected }: { connected: boolean | null }) {
     const value = await planMusic(scoreInput(), signal);
     signal.throwIfAborted();
     setPlan(value);
+    setAutomationReceipt(null);
     if (!noteEdits) setBasePlan(value);
     return value;
   }
@@ -140,10 +149,62 @@ export function MusicStudio({ connected }: { connected: boolean | null }) {
     setNotice('Render complete. This preview reflects the controls at submission time.');
   }
 
+  function renderInput(score:MusicPlan) {
+    return {...scoreInput(),mix,expected_score_sha256:score.score_sha256,automation:{lanes}};
+  }
+
+  async function verifiedAutomation(score:MusicPlan,signal:AbortSignal) {
+    const input=renderInput(score);
+    const receipt=await planMusicAutomation(input,signal);
+    signal.throwIfAborted();
+    setAutomationReceipt(receipt);
+    return {...input,automation:{lanes,expected_automation_sha256:receipt.automation_sha256}};
+  }
+
+  function validateMixAutomation() {
+    if(compositionError||mixError)return;
+    void run('planning',async signal=>{
+      const score=currentPlan??await obtainPlan(signal);
+      await verifiedAutomation(score,signal);
+      setNotice('Mixer automation validated against the current score.');
+    });
+  }
+
+  function downloadAutomation() {
+    if(compositionError||mixError)return;
+    void run('exporting',async signal=>{
+      const score=currentPlan??await obtainPlan(signal);
+      const input=await verifiedAutomation(score,signal);
+      const blob=await exportMusicAutomation(input,signal);
+      signal.throwIfAborted();
+      saveBlob(blob,'sonumio-automation.json');
+      setNotice('Verified automation export requested.');
+    });
+  }
+
+  async function loadAutomation(file:File|null) {
+    if(!file||busy||compositionError)return;
+    if(file.size<1||file.size>MAX_AUTOMATION_BYTES){setError('Automation file must be 1–128 KiB.');return;}
+    void run('planning',async signal=>{
+      const data=parseAutomationFile(await file.text(),composition);
+      signal.throwIfAborted();
+      const score=currentPlan??await obtainPlan(signal);
+      // Validate the imported automation against the current score BEFORE
+      // replacing any local controls. A failed import leaves the mix intact.
+      const receipt=await planMusicAutomation({...scoreInput(),mix:data.mix,
+        expected_score_sha256:score.score_sha256,automation:{lanes:data.lanes}},signal);
+      signal.throwIfAborted();
+      setMix(data.mix);setLanes(data.lanes);setAutomationReceipt(receipt);
+      setNotice('Imported and validated mixer automation.');
+    });
+  }
+
   function render() {
     if (compositionError || mixError) return;
     void run('rendering', async signal => {
       const score = currentPlan ?? await obtainPlan(signal);
+      signal.throwIfAborted();
+      const input=lanes.length?await verifiedAutomation(score,signal):{...scoreInput(),mix,expected_score_sha256:score.score_sha256};
       signal.throwIfAborted();
       if (typeof crypto.randomUUID !== 'function') throw new Error('This browser cannot create local job identifiers.');
       const id = crypto.randomUUID();
@@ -151,9 +212,7 @@ export function MusicStudio({ connected }: { connected: boolean | null }) {
       setResult(null);
       setStatus('queued');
       try {
-        const job = await submitMusicJob({
-          ...scoreInput(), mix, expected_score_sha256: score.score_sha256,
-        }, { id, signal });
+        const job = await submitMusicJob(input, { id, signal });
         signal.throwIfAborted();
         if (job.kind !== 'music') throw new Error('Unexpected render job kind.');
       } catch (problem) {
@@ -208,22 +267,20 @@ export function MusicStudio({ connected }: { connected: boolean | null }) {
     }
   }
 
+  function saveBlob(blob:Blob,filename:string) {
+    const url=URL.createObjectURL(blob);
+    downloads.current.add(url);
+    const anchor=document.createElement('a');
+    anchor.href=url;anchor.download=filename;anchor.click();
+    window.setTimeout(()=>{if(downloads.current.delete(url))URL.revokeObjectURL(url);},1000);
+  }
+
   function download(format: 'json' | 'midi') {
     if (!currentPlan) return;
     void run('exporting', async signal => {
       const blob = await exportMusic({ ...scoreInput(), expected_score_sha256: currentPlan.score_sha256 }, format, signal);
       signal.throwIfAborted();
-      const url = URL.createObjectURL(blob);
-      downloads.current.add(url);
-      const anchor = document.createElement('a');
-      anchor.href = url;
-      anchor.download = format === 'json' ? 'sonumio-score.json' : 'sonumio-score.mid';
-      anchor.click();
-      // Keep at most one URL per export until the browser has accepted the
-      // download. The delayed callback also remains safe after unmount.
-      window.setTimeout(() => {
-        if (downloads.current.delete(url)) URL.revokeObjectURL(url);
-      }, 1000);
+      saveBlob(blob,format==='json'?'sonumio-score.json':'sonumio-score.mid');
       setNotice('Verified score export requested.');
     });
   }
@@ -289,6 +346,18 @@ export function MusicStudio({ connected }: { connected: boolean | null }) {
       </div>
       <button className="secondary-button" type="button" onClick={() => editMix(defaultMusicMix())}>Reset mix</button>
     </fieldset>
+    {!compositionError&&<MusicAutomationEditor key={compositionKey(composition)} composition={composition}
+      lanes={lanes} receipt={automationReceipt} disabled={busy} onChange={next=>{setLanes(next);setAutomationReceipt(null);setNotice('');}}/>}
+    <div className="music-actions">
+      <button type="button" className="secondary-button" disabled={busy||connected!==true||Boolean(compositionError||mixError)}
+        onClick={validateMixAutomation}>Validate automation</button>
+      <button type="button" className="secondary-button" disabled={busy||connected!==true||Boolean(compositionError||mixError)}
+        onClick={downloadAutomation}>Export automation</button>
+      <label className="automation-import">Import automation JSON<input type="file" accept=".json,application/json"
+        disabled={busy||connected!==true||Boolean(compositionError)} onChange={e=>{
+          const file=e.target.files?.[0]??null;e.target.value='';void loadAutomation(file);
+        }}/></label>
+    </div>
     {mixError && <p className="warning">{mixError}</p>}
     <button type="button" className="primary-button" disabled={busy || connected !== true || Boolean(compositionError || mixError)} onClick={render}>
       {busy ? activity + '…' : 'Render stereo music'} <span>↗</span>

@@ -129,3 +129,13 @@ footer{display:flex;justify-content:space-between;gap:20px;border-top:1px solid 
 .note-edited td:first-child{font-weight:700;color:var(--accent,#6ad2ae)}
 .note-edit-form fieldset{display:grid;gap:.8rem}
 @media(max-width:600px){.note-toolbar{align-items:stretch}.note-toolbar .music-actions{flex-basis:100%}}
+
+/* Score-clock mixer automation */
+.music-automation-editor{display:grid;gap:.8rem;padding:1rem;border:1px solid var(--line,#39414b);border-radius:12px;margin-block:1rem}
+.automation-curve{overflow-x:auto;border-radius:8px;background:#16202b}
+.automation-curve svg{display:block;width:100%;min-width:380px}
+.automation-grid-bg{fill:#1e2c3b}.automation-grid-line{stroke:#45596d;stroke-width:.7}
+.automation-axis-label{fill:#b7c7d8;font-size:10px}.automation-line{stroke:#6ad2ae;stroke-width:2}
+.automation-point{fill:#6ad2ae;stroke:#18232e;stroke-width:1.5;cursor:pointer}
+.automation-import{display:grid;gap:.35rem;min-width:0;overflow-wrap:anywhere}
+.automation-import input{max-width:100%;font-size:.85rem}
