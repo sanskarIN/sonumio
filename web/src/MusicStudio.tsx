@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { parseStemResult, type StemPlan, type StemMode } from './music-stem-contract';
+import { submitStemJob, planStem, downloadStem } from './api';
 import { ScoreNoteEditor } from './ScoreNoteEditor';
 import { MusicAutomationEditor } from './MusicAutomationEditor';
 import { parseAutomationFile, MAX_AUTOMATION_BYTES, type AutomationLane, type AutomationReceipt } from './music-automation-contract';
@@ -39,6 +41,8 @@ export function MusicStudio({ connected }: { connected: boolean | null }) {
   const [basePlan, setBasePlan] = useState<MusicPlan | null>(null);
   const [noteEdits, setNoteEdits] = useState<NoteEdits | null>(null);
   const [result, setResult] = useState<JobAudio | null>(null);
+  const [stemMode, setStemMode] = useState<StemMode>('dry');
+  const [stemResult, setStemResult] = useState<{audio:JobAudio,plan:StemPlan}|null>(null);
   const [activity, setActivity] = useState<Activity | null>(null);
   const [status, setStatus] = useState<JobStatus | null>(null);
   const [lastJob, setLastJob] = useState(lastMusicJob);
@@ -145,6 +149,7 @@ export function MusicStudio({ connected }: { connected: boolean | null }) {
   async function watch(id: string, signal: AbortSignal) {
     const audio = await awaitJob(id, signal, next => { if (!signal.aborted) setStatus(next); });
     signal.throwIfAborted();
+    setStemResult(null);
     setResult(audio);
     setNotice('Render complete. This preview reflects the controls at submission time.');
   }
@@ -210,6 +215,7 @@ export function MusicStudio({ connected }: { connected: boolean | null }) {
       const id = crypto.randomUUID();
       rememberJob(id);
       setResult(null);
+      setStemResult(null);
       setStatus('queued');
       try {
         const job = await submitMusicJob(input, { id, signal });
@@ -220,6 +226,46 @@ export function MusicStudio({ connected }: { connected: boolean | null }) {
         throw problem;
       }
       await watch(id, signal);
+    });
+  }
+
+  function audition(track: Track) {
+    if (compositionError || mixError) return;
+    void run('rendering', async signal => {
+      const score = currentPlan ?? await obtainPlan(signal);
+      const verified = await verifiedAutomation(score,signal);
+      const input = {...verified, track, audition:stemMode};
+      const planned = await planStem(input,signal);
+      signal.throwIfAborted();
+      if (typeof crypto.randomUUID !== 'function') throw new Error('This browser cannot create local job identifiers.');
+      const id = crypto.randomUUID();
+      rememberJob(id);
+      setResult(null);
+      setStemResult(null);
+      setStatus('queued');
+      try {
+        const job = await submitStemJob(input,{id,signal});
+        if (job.kind !== 'music') throw new Error('Unexpected stem job kind.');
+      } catch (problem) {
+        if (isRejectedJobSubmission(problem) && !signal.aborted) rememberJob(null);
+        throw problem;
+      }
+      const audio = await awaitJob(id,signal,next=>{if(!signal.aborted)setStatus(next);});
+      signal.throwIfAborted();
+      parseStemResult(audio,planned);
+      setStemResult({audio,plan:planned});
+      setNotice('Stem audition ready. It reflects the submitted score and settings.');
+    });
+  }
+
+  function saveStem() {
+    if (!stemResult) return;
+    const {audio,plan}=stemResult;
+    void run('exporting',async signal=>{
+      const blob=await downloadStem(audio,plan,signal);
+      signal.throwIfAborted();
+      saveBlob(blob,'sonumio-'+plan.track+'-'+plan.audition+'.wav');
+      setNotice('Verified stem WAV download requested.');
     });
   }
 
@@ -333,12 +379,18 @@ export function MusicStudio({ connected }: { connected: boolean | null }) {
       base={{...basePlan, note_events:basePlan.note_events}} disabled={busy} onChange={changeNoteEdits}/>}
     <fieldset disabled={busy} className="music-controls">
       <legend>Track mixer</legend>
+      <label>Instrument audition<select value={stemMode} onChange={e=>setStemMode(e.target.value as StemMode)}>
+        <option value="dry">Dry stem (common attenuation, no mixer)</option>
+        <option value="solo">Solo preview (current mixer and automation)</option>
+      </select></label>
+      <p className="hint">Solo auditions temporarily ignore mute and solo selections without changing your mix.</p>
       <div className="music-track-list">{TRACKS.map((track, i) => <div key={track} className="music-track">
         <div><strong>{TRACK_LABELS[track]}</strong><small>{currentPlan ? currentPlan.tracks[track].events + ' events' : 'Track ' + (i + 1)}</small></div>
         <label>Gain {mix.gains[i].toFixed(2)}<input type="range" min="0" max="2" step="0.01" value={mix.gains[i]}
           onChange={e => editMix({ ...mix, gains: mix.gains.map((gain, index) => index === i ? Number(e.target.value) : gain) })}/></label>
         <label className="music-check"><input type="checkbox" checked={mix.mute.includes(track)} onChange={() => toggleTrack(track, 'mute')}/>Mute</label>
         <label className="music-check"><input type="checkbox" checked={mix.solo.includes(track)} onChange={() => toggleTrack(track, 'solo')}/>Solo</label>
+        <button type="button" className="secondary-button" disabled={connected!==true||Boolean(compositionError||mixError)} onClick={()=>audition(track)}>Audition</button>
       </div>)}</div>
       <div className="field-grid">
         <label>Room: {mix.room.toFixed(2)}<input type="range" min="0" max="1" step="0.01" value={mix.room} onChange={e => editMix({ ...mix, room: Number(e.target.value) })}/></label>
@@ -373,6 +425,13 @@ export function MusicStudio({ connected }: { connected: boolean | null }) {
     {status && <p className="hint" role="status">Last render: {status}</p>}
     {notice && <p className="hint" role="status">{notice}</p>}
     {error && <p className="warning" role="alert">{error}</p>}
+    {stemResult && <div className="music-result">
+      <h3>{TRACK_LABELS[stemResult.plan.track]} · {stemResult.plan.audition === 'dry'?'dry stem':'solo preview'}</h3>
+      <audio controls preload="metadata" src={stemResult.audio.audio_url} onError={()=>setError('Audition expired; render a new copy.')}/>
+      <button type="button" className="secondary-button" disabled={busy||connected!==true} onClick={saveStem}>Download verified stem WAV</button>
+      <details><summary>Audition score SHA-256</summary><code className="music-digest">{stemResult.plan.score_sha256}</code></details>
+      <p className="hint">This audition is separate from the full mix. Its settings are fixed at submission.</p>
+    </div>}
     {result && <div className="music-result">
       <h3>Music preview</h3>
       <audio controls preload="metadata" src={result.audio_url} onError={() => setError('Preview unavailable or expired; render a new copy.')}/>
