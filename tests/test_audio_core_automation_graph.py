@@ -216,3 +216,50 @@ def test_graph_output_is_buffer_not_mutable_global_cache(source):
     with pytest.raises(ValueError):
         result.audio.samples[0, 0] = 1
     assert source.samples[0, 0] == pytest.approx(.5)
+
+
+def test_allowlisted_multiband_graph_is_repeatable():
+    waveform = np.random.default_rng(876).normal(0, .1, (2, 257)).astype(np.float32)
+    audio = make_buffer(waveform, 16000)
+    options = {
+        "cutoffs_hz": [150, 3000], "taps": 65,
+        "thresholds_dbfs": [-20, -20, -20], "ratios": [1, 1, 1],
+        "knee_db": 0, "wet": 1,
+    }
+    graph = SignalGraph((
+        GraphNode("root", "source", (), {"source_id": "source"}),
+        GraphNode("multi", "multiband_compress", ("root",), options),
+    ), "multi")
+    options["cutoffs_hz"][0] = 9000
+    assert graph.nodes[1].parameters["cutoffs_hz"][0] == 150
+    rebuilt = SignalGraph.from_dict(graph.as_dict())
+    assert graph.sha256 == rebuilt.sha256
+    first = execute_graph(graph, {"source": audio})
+    second = execute_graph(graph, {"source": audio})
+    assert first.audio.spec == audio.spec
+    np.testing.assert_allclose(first.audio.samples, audio.samples, atol=5e-7)
+    np.testing.assert_array_equal(first.audio.samples, second.audio.samples)
+    assert first.report()["nodes"][-1]["operation"] == "multiband_compress"
+
+
+@pytest.mark.parametrize("invalid", [
+    {"cutoffs_hz": []},
+    {"cutoffs_hz": [500, 500]},
+    {"cutoffs_hz": [9000]},
+    {"cutoffs_hz": [150, 2800], "ratios": [1]},
+    {"cutoffs_hz": [150, 2800], "thresholds_dbfs": [-20, -20]},
+    {"cutoffs_hz": [150], "makeup_db": "bad"},
+    {"cutoffs_hz": [150], "taps": 64},
+    {"cutoffs_hz": [150], "wet": 1.5},
+    {"cutoffs_hz": [150], "output_gain_db": 25},
+    {"cutoffs_hz": [150], "ratios": [-1, 3]},
+    {"cutoffs_hz": [150], "link_channels": "false"},
+])
+def test_multiband_graph_rejects_invalid_config(invalid):
+    source = make_buffer(np.ones(257, dtype=np.float32) * .2, 16000)
+    graph = SignalGraph((
+        GraphNode("root", "source", (), {"source_id": "source"}),
+        GraphNode("multi", "multiband_compress", ("root",), invalid),
+    ), "multi")
+    with pytest.raises(AudioContractError):
+        execute_graph(graph, {"source": source})

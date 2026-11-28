@@ -33,6 +33,7 @@ from .automation import (
     AutomationCurve, Keyframe, apply_gain_automation
 )
 from .windows import envelope
+from .multiband import CrossoverPlan, multiband_compress
 
 _ID = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 OPS: dict[str, tuple[int, int]] = {
@@ -46,6 +47,7 @@ OPS: dict[str, tuple[int, int]] = {
     "biquad": (1, 1),
     "dc_block": (1, 1),
     "compress": (1, 1),
+    "multiband_compress": (1, 1),
     "noise_gate": (1, 1),
     "peak_limit": (1, 1),
     "peak_normalize": (1, 1),
@@ -71,6 +73,11 @@ _PARAMETERS: dict[str, frozenset[str]] = {
     "compress": frozenset({
         "threshold_dbfs", "ratio", "attack_seconds", "release_seconds",
         "knee_db", "makeup_db", "link_channels",
+    }),
+    "multiband_compress": frozenset({
+        "cutoffs_hz", "taps", "window", "thresholds_dbfs", "ratios",
+        "makeup_db", "attack_seconds", "release_seconds",
+        "knee_db", "link_channels", "wet", "output_gain_db",
     }),
     "noise_gate": frozenset({
         "open_threshold_dbfs", "close_threshold_dbfs", "attack_seconds",
@@ -281,6 +288,37 @@ def _execute(node: GraphNode, inputs: list[AudioBuffer],
         return head.copy_with(dc_block(head.samples, pole=p.get("pole", .995)))
     if op == "compress":
         return compress(head, CompressorConfig(**p))
+    if op == "multiband_compress":
+        cutoffs = p.get("cutoffs_hz", (180., 2500.))
+        if not isinstance(cutoffs, (tuple, list)):
+            raise AudioContractError("Multiband cutoffs must be an ordered array")
+        plan = CrossoverPlan(
+            head.sample_rate, tuple(cutoffs),
+            taps=p.get("taps", 257), window=p.get("window", "blackman"),
+        )
+        thresholds = p.get("thresholds_dbfs", (-18.,) * plan.bands)
+        ratios = p.get("ratios", (4.,) * plan.bands)
+        makeup = p.get("makeup_db", (0.,) * plan.bands)
+        for name, values in (
+            ("thresholds_dbfs", thresholds), ("ratios", ratios), ("makeup_db", makeup),
+        ):
+            if not isinstance(values, (tuple, list)) or len(values) != plan.bands:
+                raise AudioContractError(name + " must match crossover band count")
+        configs = tuple(
+            CompressorConfig(
+                threshold_dbfs=thresholds[i], ratio=ratios[i],
+                makeup_db=makeup[i],
+                attack_seconds=p.get("attack_seconds", .01),
+                release_seconds=p.get("release_seconds", .1),
+                knee_db=p.get("knee_db", 6),
+                link_channels=p.get("link_channels", True),
+            )
+            for i in range(plan.bands)
+        )
+        return multiband_compress(
+            head, plan, configs, wet=p.get("wet", 1.),
+            output_gain_db=p.get("output_gain_db", 0.),
+        ).audio
     if op == "noise_gate":
         return noise_gate(head, GateConfig(**p))
     if op == "peak_limit":
