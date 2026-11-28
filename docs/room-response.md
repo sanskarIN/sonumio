@@ -46,3 +46,34 @@ SHA256, output WAV SHA256, pre-encoding PCM SHA256, geometry and peak.
 Use optional `--source-sha256` and `--expected-output-sha256` to pin replay.
 Existing files are preserved unless `--overwrite` is explicitly provided.
 Reduce the plan's output_gain if the combined signal exceeds normalized PCM.
+
+## Explicit partitioned FFT backend
+
+The default matrix engine remains unchanged, including its v1 export receipt
+and canonical plan hash. To use the experimental uniform partitioned FIR engine:
+
+```sh
+sonumio room-response --plan examples/static-room-plan.json --source input.wav --output room.wav --engine partitioned
+```
+
+This backend splits each impulse into B-sample segments and uses a 2B-point
+FFT with a frequency-delay ring. The FFT size does not grow with impulse length.
+The partition count, spectral products, initialization work, output memory,
+and stream duration are independently bounded. No automatic backend fallback
+is performed on a limit error.
+
+The partitioned backend returns a `sonumio-verified-room-wav-v2` receipt
+with an explicit `engine: partitioned` field. Replay with the same engine,
+plan, source, quantization settings, and dither seed. A pinned output SHA-256
+is still verified before publication. The plan schema and its digest remain
+unchanged. Different engines may differ in floating-point rounding, and
+cross-engine byte-identical output is not promised.
+
+The Python API accepts `render_room(..., engine="partitioned")` or
+`export_room_plan(..., engine="partitioned")`. Generic FIR callers can use
+`convolve_partitioned(audio, impulse)` or `PartitionedConvolver` from
+`sonumio.audio_core.partitioned_convolution`. The latter emits full blocks
+from push and the exact remaining frames and optional tail from finish.
+
+This is a CPU offline reference backend, not a measured performance guarantee,
+a real-time callback API, or a learned audio model.
