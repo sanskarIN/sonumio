@@ -41,6 +41,7 @@ export function NativeProjectWorkspace({connected}:{connected:boolean|null}){
   const [status,setStatus]=useState<JobStatus|null>(null);
   const [rendered,setRendered]=useState<Rendered|null>(null);
   const [confirmClose,setConfirmClose]=useState(false);
+  const [editorEpoch,setEditorEpoch]=useState(0);
   const pending=useRef<AbortController|null>(null);
   const cancellation=useRef<AbortController|null>(null);
   const active=useRef<RenderReference|null>(null);
@@ -86,7 +87,7 @@ export function NativeProjectWorkspace({connected}:{connected:boolean|null}){
     setProject(next);setTitle(next.snapshot.title);
     setMix({...next.snapshot.mix,gains:[...next.snapshot.mix.gains],
       mute:[...next.snapshot.mix.mute],solo:[...next.snapshot.mix.solo]});
-    setEdits(null);setScore(null);setAutomation(null);setConfirmClose(false);
+    setEdits(null);setScore(null);setAutomation(null);setConfirmClose(false);setEditorEpoch(value=>value+1);
   }
   async function run(action:Activity,task:(signal:AbortSignal)=>Promise<void>){
     if(pending.current||cancellation.current||connected!==true)return;
@@ -281,7 +282,7 @@ export function NativeProjectWorkspace({connected}:{connected:boolean|null}){
         <label>Title<input required maxLength={80} value={title} onChange={e=>setTitle(e.target.value)}/></label>
       </fieldset>
       {snapshot.score_plan?.note_events&&<ScoreNoteEditor
-        key={snapshot.project_sha256}
+        key={snapshot.project_sha256+':'+editorEpoch}
         base={{...snapshot.score_plan,note_events:snapshot.score_plan.note_events}}
         disabled={!available} onChange={setEdits}/>}
       <fieldset disabled={!available} className="music-controls">
