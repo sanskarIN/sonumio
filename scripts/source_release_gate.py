@@ -20,6 +20,7 @@ import sys
 import tarfile
 import tempfile
 import tomllib
+import unicodedata
 import venv
 import wave
 import zipfile
@@ -47,12 +48,20 @@ BANNED_SUFFIXES = frozenset({
     ".h5", ".hdf5", ".exe", ".dll", ".dylib", ".so",
     ".pem", ".key", ".p12", ".pfx", ".sqlite", ".db",
     ".scorpus", ".stcheckpoint", ".partial",
+    ".zip", ".tar", ".gz", ".tgz", ".bz2", ".xz", ".7z", ".rar",
+    ".aiff", ".aif", ".m4a", ".aac", ".webm", ".mkv", ".opus",
+    ".whl", ".msi", ".dmg", ".iso", ".obj", ".o", ".lib", ".a",
 })
 # Check known binary signatures independently of extensions. These are
 # narrow format guards, not general secret scanning or authenticity checks.
 PRIVATE_ARTIFACT_MAGIC = (
     b"SCORPUS1", b"STCP0001", b"SLHAND01", b"SLCROP01",
     b"\x93NUMPY", b"PK\x03\x04", b"PK\x05\x06", b"PK\x07\x08",
+    b"\x1f\x8b\x08", b"BZh", b"\xfd7zXZ\x00", b"7z\xbc\xaf\x27\x1c",
+    b"Rar!\x1a\x07", b"\x7fELF", b"\x89HDF\r\n\x1a\n",
+    b"SQLite format 3\x00", b"\x1a\x45\xdf\xa3",
+    b"\xfe\xed\xfa\xce", b"\xce\xfa\xed\xfe",
+    b"\xfe\xed\xfa\xcf", b"\xcf\xfa\xed\xfe",
 )
 
 def reject_artifact_contents(path: str, data: bytes) -> None:
@@ -63,6 +72,36 @@ def reject_artifact_contents(path: str, data: bytes) -> None:
         raise RuntimeError(f"Binary artifact signature in source entry: {path}")
     if data.startswith((b"fLaC", b"OggS")):
         raise RuntimeError(f"Binary artifact signature in source entry: {path}")
+    # Container formats with identifiers at fixed nonzero offsets.
+    if ((len(data) >= 12 and data[:4] == b"FORM" and data[8:12] in (b"AIFF", b"AIFC"))
+            or (len(data) >= 12 and data[4:8] == b"ftyp")
+            or (len(data) >= 263 and data[257:262] == b"ustar")):
+        raise RuntimeError(f"Binary artifact signature in source entry: {path}")
+    # A DOS header alone can also occur in legitimate text. Require the
+    # bounded PE pointer and its signature before classifying it as PE.
+    if len(data) >= 64 and data[:2] == b"MZ":
+        offset = int.from_bytes(data[60:64], "little")
+        if 64 <= offset <= len(data) - 4 and data[offset:offset + 4] == b"PE\x00\x00":
+            raise RuntimeError(f"Binary artifact signature in source entry: {path}")
+
+
+WINDOWS_DEVICES = frozenset({
+    "con", "prn", "aux", "nul", "conin$", "conout$",
+    *(f"{kind}{digit}" for kind in ("com", "lpt") for digit in "123456789¹²³"),
+})
+WINDOWS_FORBIDDEN = frozenset('<>:"|?*\\')
+
+
+def _portable_path_part(part: str) -> bool:
+    """Check one archive component before any extraction on any platform."""
+    if (not part or part.endswith((" ", "."))
+            or any(ch in WINDOWS_FORBIDDEN or unicodedata.category(ch) == "Cc" for ch in part)
+            or unicodedata.normalize("NFC", part) != part):
+        return False
+    # Windows treats devices as reserved even with a suffix; spaces before
+    # the first dot do not make a reserved device name safe.
+    stem = part.split(".", 1)[0].rstrip(" ").casefold()
+    return stem not in WINDOWS_DEVICES
 
 MAX_FILES = 2000
 MAX_FILE_BYTES = 2 * 1024 * 1024
@@ -156,7 +195,7 @@ class SourceEntries:
         path = PurePosixPath(relative)
         if (path.is_absolute() or ".." in path.parts or "\\" in relative
                 or not path.parts or any(ord(ch) < 32 or ord(ch) == 127 for ch in relative)
-                or any(":" in part or part.endswith((" ", ".")) for part in path.parts)):
+                or any(not _portable_path_part(part) for part in path.parts)):
             raise RuntimeError(f"Unsafe archive path: {relative}")
         canonical = path.as_posix()
         if relative != canonical and not (directory and relative == canonical + "/"):
