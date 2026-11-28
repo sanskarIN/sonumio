@@ -31,13 +31,13 @@ NYQUIST_GUARD = SAMPLE_RATE * .46
 MAX_BATCH_SAMPLES = MAX_BATCH * MAX_FRAMES
 
 
-def _controls(instruments, pitches, velocities, frames):
-    if type(frames) is not int or not MIN_FRAMES <= frames <= MAX_FRAMES:
+def _controls(instruments, pitches, velocities, frames, *, max_frames=MAX_FRAMES, max_batch_samples=MAX_BATCH_SAMPLES):
+    if type(frames) is not int or not MIN_FRAMES <= frames <= max_frames:
         raise ValueError("Invalid learned instrument frame count")
     if (not isinstance(instruments, torch.Tensor) or instruments.device.type != "cpu"
             or instruments.dtype != torch.long or instruments.ndim != 1
             or not 1 <= len(instruments) <= MAX_BATCH
-            or len(instruments) * frames > MAX_BATCH_SAMPLES):
+            or len(instruments) * frames > max_batch_samples):
         raise ValueError("Invalid learned instrument batch")
     for value, low, high, label in (
         (instruments, 0, len(INSTRUMENTS) - 1, "identity"),
@@ -95,6 +95,9 @@ class HarmonicInstrument(nn.Module):
 
     def predict_parameters(self, instruments, pitches, velocities, frames):
         count = _controls(instruments, pitches, velocities, frames)
+        return self._condition_parameters(instruments, pitches, velocities, frames, count)
+
+    def _condition_parameters(self, instruments, pitches, velocities, frames, count):
         numeric = torch.stack((
             (pitches.to(torch.float32) - 62.) / 26.,
             velocities.to(torch.float32) / 1000.,
