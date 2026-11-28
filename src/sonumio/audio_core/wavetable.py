@@ -186,7 +186,7 @@ def permitted_harmonics(plan: WavetablePlan, note: WavetableNote) -> int:
     maximum = math.floor((plan.sample_rate / 2 - 1) / note.frequency_hz)
     if maximum < 1:
         raise AudioContractError("Note fundamental exceeds synthesizer Nyquist")
-    return min(maximum, plan.max_harmonics)
+    return 1 if plan.waveform == "sine" else min(maximum, plan.max_harmonics)
 
 
 def _envelope(length: int, gate: int, options: VoiceEnvelope) -> np.ndarray:
