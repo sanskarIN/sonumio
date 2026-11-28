@@ -73,3 +73,26 @@ dullness and unnatural transients. The report therefore explicitly
 disclaims phoneme recognition, clipping prevention and calibrated
 perceptual-quality improvement. Listening evaluation is necessary
 before considering it ready for a particular voice or music mix.
+
+## Checksum-verified WAV rendering
+
+```sh
+sonumio wav-deess --source spoken-input.wav --output cleaned.wav \
+  --band-low-hz 3500 --band-high-hz 7800 --ratio 4
+```
+
+The command uses Sonumio's canonical WAV reader with optional
+`--source-sha256`, applies the same bounded effect, then publishes a
+complete WAV using an atomic no-clobber operation. Use
+`--expected-output-sha256` to enforce byte-identical playback
+reproducibility, and `--dither-seed` when adding explicitly seeded
+integer-PCM dithering. The output format defaults to 16-bit PCM.
+
+Source and destination file identities are checked before and after
+processing; output may be overwritten only with `--overwrite`.
+Failure returns a nonzero status without a misleading success JSON
+receipt or truncated destination WAV.
+
+The receipt records input file provenance, output SHA-256, PCM digest,
+output bit-depth, effect settings and gain statistics. Input audio is
+not automatically downloaded, uploaded, or modified.
