@@ -1,4 +1,5 @@
 /** Local original-music controls shared by the studio and its API client. */
+import { parseNoteEvents, validateEditShape, type NoteEdits, type NoteEvent } from './music-note-editor';
 export const TRACKS = ['keys', 'pad', 'bass', 'lead', 'pluck', 'kick', 'snare', 'hat'] as const;
 export type Track = typeof TRACKS[number];
 export const STYLES = ['calm', 'cinematic', 'rhythmic'] as const;
@@ -15,7 +16,7 @@ export type Composition = {
 export type MusicMix = {
   gains: number[]; mute: Track[]; solo: Track[]; room: number; peak_ceiling: number;
 };
-export type MusicScoreInput = { composition: Composition; expected_score_sha256?: string };
+export type MusicScoreInput = { composition: Composition; expected_score_sha256?: string; note_edits?: NoteEdits };
 export type MusicRenderInput = MusicScoreInput & { mix: MusicMix };
 export type Section = { kind: string; first_bar: number; bars: number };
 export type TrackSummary = { events: number; active_fraction: number; pitch_min: number | null; pitch_max: number | null; max_polyphony: number };
@@ -24,6 +25,7 @@ export type MusicPlan = {
   disclaimer: string; composition: Composition; score_sha256: string; sample_rate: number;
   frames: number; duration_seconds: number; bars: number; events: number;
   sections: Section[]; harmony: number[]; tracks: Record<Track, TrackSummary>;
+  note_events?: NoteEvent[];
 };
 
 export function defaultComposition(): Composition {
@@ -75,6 +77,7 @@ export function validateScoreInput(input: MusicScoreInput): void {
   if (error) throw new Error(error);
   if (input.expected_score_sha256 !== undefined && !isDigest(input.expected_score_sha256))
     throw new Error('Invalid expected score digest.');
+  if (input.note_edits !== undefined) validateEditShape(input.note_edits,input.composition);
 }
 export function compositionKey(c: Composition): string {
   return JSON.stringify([c.style, c.root, c.mode, c.bpm, c.bars, c.seed, c.swing]);
@@ -124,5 +127,10 @@ export function parseMusicPlan(value: unknown, input: MusicScoreInput): MusicPla
     total += summary.events;
   }
   if (total !== plan.events) throw new Error('Music track event counts do not match.');
+  if (plan.note_events !== undefined) {
+    const notes = parseNoteEvents(plan.note_events,plan.composition,plan.events);
+    for (const track of TRACKS) if(notes.filter(note=>note.track===track).length!==plan.tracks[track].events)
+      throw new Error('Score note events differ from track summaries.');
+  } else if (input.note_edits !== undefined) throw new Error('Edited score response omitted its notes.');
   return plan;
 }
