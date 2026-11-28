@@ -169,7 +169,7 @@ def main(argv: list[str] | None = None) -> int:
         return run_automation_command(args)
     if args.command == "contact-sound":
         return run_contact_command(args)
-    if args.command in ("wav-rhythm", "wav-pitch"):
+    if args.command in ("wav-rhythm", "wav-pitch", "wav-chroma"):
         return run_audio_analysis_command(args)
     if args.command == "room-response":
         return run_room_command(args)
