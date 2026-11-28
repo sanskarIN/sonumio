@@ -1,7 +1,7 @@
 """Controlled training objectives for sustained notes near silence.
 
 The baseline uses the existing relative waveform/spectral loss. Alternative
-arms use a fixed reference-power floor and an optional absolute energy
+arms use a fixed reference-power floor and an optional compressed envelope
 term. Floors are prespecified, not fitted to held-out examples. No change
 to the synthesis architecture or evaluation metrics is made.
 """
