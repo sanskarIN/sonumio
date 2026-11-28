@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import sys
 from pathlib import Path
 
 from .arrangement import TRACKS
@@ -30,19 +31,23 @@ def register_blockwise_music_command(sub):
 
 
 def run_blockwise_music_command(args):
-    source = args.score
-    target = args.output
-    if source.resolve() == target.resolve() or (
-        target.exists() and source.exists() and os.path.samefile(source, target)
-    ):
-        raise GenerationError("Music output cannot overwrite the input score")
-    score = read_score(source, expected_sha256=args.expected_score_sha256)
-    mix = MixPlan(mute=tuple(args.mute), solo=tuple(args.solo),
-                  room=args.room, peak_ceiling=args.peak_ceiling)
-    wav, report = generate_blockwise_music(score, mix, block_frames=args.block_frames)
-    receipt = publish_generated_wav(target, wav, overwrite=args.overwrite,
-                                    expected_sha256=args.expected_output_sha256)
-    report.update({"output_sha256": receipt.wav_sha256,
-                   "bytes_written": receipt.bytes_written})
+    try:
+        source = args.score
+        target = args.output
+        if source.resolve() == target.resolve() or (
+            target.exists() and source.exists() and os.path.samefile(source, target)
+        ):
+            raise GenerationError("Music output cannot overwrite the input score")
+        score = read_score(source, expected_sha256=args.expected_score_sha256)
+        mix = MixPlan(mute=tuple(args.mute), solo=tuple(args.solo),
+                      room=args.room, peak_ceiling=args.peak_ceiling)
+        wav, report = generate_blockwise_music(score, mix, block_frames=args.block_frames)
+        receipt = publish_generated_wav(target, wav, overwrite=args.overwrite,
+                                        expected_sha256=args.expected_output_sha256)
+        report.update({"output_sha256": receipt.wav_sha256,
+                       "bytes_written": receipt.bytes_written})
+    except (OSError, ValueError, TypeError, RuntimeError) as exc:
+        print(f"Sonumio blockwise music: {exc}", file=sys.stderr)
+        return 2
     print(json.dumps(report, sort_keys=True, allow_nan=False))
     return 0
