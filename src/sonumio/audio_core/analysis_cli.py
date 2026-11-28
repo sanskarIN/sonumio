@@ -14,6 +14,7 @@ import sys
 from .wave_snapshot import read_verified_pcm
 from .rhythm import RhythmSettings, analyze_rhythm
 from .yin_pitch import PitchSettings, track_pitch
+from .harmonic_chroma import ChromaSettings, analyze_chroma
 
 
 def register_audio_analysis_commands(sub):
@@ -46,7 +47,23 @@ def register_audio_analysis_commands(sub):
     pitch.add_argument("--silence-dbfs", type=float, default=-60.)
     pitch.add_argument("--summary-only", action="store_true",
                        help="Suppress individual voiced/unvoiced pitch frames")
-    return beat, pitch
+    chroma = sub.add_parser(
+        "wav-chroma", help="Inspect verified PCM pitch-class and triad hypotheses",
+    )
+    chroma.add_argument("input", type=Path)
+    chroma.add_argument("--expected-sha256")
+    chroma.add_argument("--packet-frames", type=int, default=8192)
+    chroma.add_argument("--fft-frames", type=int, default=2048)
+    chroma.add_argument("--hop-frames", type=int, default=512)
+    chroma.add_argument("--lowest-hz", type=float, default=65.)
+    chroma.add_argument("--highest-hz", type=float, default=4000.)
+    chroma.add_argument("--reference-a-hz", type=float, default=440.)
+    chroma.add_argument("--minimum-triad-energy", type=float, default=.07)
+    chroma.add_argument("--minimum-chord-score", type=float, default=.55)
+    chroma.add_argument("--minimum-score-gap", type=float, default=.015)
+    chroma.add_argument("--summary-only", action="store_true",
+                        help="Suppress per-frame individual chord hypotheses")
+    return beat, pitch, chroma
 
 
 def _analyze_rhythm(args, audio):
@@ -85,8 +102,27 @@ def _analyze_pitch(args, audio):
     return result
 
 
+def _analyze_chroma(args, audio):
+    options = ChromaSettings(
+        n_fft=args.fft_frames,
+        hop_frames=args.hop_frames,
+        lowest_hz=args.lowest_hz,
+        highest_hz=args.highest_hz,
+        reference_a_hz=args.reference_a_hz,
+        minimum_triad_energy=args.minimum_triad_energy,
+        minimum_chord_score=args.minimum_chord_score,
+        minimum_score_gap=args.minimum_score_gap,
+    )
+    result = analyze_chroma(audio, options)
+    report = result.as_dict()
+    report["candidate_segments"] = len(result.segments)
+    if args.summary_only:
+        report.pop("chord_hypotheses")
+    return report
+
+
 def run_audio_analysis_command(args) -> int:
-    if args.command not in ("wav-rhythm", "wav-pitch"):
+    if args.command not in ("wav-rhythm", "wav-pitch", "wav-chroma"):
         raise ValueError("Unknown audio inspection command")
     try:
         snapshot = read_verified_pcm(
@@ -95,8 +131,10 @@ def run_audio_analysis_command(args) -> int:
         )
         if args.command == "wav-rhythm":
             analysis = _analyze_rhythm(args, snapshot.audio)
-        else:
+        elif args.command == "wav-pitch":
             analysis = _analyze_pitch(args, snapshot.audio)
+        else:
+            analysis = _analyze_chroma(args, snapshot.audio)
         document = {
             "protocol": "sonumio-local-audio-analysis-v1",
             "command": args.command,
