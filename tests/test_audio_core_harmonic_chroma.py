@@ -178,7 +178,7 @@ def test_invalid_triad_scoring_vector(vector):
 
 
 def test_very_long_analysis_work_is_rejected_before_fft():
-    audio = make_buffer(np.zeros(1000000, dtype=np.float32), 8000)
+    audio = make_buffer(np.zeros(960000, dtype=np.float32), 8000)
     options = ChromaSettings(n_fft=256, hop_frames=32)
     with pytest.raises(AudioLimitError):
         analyze_chroma(audio, options)
