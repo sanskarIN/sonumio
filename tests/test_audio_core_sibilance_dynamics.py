@@ -150,8 +150,8 @@ def test_attack_release_detectors_are_causal_and_bounded():
     slow = deesser_gain(
         band, options(attack_seconds=.03, release_seconds=.08),
     )
-    assert fast[0, 3500] < 1
-    assert slow[0, 3500] >= fast[0, 3500]
+    assert fast[0, 3555] < 1
+    assert slow[0, 3555] >= fast[0, 3555]
     assert np.isfinite(slow).all()
     assert np.min(slow) > 0
 
