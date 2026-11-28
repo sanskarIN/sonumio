@@ -21,6 +21,7 @@ from .music_analysis import analyze_score
 from .music_midi import encode_midi
 from .music_mix import DEFAULT_LEVELS, MixPlan, generate_arrangement_audio
 from .music_score_io import encode_score
+from .music_note_edits import NoteEdits, apply_note_edits
 
 MAX_PREVIEW_SECONDS = 30
 MAX_PREVIEW_FRAMES = SAMPLE_RATE * MAX_PREVIEW_SECONDS
@@ -69,6 +70,7 @@ class MusicMixRequest(StudioModel):
 class MusicScoreRequest(StudioModel):
     composition: MusicCompositionRequest
     expected_score_sha256: Digest | None = None
+    note_edits: NoteEdits | None = None
 
 
 class MusicRenderRequest(MusicScoreRequest):
@@ -77,6 +79,8 @@ class MusicRenderRequest(MusicScoreRequest):
 
 def prepare_score(request: MusicScoreRequest) -> Arrangement:
     score = compose_arrangement(request.composition.to_plan())
+    if request.note_edits is not None:
+        score, _ = apply_note_edits(score, request.note_edits)
     digest = arrangement_digest(score)
     if request.expected_score_sha256 is not None and request.expected_score_sha256 != digest:
         raise GenerationError("Score digest mismatch; regenerate the preview")
@@ -97,6 +101,7 @@ def describe_score(score: Arrangement) -> dict:
         "duration_seconds": analysis["duration_seconds"],
         "bars": score.plan.bars,
         "events": analysis["events"],
+        "note_events": [asdict(event) for event in score.events],
         "sections": [asdict(section) for section in score.sections],
         "harmony": list(score.harmony),
         "tracks": analysis["tracks"],
