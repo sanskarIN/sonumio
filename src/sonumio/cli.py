@@ -24,6 +24,7 @@ from .audio_core.granular_cli import register_granular_command, run_granular_com
 from .audio_core.contact_cli import register_contact_command, run_contact_command
 from .music_stem_cli import register_stem_commands, run_stem_command
 from .audio_core.spatial_cli import register_spatial_command, run_spatial_command
+from .audio_core.room_response_cli import register_room_command, run_room_command
 from .audio_core.asset_pack_cli import register_asset_pack_commands, run_asset_pack_command
 from .music_automation_cli import register_automation_command, run_automation_command
 from .music_blockwise_cli import register_blockwise_music_command, run_blockwise_music_command
@@ -146,6 +147,7 @@ def main(argv: list[str] | None = None) -> int:
     register_contact_command(sub)
     register_stem_commands(sub)
     register_spatial_command(sub)
+    register_room_command(sub)
     register_asset_pack_commands(sub)
     register_automation_command(sub)
     register_blockwise_music_command(sub)
@@ -165,6 +167,8 @@ def main(argv: list[str] | None = None) -> int:
         return run_automation_command(args)
     if args.command == "contact-sound":
         return run_contact_command(args)
+    if args.command == "room-response":
+        return run_room_command(args)
     if args.command == "spatial-scene":
         return run_spatial_command(args)
     if args.command in ("sound-pack", "sound-pack-plan", "sound-pack-verify",
