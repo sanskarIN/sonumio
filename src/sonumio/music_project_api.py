@@ -8,11 +8,14 @@ from starlette.requests import ClientDisconnect
 
 from .errors import GenerationError
 from .music_project import MAX_PROJECT_BYTES, decode_project
+from .music_score_io import MAX_SCORE_BYTES
+from .music_automation import MAX_PLAN_BYTES
 from .music_project_workspace import (
     MAX_MUTATION_BYTES, CreateProjectRequest, ReviseProjectRequest,
     parse_mutation, project_from_request, revision_from_request,
     project_snapshot, project_download, project_score_download,
     project_render_identity, render_project_preview,
+    inspect_score_document, inspect_automation_document,
 )
 
 
@@ -80,6 +83,16 @@ def install_project_routes(app,*,enqueue,store_for_current,store_audio,requested
     async def inspect_project(request:Request):
         project=await _project(request)
         return await _validated(project_snapshot,project)
+
+    @router.post("/v1/music/project/inspect-score")
+    async def inspect_score(request:Request):
+        data=await bounded_json_body(request,MAX_SCORE_BYTES)
+        return await _validated(inspect_score_document,data)
+
+    @router.post("/v1/music/project/inspect-automation")
+    async def inspect_automation(request:Request):
+        data=await bounded_json_body(request,MAX_PLAN_BYTES)
+        return await _validated(inspect_automation_document,data)
 
     @router.post("/v1/music/project/create")
     async def create(request:Request):
