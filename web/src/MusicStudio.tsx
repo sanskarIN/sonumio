@@ -89,6 +89,7 @@ export function MusicStudio({ connected }: { connected: boolean | null }) {
   async function run(action: Activity, task: (signal: AbortSignal) => Promise<void>) {
     if (pending.current || cancelBusy.current || connected !== true) return;
     const controller = new AbortController();
+    activeJob.current = null;
     pending.current = controller;
     setActivity(action);
     setError('');
@@ -151,6 +152,7 @@ export function MusicStudio({ connected }: { connected: boolean | null }) {
   function recover() {
     if (!lastJob) return;
     void run('recovering', async signal => {
+      activeJob.current = lastJob;
       const job = await getJob(lastJob, signal);
       signal.throwIfAborted();
       if (job.kind !== 'music') throw new Error('This identifier does not refer to a music job.');
