@@ -15,7 +15,8 @@ from .music_patch_synthesis import (
     InstrumentPatch,OscillatorBank,Partial,Envelope,NoiseLayer,MAX_BANKS,MAX_PARTIALS,
     patch_cost,render_patch,active_partials,
 )
-from .music_score_io import _object,_unique,_nonfinite
+from .music_score_io import _unique,_nonfinite
+from .music_automation import _object
 
 FORMAT="sonumio-original-instrument-patches-v1"
 MAX_BYTES=128*1024
