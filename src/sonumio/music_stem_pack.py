@@ -127,6 +127,7 @@ def _inspect_stem(track, raw, frames):
 
 def _manifest(score, score_raw, members, source_peak):
     frames = _validate_score(score)
+    scale = _attenuation(source_peak)  # Validate before any numeric conversion.
     return {
         "format": PROTOCOL,
         "score_sha256": arrangement_digest(score),
@@ -135,7 +136,7 @@ def _manifest(score, score_raw, members, source_peak):
         "sample_rate": SAMPLE_RATE, "channels": 2, "bits_per_sample": 16,
         "frames": frames,
         "declared_dry_source_peak": float(source_peak),
-        "common_attenuation": _attenuation(source_peak),
+        "common_attenuation": scale,
         "peak_ceiling": PEAK_CEILING,
         "stems": [_inspect_stem(track, members[track], frames) for track in TRACKS],
         "dry_stems": True, "room_effects_applied": False,
