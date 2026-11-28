@@ -1,0 +1,42 @@
+name: Sustained instrument edge factorial research
+on:
+  pull_request:
+    paths:
+      - 'research/instrument_edge_*.py'
+      - 'research/instrument_long_*.py'
+      - 'research/instrument_harmonic_model.py'
+      - 'research/instrument_note_data.py'
+      - 'src/sonumio/music_instruments.py'
+      - 'tests/test_instrument_edge_research.py'
+      - '.github/workflows/instrument-edge-research.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'research/instrument_edge_*.py'
+      - 'research/instrument_long_*.py'
+      - 'research/instrument_harmonic_model.py'
+      - 'research/instrument_note_data.py'
+      - 'src/sonumio/music_instruments.py'
+      - 'tests/test_instrument_edge_research.py'
+      - '.github/workflows/instrument-edge-research.yml'
+permissions:
+  contents: read
+jobs:
+  factorial:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      OMP_NUM_THREADS: '2'
+      MKL_NUM_THREADS: '2'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python -m pip install -e '.[test]'
+      - run: python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+      - run: python -m pytest -q tests/test_instrument_edge_research.py
+      - name: Train four matched edge arms across three seeds
+        run: |
+          python -m research.instrument_edge_study > /tmp/edge-report.json
+          python -c "import json; r=json.load(open('/tmp/edge-report.json')); print(json.dumps({'summary':r['summary'],'schedule':r['schedule'],'sources':r['sources']},sort_keys=True,allow_nan=False))"
