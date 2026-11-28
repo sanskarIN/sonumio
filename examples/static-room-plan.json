@@ -1,0 +1,26 @@
+{
+  "protocol": "sonumio-static-room-plan-v1",
+  "room": {
+    "width": 5.0,
+    "depth": 4.0,
+    "height": 3.0,
+    "reflections": [0.4, 0.4, 0.5, 0.5, 0.3, 0.3]
+  },
+  "sources": [{"x": 1.0, "y": 2.0, "z": 1.0}],
+  "receivers": [
+    {"x": 3.0, "y": 1.9, "z": 1.0},
+    {"x": 3.0, "y": 2.1, "z": 1.0}
+  ],
+  "config": {
+    "sample_rate": 24000,
+    "reflection_order": 2,
+    "speed_of_sound": 343.0,
+    "reference_distance": 1.0,
+    "minimum_distance": 0.25,
+    "include_direct": true,
+    "max_seconds": 2.0,
+    "block_frames": 1024
+  },
+  "include_tail": true,
+  "output_gain": 0.35
+}

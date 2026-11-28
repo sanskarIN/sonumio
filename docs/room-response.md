@@ -31,3 +31,18 @@ work limits are explicit. This is a finite-order static reference, not a
 measured acoustic simulation or neural model. No normalization, clipping,
 late diffuse tail, frequency-dependent absorption or binaural head model is
 implicitly added.
+
+## Command-line render
+
+The example plan expects a mono 24 kHz PCM WAV. For other sample rates,
+edit the plan clock explicitly; no implicit resampling occurs.
+
+```sh
+sonumio room-response --plan examples/static-room-plan.json --source input.wav --output room.wav
+```
+
+The command emits a JSON receipt with source WAV SHA256, canonical plan
+SHA256, output WAV SHA256, pre-encoding PCM SHA256, geometry and peak.
+Use optional `--source-sha256` and `--expected-output-sha256` to pin replay.
+Existing files are preserved unless `--overwrite` is explicitly provided.
+Reduce the plan's output_gain if the combined signal exceeds normalized PCM.
