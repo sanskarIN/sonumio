@@ -23,7 +23,7 @@ VERSION = 1
 MAX_RECORDS = 512
 MAX_BYTES = 256 * 1024
 _ID = re.compile(r"[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}\Z")
-_KINDS = frozenset({"generation", "scene"})
+_KINDS = frozenset({"generation", "scene", "music"})
 _STATES = frozenset({"queued", "running", "cancelling",
                      "succeeded", "failed", "cancelled"})
 _SAFE_ERRORS = frozenset({

@@ -252,3 +252,52 @@ def cancel_job(job_id: str) -> dict:
         raise HTTPException(status_code=404, detail="Job not found or expired") from exc
     except JobConflictError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+# Original symbolic composition and exports are bounded, local-only operations.
+# Audio synthesis goes through the existing shared single-worker job queue.
+from .music_studio import (
+    MusicScoreRequest, MusicRenderRequest, prepare_score, describe_score,
+    export_score, render_preview,
+)
+
+
+def _music_score(request: MusicScoreRequest):
+    try:
+        return prepare_score(request)
+    except GenerationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.post("/v1/music/plan")
+def music_plan(request: MusicScoreRequest) -> dict:
+    return describe_score(_music_score(request))
+
+
+@app.post("/v1/music/score")
+def music_score(request: MusicScoreRequest):
+    data, media_type, headers = export_score(_music_score(request), "json")
+    return Response(content=data, media_type=media_type, headers=headers)
+
+
+@app.post("/v1/music/midi")
+def music_midi(request: MusicScoreRequest):
+    data, media_type, headers = export_score(_music_score(request), "midi")
+    return Response(content=data, media_type=media_type, headers=headers)
+
+
+@app.post("/v1/jobs/music", status_code=202)
+def enqueue_music(request: MusicRenderRequest, job_id: RequestedJobId = None) -> dict:
+    score = _music_score(request)
+    try:
+        mix = request.mix.to_plan()
+    except GenerationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    store = _store_for(OUTPUT_DIR)
+
+    def produce():
+        wav, result = render_preview(score, mix)
+        identifier = _store_audio(wav, store)
+        return {**result, "id": identifier,
+                "audio_url": f"/v1/generations/{identifier}/audio"}
+
+    return _enqueue("music", request, produce, store, job_id)
