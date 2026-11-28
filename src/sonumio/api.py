@@ -253,6 +253,12 @@ def cancel_job(job_id: str) -> dict:
     except JobConflictError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
+# Native project interchange uses the same bounded local queue.
+from .music_project_api import install_project_routes
+
+install_project_routes(app, enqueue=_enqueue, store_for_current=lambda: _store_for(OUTPUT_DIR),
+                       store_audio=_store_audio, requested_job_id=_requested_job_id)
+
 # Original symbolic composition and exports are bounded, local-only operations.
 # Audio synthesis goes through the existing shared single-worker job queue.
 from .music_studio import (
