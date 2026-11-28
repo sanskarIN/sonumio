@@ -33,6 +33,7 @@ from .arrangement_bridge_cli import register_arrangement_bridge, COMMANDS as BRI
 from .arrangement_import_cli import register_arrangement_import, COMMANDS as IMPORT_COMMANDS
 from .multitrack_preview_cli import register_multitrack_preview, COMMANDS as MULTITRACK_COMMANDS
 from .multitrack_recipe_cli import register_multitrack_recipe, COMMANDS as MULTITRACK_RECIPE_COMMANDS
+from .multitrack_plan_cli import register_multitrack_plan, COMMANDS as MULTITRACK_PLAN_COMMANDS
 
 
 def _source_digest(parser):
@@ -176,6 +177,7 @@ def make_parser() -> argparse.ArgumentParser:
     register_arrangement_import(sub)
     register_multitrack_preview(sub)
     register_multitrack_recipe(sub)
+    register_multitrack_plan(sub)
     return parser
 
 
@@ -396,6 +398,7 @@ _DISPATCH = {
     **IMPORT_COMMANDS,
     **MULTITRACK_COMMANDS,
     **MULTITRACK_RECIPE_COMMANDS,
+    **MULTITRACK_PLAN_COMMANDS,
 }
 
 

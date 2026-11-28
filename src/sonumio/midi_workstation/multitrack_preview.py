@@ -14,12 +14,10 @@ from typing import Any
 
 import numpy as np
 
-from .contracts import (
-    MidiIntegrityError, MidiLimitError, MidiWorkstationError,
-    integer, finite, sha256,
-)
+from .contracts import (MidiIntegrityError, MidiLimitError, MidiWorkstationError,
+                        integer, finite, sha256)
 from .score import Score, NOTE_ID_RE
-from .transport import TransportSettings, build_schedule
+from .multitrack_preflight import build_multitrack_preflight, _peak_polyphony
 from .publish import _distinct
 
 PROTOCOL = "sonumio-multitrack-wavetable-preview-v1"
@@ -96,64 +94,22 @@ class MultiTrackPreviewResult:
     report: dict
 
 
-def _peak_polyphony(schedule, patch_map):
-    markers=[]
-    for note in schedule.notes:
-        patch=patch_map.get(note.track_id)
-        if patch is None:
-            continue
-        markers.extend(((note.start_frame,1),
-                        (note.stop_frame+patch.release_frames,-1)))
-    count=maximum=0
-    for _,delta in sorted(markers):
-        count+=delta
-        maximum=max(count,maximum)
-        if maximum>MAX_MIX_POLYPHONY:
-            raise MidiLimitError("Multitrack mix exceeds 64 simultaneous voices")
-    return maximum
-
-
 def render_multitrack_preview(
     score: Score, settings: MultiTrackPreviewSettings,
 ) -> MultiTrackPreviewResult:
     """Render independently patched tracks, combine in deterministic order."""
-    if not isinstance(score,Score) or not isinstance(settings,MultiTrackPreviewSettings):
-        raise MidiWorkstationError("Expected workstation Score and MultiTrackPreviewSettings")
+    preflight = build_multitrack_preflight(score, settings)
+    # From this point forward, every expensive allocation corresponds to
+    # a bounded resource estimate from the same canonical schedule.
     from sonumio.audio_core.wavetable import (
-        WavetablePlan,WavetableNote,VoiceEnvelope,render_wavetable,
+        WavetablePlan, WavetableNote, VoiceEnvelope, render_wavetable,
     )
     from sonumio.audio_core.contracts import make_buffer
     from sonumio.audio_core.hashing import digest_audio
-    patch_map={patch.track_id:patch for patch in settings.patches}
-    selected_ids=(set(t.id for t in score.tracks) if settings.include_muted
-                  else set(score.active_track_ids))
-    note_bearing={t.id for t in score.tracks if t.id in selected_ids and t.pitched and t.notes}
-    if set(patch_map)!=note_bearing:
-        raise MidiWorkstationError("Instrument patches must cover exactly audible pitched tracks")
-    tail=max(p.release_frames for p in settings.patches)
-    schedule=build_schedule(score,TransportSettings(
-        sample_rate=settings.sample_rate,tail_frames=tail,
-        include_muted=settings.include_muted,
-    ))
-    percussion=[n for n in schedule.notes if n.track_id not in note_bearing]
-    if percussion and not settings.allow_skip_percussion:
-        raise MidiWorkstationError("Percussion requires explicit skip approval or another renderer")
-    selected=[n for n in schedule.notes if n.track_id in note_bearing]
-    if len(selected)>settings.maximum_notes:
-        raise MidiLimitError("Multitrack preview exceeds note count budget")
-    if settings.channels==1 and any(n.pan!=64 for n in selected):
-        raise MidiWorkstationError("Mono multi-instrument output requires centered note pan")
-    frames=schedule.output_frames
-    channels=settings.channels
-    if frames*channels*(8+4+4)>MAX_MIX_FLOAT_BYTES:
-        raise MidiLimitError("Multitrack mix exceeds float PCM memory budget")
-    work=frames*channels*len(settings.patches)
-    if work>settings.maximum_work_samples:
-        raise MidiLimitError("Multitrack mix exceeds total track work budget")
-    active_voice_frames=sum(n.frames+patch_map[n.track_id].release_frames for n in selected)
-    if active_voice_frames>40_000_000:
-        raise MidiLimitError("Multitrack mix exceeds total voice processing budget")
-    polyphony=_peak_polyphony(schedule,patch_map)
+    selected = preflight.selected_notes
+    frames = preflight.output_frames
+    channels = settings.channels
+    polyphony = preflight.maximum_polyphony
     summed=np.zeros((channels,frames),dtype=np.float64)
     stem_ledger=[]
     for patch in settings.patches:  # canonical sorted order is part of reproducibility contract
@@ -206,7 +162,7 @@ def render_multitrack_preview(
         "sample_rate":settings.sample_rate,
         "channels":channels,"frames":frames,
         "rendered_notes":len(selected),
-        "skipped_percussion_notes":len(percussion),
+        "skipped_percussion_notes":preflight.skipped_percussion_notes,
         "tracks_rendered":len(settings.patches),
         "maximum_polyphony":polyphony,
         "mix_peak_before_normalization":raw_peak,

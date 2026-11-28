@@ -284,3 +284,27 @@ are protected against output-path aliases and hardlinks, and the WAV
 publisher verifies its full generated content checksum before committing.
 These outputs use original deterministic synthesis; no trained-model
 inference, licensed sample content or perceptual quality proof is implied.
+
+### Audio-free resource planning
+
+Use the same strict note scheduler and resource limits as the actual original
+finite-Fourier renderer, **without allocating audio** or importing
+`sonumio.audio_core`. This is useful for checking a candidate score/patch
+recipe before beginning expensive local synthesis.
+
+```bash
+python -m sonumio.midi_workstation multitrack-preview-plan score.json \
+  --patch bass:square:0.04 --patch lead:sine:0.09 \
+  --sample-rate 24000 --channels 2
+python -m sonumio.midi_workstation multitrack-plan-from-recipe score.json \
+  --recipe patches.json --expected-recipe-sha256 <raw-recipe-sha256>
+```
+
+The JSON preflight receipt reports source-score digest, exact scheduled note
+counts, intentionally skipped percussion, sample-clock frames, per-stem
+gate/release processing, global and per-instrument polyphony, and declared
+PCM-memory/sample-work budgets. The same preflight is executed before
+wavetable rendering, so accepted note routing and resource geometry agree
+with the actual synthesis step. Preflight is **not** an estimated waveform
+peak or proof of audio quality; final encoding and SHA-verified WAV
+publication still require full audio-core processing.
