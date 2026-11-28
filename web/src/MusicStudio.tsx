@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { ScoreNoteEditor } from './ScoreNoteEditor';
+import type { NoteEdits } from './music-note-editor';
 import { awaitJob, cancelJob, exportMusic, getJob, isClientJobId, isRejectedJobSubmission,
   planMusic, submitMusicJob, type JobAudio, type JobStatus } from './api';
 import { TRACKS, STYLES, MODES, defaultComposition, defaultMusicMix, compositionKey,
@@ -30,6 +32,8 @@ export function MusicStudio({ connected }: { connected: boolean | null }) {
   const [composition, setComposition] = useState(defaultComposition);
   const [mix, setMix] = useState(defaultMusicMix);
   const [plan, setPlan] = useState<MusicPlan | null>(null);
+  const [basePlan, setBasePlan] = useState<MusicPlan | null>(null);
+  const [noteEdits, setNoteEdits] = useState<NoteEdits | null>(null);
   const [result, setResult] = useState<JobAudio | null>(null);
   const [activity, setActivity] = useState<Activity | null>(null);
   const [status, setStatus] = useState<JobStatus | null>(null);
@@ -71,6 +75,8 @@ export function MusicStudio({ connected }: { connected: boolean | null }) {
   function editComposition<K extends keyof Composition>(key: K, value: Composition[K]) {
     setComposition(previous => ({ ...previous, [key]: value }));
     setPlan(null);
+    setBasePlan(null);
+    setNoteEdits(null);
     setNotice('');
   }
 
@@ -106,10 +112,19 @@ export function MusicStudio({ connected }: { connected: boolean | null }) {
     }
   }
 
+  function scoreInput() { return { composition, ...(noteEdits ? { note_edits: noteEdits } : {}) }; }
+
+  function changeNoteEdits(next: NoteEdits | null) {
+    setNoteEdits(next);
+    setPlan(next ? null : basePlan);
+    setNotice('');
+  }
+
   async function obtainPlan(signal: AbortSignal) {
-    const value = await planMusic({ composition }, signal);
+    const value = await planMusic(scoreInput(), signal);
     signal.throwIfAborted();
     setPlan(value);
+    if (!noteEdits) setBasePlan(value);
     return value;
   }
 
@@ -137,7 +152,7 @@ export function MusicStudio({ connected }: { connected: boolean | null }) {
       setStatus('queued');
       try {
         const job = await submitMusicJob({
-          composition, mix, expected_score_sha256: score.score_sha256,
+          ...scoreInput(), mix, expected_score_sha256: score.score_sha256,
         }, { id, signal });
         signal.throwIfAborted();
         if (job.kind !== 'music') throw new Error('Unexpected render job kind.');
@@ -196,7 +211,7 @@ export function MusicStudio({ connected }: { connected: boolean | null }) {
   function download(format: 'json' | 'midi') {
     if (!currentPlan) return;
     void run('exporting', async signal => {
-      const blob = await exportMusic({ composition, expected_score_sha256: currentPlan.score_sha256 }, format, signal);
+      const blob = await exportMusic({ ...scoreInput(), expected_score_sha256: currentPlan.score_sha256 }, format, signal);
       signal.throwIfAborted();
       const url = URL.createObjectURL(blob);
       downloads.current.add(url);
@@ -239,7 +254,7 @@ export function MusicStudio({ connected }: { connected: boolean | null }) {
           <div className="music-duration"><span className="field-heading">PREVIEW LENGTH</span>{duration === null ? 'Adjust controls' : duration.toFixed(2) + ' seconds'}<p className="hint">Maximum 30 seconds</p></div>
         </div>
         {compositionError && <p className="warning" role="status">{compositionError}</p>}
-        <button className="secondary-button" type="submit" disabled={connected !== true || Boolean(compositionError)}>Compose score</button>
+        <button className="secondary-button" type="submit" disabled={connected !== true || Boolean(compositionError)}>{noteEdits ? 'Validate edited score' : 'Compose score'}</button>
       </fieldset>
     </form>
     {currentPlan && <div className="music-score-summary">
@@ -257,6 +272,8 @@ export function MusicStudio({ connected }: { connected: boolean | null }) {
         <button type="button" className="secondary-button" disabled={busy || connected !== true} onClick={() => download('midi')}>Export MIDI</button>
       </div>
     </div>}
+    {basePlan?.note_events && <ScoreNoteEditor key={basePlan.score_sha256}
+      base={{...basePlan, note_events:basePlan.note_events}} disabled={busy} onChange={changeNoteEdits}/>}
     <fieldset disabled={busy} className="music-controls">
       <legend>Track mixer</legend>
       <div className="music-track-list">{TRACKS.map((track, i) => <div key={track} className="music-track">

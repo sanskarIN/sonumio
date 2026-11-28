@@ -110,3 +110,22 @@ footer{display:flex;justify-content:space-between;gap:20px;border-top:1px solid 
 .music-actions{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0}
 .music-result audio{display:block;width:100%;margin:12px 0}
 @media(max-width:540px){.music-track{grid-template-columns:minmax(60px,1fr) minmax(80px,2fr);gap:8px}.music-sections>div{min-width:68px}.music-controls{padding:10px}}
+
+/* Symbolic score note editor */
+.score-note-editor{display:grid;gap:.9rem;padding:1rem;border:1px solid var(--line,#39414b);border-radius:12px;margin-block:1rem}
+.note-toolbar{display:flex;flex-wrap:wrap;align-items:end;gap:.75rem}
+.note-toolbar label{display:grid;gap:.3rem;min-width:7rem}
+.note-roll{max-height:26rem;overflow:auto;border:1px solid var(--line,#39414b);border-radius:8px;background:#141c25}
+.note-roll svg{display:block;width:100%;min-width:440px}
+.roll-label{font-size:10px;fill:#a7b6c7}
+.roll-natural{fill:#1e2937}.roll-sharp{fill:#17212c}
+.roll-beat{stroke:#66788f;stroke-width:1}.roll-tick{stroke:#354254;stroke-width:.5}
+.roll-note{fill:#82b8e6;cursor:pointer}.roll-changed{fill:#6ad2ae}.roll-selected{stroke:#fff;stroke-width:1.5}
+.note-table-wrap{overflow:auto;max-height:16rem}
+.note-table{border-collapse:collapse;width:100%;font-size:.85rem}
+.note-table caption{text-align:left;padding:.3rem;color:inherit}
+.note-table th,.note-table td{text-align:left;border-bottom:1px solid var(--line,#39414b);padding:.45rem;white-space:nowrap}
+.note-table thead{position:sticky;top:0;background:var(--panel,#1e2937)}
+.note-edited td:first-child{font-weight:700;color:var(--accent,#6ad2ae)}
+.note-edit-form fieldset{display:grid;gap:.8rem}
+@media(max-width:600px){.note-toolbar{align-items:stretch}.note-toolbar .music-actions{flex-basis:100%}}
