@@ -176,7 +176,7 @@ def test_manual_mask_cannot_touch_edges_or_long_runs(selected):
 def test_manual_mask_fraction_bound():
     audio = quiet(1000)
     mask = np.zeros((1, 1000), dtype=bool)
-    mask[10:900:10] = True
+    mask[0, 10:900:10] = True
     with pytest.raises(AudioLimitError):
         repair_clicks(audio, explicit_mask=mask)
 
