@@ -222,7 +222,7 @@ class LocalJobQueue:
         self, kind: str, produce: Callable[[], dict], cleanup: Callable[[dict], None],
         *, job_id: str | None = None, request_fingerprint: bytes | None = None,
     ) -> dict:
-        if kind not in {"generation", "scene"}:
+        if kind not in {"generation", "scene", "music"}:
             raise ValueError("unsupported job kind")
         if job_id is not None:
             if (not isinstance(job_id, str)
