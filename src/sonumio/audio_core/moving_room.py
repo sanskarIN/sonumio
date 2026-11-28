@@ -13,7 +13,7 @@ import math
 
 import numpy as np
 
-from .contracts import AudioBuffer, AudioLayout, AudioSpec, MAX_BYTES
+from .contracts import AudioBuffer, AudioLayout, AudioSpec, MAX_BYTES, make_buffer
 from .errors import AudioContractError, AudioLimitError
 from .matrix_convolution import convolve_matrix
 from .partitioned_convolution import convolve_partitioned
@@ -225,6 +225,12 @@ def render_motion_room(
         raise AudioContractError("Motion source topology differs from audio")
     if plan.keys[-1].frame >= audio.frames:
         raise AudioContractError("Scene keyframes extend beyond sound duration")
+    estimated_kernel_bytes = (
+        len(plan.keys) * plan.input_channels * plan.output_channels
+        * (math.ceil(plan.config.max_seconds * plan.config.sample_rate) + 2) * 8
+    )
+    if estimated_kernel_bytes > MAX_SCENE_WORK_BYTES:
+        raise AudioLimitError("Motion scene aggregate impulse budget exceeded")
     responses = [
         build_room_response(plan.room, key.sources, key.receivers, plan.config)
         for key in plan.keys
@@ -250,15 +256,10 @@ def render_motion_room(
         raise AudioContractError("Moving room generated nonfinite output")
     if float(np.max(np.abs(output))) > float(np.finfo(np.float32).max):
         raise AudioLimitError("Moving room output exceeds finite float32 range")
-    result = audio.copy_with(output.astype(np.float32),
-                             source_note="interpolated static room snapshots"
-                             ) if plan.output_channels == audio.channels and (
-                                 not include_tail or frames == audio.frames
-                             ) else None
-    if result is None:
-        from .contracts import make_buffer
-        result = make_buffer(output.astype(np.float32), audio.sample_rate,
-                             layout=layout, source_note="interpolated room snapshots")
+    result = make_buffer(
+        output.astype(np.float32), audio.sample_rate, layout=layout,
+        source_note="interpolated static room snapshots",
+    )
     report = MotionRoomReport(
         audio.sample_rate, audio.frames, result.frames, audio.channels,
         result.channels, max(s.impulse_taps for s in stats), plan.engine,
