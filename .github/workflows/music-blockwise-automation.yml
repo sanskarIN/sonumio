@@ -1,0 +1,28 @@
+name: Blockwise music automation verification
+on:
+  pull_request:
+    paths:
+      - 'src/sonumio/music_blockwise*.py'
+      - 'src/sonumio/music_automation*.py'
+      - 'tests/test_music_blockwise*.py'
+      - '.github/workflows/music-blockwise-automation.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'src/sonumio/music_blockwise*.py'
+      - 'src/sonumio/music_automation*.py'
+      - 'tests/test_music_blockwise*.py'
+      - '.github/workflows/music-blockwise-automation.yml'
+permissions:
+  contents: read
+jobs:
+  parity:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python -m pip install -e '.[test]'
+      - run: python -m pytest -q tests/test_music_blockwise.py tests/test_music_automation.py tests/test_music_blockwise_automation.py
