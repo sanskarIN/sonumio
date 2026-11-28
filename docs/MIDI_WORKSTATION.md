@@ -66,3 +66,51 @@ The local test suite covers MIDI parse/encode, malformed inputs, controller stat
 The new module is discoverable under the existing `setuptools` package scan, because it resides in `src/sonumio/midi_workstation`. Do not automatically route existing top-level Sonumio commands through it until the legacy MIDI behavior, web studio and any public API consumers have been regression-tested. This subsystem is opt-in through `python -m sonumio.midi_workstation`.
 
 A responsible release should additionally verify cross-platform path safety (Windows + Linux), full repo unit/integration tests, note-count performance, real wavetable output, and input boundary fuzzing.
+
+## Read-only MIDI linter
+
+The optional `midi-lint` command reports structurally permitted but musically
+ambiguous conditions without editing or rendering the file. Findings cover
+unmatched and unreleased notes, same-key overlaps, zero-length notes, cross-track
+releases, controller closures, sustain left down, patch changes while held,
+and conflicting or duplicate conductor metadata. Format-2 tracks remain
+independent; format-0/1 channels are shared. Each finding has an original track
+and tick, with deterministic bounded output (1–2048 detailed findings).
+
+```bash
+python -m sonumio.midi_workstation midi-lint original.mid
+python -m sonumio.midi_workstation midi-lint original.mid --max-findings 32 --no-information
+python -m sonumio.midi_workstation midi-lint original.mid --fail-on-errors
+python -m sonumio.midi_workstation midi-lint original.mid --fail-on-warnings
+```
+
+The default returns a JSON report, including error findings, without mutation.
+The optional nonzero gates leave standard output empty. No SysEx is executed.
+Note pairing is a conservative FIFO diagnostic, not a claim about every synth.
+
+## Raw MIDI note transform with loss-aware safety
+
+`midi-transform` is for files that should retain original SMF events rather
+than undergo lossy conversion into Sonumio's editable score. It preserves MIDI
+ticks, track order, tempo, meter, controllers, arbitrary opaque metadata and
+SysEx as decoded events, and changes only selected note-on/off pitch, polyphonic
+key pressure pitch, and nonzero note-on velocity. Percussion is excluded by
+default, note-on velocity zero remains a release, and note-off release velocity
+remains unchanged. Export canonically re-encodes running status, so this is
+event-semantic rather than byte-identical interchange.
+
+```bash
+python -m sonumio.midi_workstation midi-transform original.mid --output higher.mid --semitones 2
+python -m sonumio.midi_workstation midi-transform original.mid --output softer.mid --velocity-numerator 3 --velocity-denominator 4
+python -m sonumio.midi_workstation midi-transform original.mid --output selected.mid --track 1 --channel 0 --pitch-low 48 --pitch-high 84 --semitones -1
+python -m sonumio.midi_workstation midi-transform original.mid --output other-key.mid --semitones 2 --transpose-key-signatures
+```
+
+Velocity scales as an exact rational, rounded half up, with an optional offset
+and a documented [1,127] clamp. Pitch overflow aborts. New overlapping
+same-key note-on identities abort unless `--allow-new-overlaps` is explicitly
+set; existing overlaps are not silently repaired. Key-signature meta changes
+require a whole-score selection and choose a minimal-accidental enharmonic
+spelling. Without that flag, transposition retains original key-signature
+metadata and exposes that fact in the receipt. Publication is atomic,
+SHA-256-pinned, no-clobber by default, and never overwrites an input file.

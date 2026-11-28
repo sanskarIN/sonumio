@@ -19,6 +19,8 @@ from .contracts import (
 from .performance import PerformanceSettings, performance_report, reconstruct_performance
 from .publish import PublicationOptions, publish_midi, publish_score
 from .quantize import HumanizeSettings, QuantizeGrid, humanize_score, quantize_score
+from .raw_edit import MidiTransformSettings, transform_midi
+from .lint import LintSettings, lint_midi
 from .score import Score, from_midi, to_midi
 from .score_io import load_score, parse_score_snapshot
 from .smf import read_smf, validate_roundtrip
@@ -78,6 +80,36 @@ def make_parser() -> argparse.ArgumentParser:
     to_binary.add_argument("--only-active", action="store_true")
     _source_digest(to_binary)
     _destination(to_binary)
+
+    midi_lint = sub.add_parser(
+        "midi-lint", help="Inspect raw MIDI for ambiguous musical semantics"
+    )
+    midi_lint.add_argument("source", type=Path)
+    midi_lint.add_argument("--max-findings", type=int, default=256)
+    midi_lint.add_argument("--no-information", action="store_true")
+    midi_lint.add_argument("--fail-on-warnings", action="store_true")
+    midi_lint.add_argument("--fail-on-errors", action="store_true")
+    _source_digest(midi_lint)
+
+    midi_transform = sub.add_parser(
+        "midi-transform",
+        help="Non-destructively transpose selected MIDI notes and scale key-on velocity",
+    )
+    midi_transform.add_argument("source", type=Path)
+    midi_transform.add_argument("--semitones", type=int, default=0)
+    midi_transform.add_argument("--velocity-numerator", type=int, default=1)
+    midi_transform.add_argument("--velocity-denominator", type=int, default=1)
+    midi_transform.add_argument("--velocity-offset", type=int, default=0)
+    midi_transform.add_argument("--pitch-low", type=int, default=0)
+    midi_transform.add_argument("--pitch-high", type=int, default=127)
+    midi_transform.add_argument("--track", action="append", type=int)
+    midi_transform.add_argument("--channel", action="append", type=int)
+    midi_transform.add_argument("--include-percussion", action="store_true")
+    midi_transform.add_argument("--transpose-key-signatures", action="store_true")
+    midi_transform.add_argument("--allow-new-overlaps", action="store_true",
+                                help="Explicitly allow new same-pitch overlapping notes")
+    _source_digest(midi_transform)
+    _destination(midi_transform)
 
     score_inspect = sub.add_parser("score-inspect", help="Inspect score metrics and chord hypotheses")
     score_inspect.add_argument("source", type=Path)
@@ -171,6 +203,54 @@ def _midi_import(args) -> dict:
     }
 
 
+def _midi_lint(args) -> dict:
+    source = read_smf(args.source, expected_sha256=args.expected_sha256)
+    report = lint_midi(source.midi, LintSettings(
+        maximum_findings=args.max_findings,
+        include_information=not args.no_information,
+    ))
+    if args.fail_on_warnings and report.status != "clean":
+        raise MidiWorkstationError("MIDI lint gate detected warnings or errors")
+    if args.fail_on_errors and report.status == "errors":
+        raise MidiWorkstationError("MIDI lint gate detected errors")
+    return {
+        "protocol": "sonumio-workstation-midi-lint-receipt-v1",
+        "source_sha256": source.sha256,
+        "source_bytes": source.raw_bytes,
+        "lint": report.as_dict(),
+    }
+
+
+def _midi_transform(args) -> dict:
+    source = read_smf(args.source, expected_sha256=args.expected_sha256)
+    settings = MidiTransformSettings(
+        semitones=args.semitones,
+        velocity_numerator=args.velocity_numerator,
+        velocity_denominator=args.velocity_denominator,
+        velocity_offset=args.velocity_offset,
+        pitch_low=args.pitch_low,
+        pitch_high=args.pitch_high,
+        tracks=tuple(sorted(set(args.track))) if args.track else None,
+        channels=tuple(sorted(set(args.channel))) if args.channel else None,
+        include_percussion=args.include_percussion,
+        transpose_key_signatures=args.transpose_key_signatures,
+        reject_new_collisions=not args.allow_new_overlaps,
+    )
+    transformed, report = transform_midi(source.midi, settings)
+    publication = publish_midi(args.output, transformed, _publication(args),
+                               input_path=args.source)
+    if publication.output_sha256 != report.result_sha256:
+        raise MidiIntegrityError("Published MIDI differs from transformed stream")
+    return {
+        "protocol": "sonumio-workstation-transform-receipt-v1",
+        "source_sha256": source.sha256,
+        "source_bytes": source.raw_bytes,
+        "canonical_source_sha256": report.source_sha256,
+        "transform": report.as_dict(),
+        "publication": publication.as_dict(),
+    }
+
+
 def _midi_export(args) -> dict:
     source = load_score(args.source, expected_sha256=args.expected_sha256)
     midi = to_midi(source.score, include_muted=not args.only_active)
@@ -239,6 +319,8 @@ _DISPATCH = {
     "midi-validate": _midi_validate,
     "midi-import": _midi_import,
     "midi-export": _midi_export,
+    "midi-transform": _midi_transform,
+    "midi-lint": _midi_lint,
     "score-inspect": _score_inspect,
     "score-quantize": _score_quantize,
     "score-humanize": _score_humanize,
