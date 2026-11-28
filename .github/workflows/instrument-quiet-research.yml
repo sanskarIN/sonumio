@@ -1,0 +1,40 @@
+name: Sustained quiet-region objective research
+on:
+  pull_request:
+    paths:
+      - 'research/instrument_quiet_*.py'
+      - 'research/instrument_edge_*.py'
+      - 'research/instrument_long_*.py'
+      - 'research/instrument_harmonic_model.py'
+      - 'tests/test_instrument_quiet_research.py'
+      - '.github/workflows/instrument-quiet-research.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'research/instrument_quiet_*.py'
+      - 'research/instrument_edge_*.py'
+      - 'research/instrument_long_*.py'
+      - 'research/instrument_harmonic_model.py'
+      - 'tests/test_instrument_quiet_research.py'
+      - '.github/workflows/instrument-quiet-research.yml'
+permissions:
+  contents: read
+jobs:
+  compare:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      OMP_NUM_THREADS: '2'
+      MKL_NUM_THREADS: '2'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python -m pip install -e '.[test]'
+      - run: python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+      - run: python -m pytest -q tests/test_instrument_quiet_research.py
+      - name: Train matched quiet-region objective arms
+        run: |
+          python -m research.instrument_quiet_study > /tmp/quiet-report.json
+          python -c "import json; r=json.load(open('/tmp/quiet-report.json')); print(json.dumps({'summary':r['summary'],'schedule':r['schedule'],'training':[x['training'] for x in r['replicates']]},sort_keys=True,allow_nan=False))"
