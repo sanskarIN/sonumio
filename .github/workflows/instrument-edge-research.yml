@@ -19,6 +19,13 @@ on:
       - 'src/sonumio/music_instruments.py'
       - 'tests/test_instrument_edge_research.py'
       - '.github/workflows/instrument-edge-research.yml'
+# Superseded PR runs share a group and may cancel one another.
+# Main-branch pushes and manual dispatches each get a unique run_id group,
+# because even cancel-in-progress: false can evict older pending group runs.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 permissions:
   contents: read
 jobs:
