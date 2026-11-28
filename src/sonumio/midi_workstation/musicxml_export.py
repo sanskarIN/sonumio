@@ -16,6 +16,7 @@ from .contracts import MidiFormatError, MidiLimitError, MidiWorkstationError
 from .musicxml_common import (
     MAX_MEASURES, MAX_NOTE_FRAGMENTS, MAX_VOICES, MusicXmlReceipt,
     fingerprint, pitch_to_xml, serialize_xml, tempo_to_bpm, xml_tag,
+    velocity_to_dynamics,
 )
 from .score import Score, ScoreNote, ScoreTrack
 from .tempo import MeterPoint, TempoPoint
@@ -136,7 +137,10 @@ def allocate_voices(fragments: list[NoteFragment]) -> tuple[tuple[NoteFragment, 
 def _add_note(measure: ET.Element, fragment: NoteFragment, voice: int,
               part_idx: int) -> None:
     note = fragment.note
-    element = xml_tag(measure, "note", id=f"sn_{note.id}_part{part_idx}_seg{fragment.segment}")
+    element = xml_tag(measure, "note",
+                      id=f"sn_{note.id}_part{part_idx}_seg{fragment.segment}",
+                      dynamics=velocity_to_dynamics(note.velocity),
+                      **{"end-dynamics": velocity_to_dynamics(note.release_velocity)})
     step, alter, octave = pitch_to_xml(note.pitch)
     pitch = xml_tag(element, "pitch")
     xml_tag(pitch, "step", step)
@@ -144,11 +148,12 @@ def _add_note(measure: ET.Element, fragment: NoteFragment, voice: int,
         xml_tag(pitch, "alter", alter)
     xml_tag(pitch, "octave", octave)
     xml_tag(element, "duration", fragment.duration)
-    xml_tag(element, "voice", voice)
     if fragment.tied_from_previous:
         xml_tag(element, "tie", type="stop")
     if fragment.tied_to_next:
         xml_tag(element, "tie", type="start")
+    # MusicXML note children have a fixed schema order: tie precedes voice.
+    xml_tag(element, "voice", voice)
     if fragment.tied_from_previous or fragment.tied_to_next:
         notations = xml_tag(element, "notations")
         if fragment.tied_from_previous:
@@ -176,8 +181,13 @@ def _add_tempo_directions(measure_node: ET.Element, range_: MeasureRange,
     for change in tempo:
         if range_.start <= change.tick < range_.stop or (include_end and change.tick == range_.stop):
             direction = xml_tag(measure_node, "direction")
+            direction_type = xml_tag(direction, "direction-type")
+            metronome = xml_tag(direction_type, "metronome")
+            xml_tag(metronome, "beat-unit", "quarter")
+            bpm = tempo_to_bpm(change.microseconds_per_quarter)
+            xml_tag(metronome, "per-minute", bpm)
             xml_tag(direction, "offset", change.tick - range_.start)
-            xml_tag(direction, "sound", tempo=tempo_to_bpm(change.microseconds_per_quarter))
+            xml_tag(direction, "sound", tempo=bpm)
 
 
 def _add_measure_voices(node: ET.Element, layout: MeasureRange,
@@ -234,6 +244,8 @@ def encode_musicxml(score: Score) -> tuple[bytes, MusicXmlReceipt]:
         xml_tag(instrument, "instrument-name", track.name)
         midi = xml_tag(part, "midi-instrument", id=inst_id)
         xml_tag(midi, "midi-channel", track.channel + 1)
+        # MusicXML MIDI banks are 1-based, combined 14-bit MSB/LSB.
+        xml_tag(midi, "midi-bank", track.bank_msb * 128 + track.bank_lsb + 1)
         xml_tag(midi, "midi-program", track.program + 1)
     for index, track in enumerate(score.tracks):
         part = xml_tag(root, "part", id=f"sn-{track.id}")
@@ -247,9 +259,8 @@ def encode_musicxml(score: Score) -> tuple[bytes, MusicXmlReceipt]:
                                       include_end=layout.index == len(measures) - 1)
             _add_measure_voices(node, layout, fragments[track.id].get(layout.index, []), index)
     raw = serialize_xml(root)
-    losses = ["note_velocity_and_release_velocity_not_exported",
-              "note_pan_not_exported", "score_revision_not_exported",
-              "track_mute_solo_not_exported", "MIDI_bank_selection_not_exported"]
+    losses = ["note_pan_not_exported", "score_revision_not_exported",
+              "track_mute_solo_not_exported"]
     report = MusicXmlReceipt(score.sha256, fingerprint(raw), len(score.tracks),
                              len(measures), score.note_count, len(score.tempo),
                              len(score.meter), tuple(losses))

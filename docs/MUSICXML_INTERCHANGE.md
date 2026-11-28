@@ -34,7 +34,9 @@ output SHA256 pinning, explicit overwrite or parent directory creation.
 - Explicit MIDI pitched note values (`step`, integer `alter`, `octave`).
 - Integer durations, rests, `forward`/`backup` multi-voice timing, and chords.
 - Bar-crossing tie start/stop chains (validated for continuity and identity).
-- Part names and explicit MIDI channel/program routing when present.
+- Part names and explicit 1-based MIDI channel/program/bank routing when present.
+- MusicXML note dynamics and end-dynamics percentages converted exactly to MIDI 7-bit note-on and note-off velocities.
+- Schema-conformant quarter-beat metronome tempo directions.
 - Sonumio note IDs and exact project end time on Sonumio-origin exports.
 
 Unsupported performance or notation constructs (unpitched drums, grace notes,
@@ -45,10 +47,11 @@ changes) are deliberately rejected rather than silently guessed.
 ### Semantic loss is explicit
 
 Sonumio tracks additional metadata that the restricted MusicXML performance
-projection cannot carry: exact original velocity, release velocity, per-note
-pan, score revision, track mute/solo flags, MIDI bank data and engraving.
-Imported notes use stable defaults **velocity 100, release velocity 0, pan 64**;
-receipts state these changes. A MusicXML round-trip does **not** claim to
+projection cannot carry: per-note pan, score revision, track mute/solo flags
+and engraving. Exact note-on/release velocities and 14-bit MIDI bank routing
+are preserved through exported MusicXML. External MusicXML notes without
+dynamics attributes use defaults **velocity 100, release velocity 0**, and
+per-note pan defaults to **64**; receipts state these assumptions. A MusicXML round-trip does **not** claim to
 reconstruct every byte or expressive setting of the original Sonumio score.
 
 ### Source and ZIP security

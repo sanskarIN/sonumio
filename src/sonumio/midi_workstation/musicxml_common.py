@@ -9,7 +9,7 @@ There is no network, DTD, XML entity expansion, or external resource access.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from decimal import Decimal, InvalidOperation, localcontext
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP, localcontext
 from fractions import Fraction
 from hashlib import sha256
 import re
@@ -66,7 +66,10 @@ def required_text(parent: ET.Element, name: str) -> str:
 def bounded_integer(text: str, label: str, minimum: int, maximum: int) -> int:
     if type(text) is not str or not re.fullmatch(r"[0-9]{1,12}", text.strip()):
         raise MidiFormatError(f"Invalid MusicXML {label} integer")
-    return integer(int(text.strip()), label, minimum, maximum)
+    value = int(text.strip())
+    if not minimum <= value <= maximum:
+        raise MidiFormatError(f"MusicXML {label} integer outside supported range")
+    return value
 
 
 def integer_element(parent: ET.Element, name: str, minimum: int, maximum: int) -> int:
@@ -165,6 +168,34 @@ def bpm_to_tempo(value: str) -> int:
             return integer(microseconds, "MusicXML tempo", 1, 0xFFFFFF)
     except (InvalidOperation, OverflowError, ZeroDivisionError) as exc:
         raise MidiFormatError("Invalid MusicXML BPM value") from exc
+
+
+def velocity_to_dynamics(velocity: int) -> str:
+    """MusicXML percentage of a 90-velocity reference, not 7-bit MIDI raw.
+
+    Fixed decimal precision keeps exported values portable through text
+    editors and MusicXML validators while ensuring integer round-trip for
+    all 128 possible release velocities and 127 onset velocities.
+    """
+    integer(velocity, "MusicXML MIDI velocity", 0, 127)
+    with localcontext() as ctx:
+        ctx.prec = 48
+        return format(Decimal(velocity) * Decimal(100) / Decimal(90), ".18f").rstrip("0").rstrip(".")
+
+
+def dynamics_to_velocity(text: str, *, allow_zero: bool) -> int:
+    if type(text) is not str or not 1 <= len(text) <= 40:
+        raise MidiFormatError("Invalid MusicXML dynamics decimal")
+    if not re.fullmatch(r"[0-9]{1,3}(?:\.[0-9]{1,24})?", text):
+        raise MidiFormatError("Invalid MusicXML dynamics number syntax")
+    try:
+        value = Decimal(text)
+        if value < 0 or value > Decimal(127) * 100 / 90:
+            raise MidiFormatError("MusicXML dynamics outside MIDI 7-bit range")
+        midi = int((value * Decimal(90) / Decimal(100)).to_integral_value(rounding=ROUND_HALF_UP))
+        return integer(midi, "MusicXML dynamics MIDI velocity", 0 if allow_zero else 1, 127)
+    except (InvalidOperation, ValueError, OverflowError) as exc:
+        raise MidiFormatError("Invalid MusicXML dynamics value") from exc
 
 
 def serialize_xml(root: ET.Element) -> bytes:

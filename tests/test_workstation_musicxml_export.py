@@ -224,8 +224,8 @@ def test_explicit_semantic_loss_manifest_present_on_export_and_import():
     restored, imported = decode_musicxml(xml)
     assert ledger.losses
     assert imported.losses
-    assert restored.notes[0].velocity == 100
-    assert restored.notes[0].release_velocity == 0
+    assert restored.notes[0].velocity == 72
+    assert restored.notes[0].release_velocity == 55
     assert restored.notes[0].pan == 64
     assert restored.sha256 != original.sha256
     assert not ledger.as_dict()["lossless_roundtrip_claimed"]

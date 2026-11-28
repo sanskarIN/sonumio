@@ -19,6 +19,7 @@ from .musicxml_common import (
     MusicXmlReceipt, PART_ID, SONUMIO_ID, bounded_integer, bpm_to_tempo,
     child, children, fingerprint, integer_element, local_name,
     parse_musicxml, pitch_from_xml, required_text, validate_children,
+    dynamics_to_velocity,
 )
 from .score import NOTE_ID_RE, Score, ScoreNote, ScoreTrack, note_sort_key
 from .tempo import MeterPoint, TempoPoint
@@ -30,6 +31,8 @@ class _PartInfo:
     name: str
     channel: int
     program: int
+    bank_msb: int
+    bank_lsb: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -42,6 +45,8 @@ class _NotePart:
     tied_to_next: bool
     tied_from_previous: bool
     explicit_id: str | None
+    velocity: int
+    release_velocity: int
 
 
 def _parse_parts(root: ET.Element) -> tuple[_PartInfo, ...]:
@@ -75,16 +80,22 @@ def _parse_parts(root: ET.Element) -> tuple[_PartInfo, ...]:
                 raise MidiFormatError("More than 15 MIDI parts require explicit channel assignments")
             channel = default
             program = 0
+            bank_msb = bank_lsb = 0
         else:
+            validate_children(midi, {"midi-channel", "midi-bank", "midi-program", "midi-name"},
+                              context="MIDI instrument")
             raw_channel = child(midi, "midi-channel")
             raw_program = child(midi, "midi-program")
             if raw_channel is None or raw_program is None:
                 raise MidiFormatError("MIDI instrument needs both channel and program")
             channel = integer_element(midi, "midi-channel", 1, 16) - 1
             program = integer_element(midi, "midi-program", 1, 128) - 1
+            bank_node = child(midi, "midi-bank")
+            bank = 1 if bank_node is None else integer_element(midi, "midi-bank", 1, 16384)
+            bank_msb, bank_lsb = divmod(bank - 1, 128)
         if channel == 9:
             raise MidiFormatError("Drum channel 10 requires unsupported unpitched notation")
-        result.append(_PartInfo(stable_id, name, channel, program))
+        result.append(_PartInfo(stable_id, name, channel, program, bank_msb, bank_lsb))
     if not result:
         raise MidiFormatError("Empty MusicXML part list")
     return tuple(result)
@@ -149,6 +160,11 @@ def _parse_note(node: ET.Element, cursor: int, prior_start: int | None,
         return (cursor if is_chord else cursor + length), None, start, voice
     pitch_node = child(node, "pitch", required=True)
     pitch = pitch_from_xml(pitch_node)
+    dynamics_text = node.get("dynamics")
+    end_dynamics_text = node.get("end-dynamics")
+    velocity = 100 if dynamics_text is None else dynamics_to_velocity(dynamics_text, allow_zero=False)
+    release_velocity = (0 if end_dynamics_text is None else
+                        dynamics_to_velocity(end_dynamics_text, allow_zero=True))
     found_ties = [item.get("type") for item in children(node, "tie")]
     if len(found_ties) != len(set(found_ties)) or any(x not in ("start", "stop") for x in found_ties):
         raise MidiFormatError("Invalid MIDI playback tie annotations")
@@ -169,6 +185,7 @@ def _parse_note(node: ET.Element, cursor: int, prior_start: int | None,
     return (cursor if is_chord else cursor + length), _NotePart(
         source_id or "", pitch, start, end, voice,
         "start" in found_ties, "stop" in found_ties, explicit_id,
+        velocity, release_velocity,
     ), start, voice
 
 
@@ -191,8 +208,11 @@ def _convert_voices(parts: list[_NotePart], part_index: int, span_end: int) -> t
                 raise MidiFormatError("Unmatched or discontinuous MusicXML tie-stop")
             if fragment.explicit_id and prior.explicit_id != fragment.explicit_id:
                 raise MidiFormatError("MusicXML tie changed stable note identity")
+            if (fragment.velocity, fragment.release_velocity) != (prior.velocity, prior.release_velocity):
+                raise MidiFormatError("Tied MusicXML fragments disagree on expressive dynamics")
             combined = _NotePart(prior.name, prior.pitch, prior.start, fragment.stop,
-                                 prior.voice, fragment.tied_to_next, False, prior.explicit_id)
+                                 prior.voice, fragment.tied_to_next, False, prior.explicit_id,
+                                 prior.velocity, prior.release_velocity)
         else:
             if key in active:
                 raise MidiFormatError("Conflicting MusicXML tie chains on one voice/pitch")
@@ -206,7 +226,8 @@ def _convert_voices(parts: list[_NotePart], part_index: int, span_end: int) -> t
             raise MidiFormatError("Duplicate or invalid MusicXML stable note ID")
         named.add(note_id)
         notes.append(ScoreNote(note_id, combined.start, combined.stop - combined.start,
-                               combined.pitch, 100, 0, 64))
+                               combined.pitch, combined.velocity,
+                               combined.release_velocity, 64))
         if len(notes) > MAX_SCORE_NOTES:
             raise MidiLimitError("MusicXML imported note count exceeds budget")
     if active:
@@ -292,8 +313,22 @@ def decode_musicxml(raw: bytes) -> tuple[Score, MusicXmlReceipt]:
                 elif kind == "direction":
                     validate_children(item, {"sound", "offset", "direction-type"}, context="direction")
                     sound = child(item, "sound")
+                    direction_type = child(item, "direction-type")
+                    if direction_type is not None:
+                        validate_children(direction_type, {"metronome"},
+                                          context="tempo direction-type")
+                        metronome = child(direction_type, "metronome", required=True)
+                        validate_children(metronome, {"beat-unit", "per-minute"},
+                                          context="metronome")
+                        if required_text(metronome, "beat-unit") != "quarter":
+                            raise MidiFormatError("Only quarter-note metronome marks are supported")
+                        marked_tempo = bpm_to_tempo(required_text(metronome, "per-minute"))
+                    else:
+                        marked_tempo = None
                     if sound is None or set(sound.attrib) != {"tempo"}:
                         raise MidiFormatError("Only MusicXML tempo sound directions are supported")
+                    if marked_tempo is not None and marked_tempo != bpm_to_tempo(sound.attrib["tempo"]):
+                        raise MidiFormatError("Metronome and playback tempo disagree")
                     if division is None or ppqn is None:
                         raise MidiFormatError("Tempo direction precedes divisions")
                     offset = child(item, "offset")
@@ -333,7 +368,7 @@ def decode_musicxml(raw: bytes) -> tuple[Score, MusicXmlReceipt]:
                         fragments.append(_NotePart(note.name, note.pitch,
                             position + note.start, position + note.stop,
                             note.voice, note.tied_to_next, note.tied_from_previous,
-                            note.explicit_id))
+                            note.explicit_id, note.velocity, note.release_velocity))
                         total_fragments += 1
                         if total_fragments > MAX_NOTE_FRAGMENTS:
                             raise MidiLimitError("MusicXML note fragment count exceeds budget")
@@ -364,7 +399,7 @@ def decode_musicxml(raw: bytes) -> tuple[Score, MusicXmlReceipt]:
             master_measure_stops = tuple(measure_stops)
         tracks = _convert_voices(fragments, part_idx, position)
         track_rows.append(ScoreTrack(info.id, info.name, info.channel, info.program,
-                                     0, 0, tracks))
+                                     info.bank_msb, info.bank_lsb, tracks))
     if ppqn is None or master_measure_stops is None:
         raise MidiFormatError("MusicXML has no valid quarter division")
     end = master_measure_stops[-1]
@@ -378,11 +413,10 @@ def decode_musicxml(raw: bytes) -> tuple[Score, MusicXmlReceipt]:
     tempo_points = tuple(point for _, point in sorted(master_tempos.items()))
     score = Score(title, ppqn, tuple(track_rows), tempo_points,
                   meter_points, end)
-    losses = ("MusicXML_velocity_not_represented_default_100",
-              "MusicXML_per_note_pan_not_represented_default_64",
+    losses = ("MusicXML_per_note_pan_not_represented_default_64",
               "notation_spelling_and_layout_not_retained",
               "articulation_and_engraving_not_retained",
-              "note_release_velocity_not_represented_default_0")
+              "absent_note_dynamics_default_to_100_and_release_0")
     receipt = MusicXmlReceipt(fingerprint(raw), score.sha256, len(track_rows),
                               len(master_measure_starts), score.note_count,
                               len(tempo_points), len(meter_points), losses)
