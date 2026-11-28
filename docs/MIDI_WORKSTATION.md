@@ -184,3 +184,43 @@ and refuses to overwrite inputs, symlinks or existing output by default.
 The complete repository's tests verify canonical legacy encode/decode, the
 strict clock, track routing and fail-closed conversion with real
 \`sonumio.arrangement\` and \`sonumio.music_score_io\` rather than a test stub.
+
+## Explicit legacy arrangement import
+
+Legacy Sonumio arrangement score JSON can also be converted to the new
+editable MIDI workstation score format, but this is **not a lossless format
+conversion**. Legacy score style, harmonic progression, named sections and
+frame-rounded swing belong to the original composition, not the workstation
+score model. The \`arrangement-import\` command requires explicit routing for
+every note-bearing legacy instrument, including the MIDI channel, program and
+optional bank selection. No patch is guessed from an instrument's name.
+
+\`\`\`bash
+python -m sonumio.midi_workstation arrangement-import original-arrangement.json \
+  --route keys:keyboard:0:0 \
+  --route pad:strings:1:48 \
+  --route bass:bassline:2:33 \
+  --route lead:leadline:3:80 \
+  --route pluck:plucked:4:24 \
+  --route kick:kick:9:0 \
+  --route snare:snare:9:0 \
+  --route hat:hat:9:0 \
+  --allow-velocity-quantization --allow-pan-quantization \
+  --output editable.json
+\`\`\`
+
+Supply only mappings for instruments that actually appear in the arrangement.
+Exact eighth-note grid timing survives as long as PPQN is divisible by eight
+(the default is 480). Constant BPM is converted to integer microseconds per
+quarter; the MIDI score has 4/4 meter. MIDI note velocities are [1,127], and
+MIDI pan is [0,127] with center 64. Nonrepresentable fractional velocities and
+pans are refused unless their corresponding \`--allow-*-quantization\` option is
+explicitly present. Swing is refused by default; \`--allow-swing-loss\` records
+that the new straight PPQN score cannot reproduce the original frame timing.
+
+The receipt includes the original arrangement digest, generated score digest,
+exact note count, maximum quantization errors, skipped metadata, all routing
+choices, and whether swing was discarded. Canonical output uses Sonumio's
+normal no-clobber atomic workstation-score publisher, with optional SHA-256
+input/output guards. Full GitHub CI exercises this against both real schema
+implementations; metadata loss is never described as an exact roundtrip.

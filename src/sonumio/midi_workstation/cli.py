@@ -30,6 +30,7 @@ from .tempo import tempo_summary
 from .score_commands import add_score_commands, COMMANDS as SCORE_COMMANDS
 from .history_cli import register_history_commands, COMMANDS as HISTORY_COMMANDS
 from .arrangement_bridge_cli import register_arrangement_bridge, COMMANDS as BRIDGE_COMMANDS
+from .arrangement_import_cli import register_arrangement_import, COMMANDS as IMPORT_COMMANDS
 
 
 def _source_digest(parser):
@@ -170,6 +171,7 @@ def make_parser() -> argparse.ArgumentParser:
     add_score_commands(sub)
     register_history_commands(sub)
     register_arrangement_bridge(sub)
+    register_arrangement_import(sub)
     return parser
 
 
@@ -387,6 +389,7 @@ _DISPATCH = {
     **SCORE_COMMANDS,
     **HISTORY_COMMANDS,
     **BRIDGE_COMMANDS,
+    **IMPORT_COMMANDS,
 }
 
 
