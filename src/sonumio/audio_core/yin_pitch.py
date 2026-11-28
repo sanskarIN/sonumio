@@ -190,7 +190,8 @@ def _difference(segment: np.ndarray, frame: int, maximum_lag: int) -> np.ndarray
 
 def _cmndf(difference: np.ndarray) -> np.ndarray:
     if (not isinstance(difference, np.ndarray) or difference.ndim != 1
-            or len(difference) < 3 or not np.isfinite(difference).all()
+            or len(difference) < 3 or difference.dtype not in (np.float32, np.float64)
+            or not np.isfinite(difference).all()
             or np.any(difference < 0)):
         raise AudioContractError("Invalid pitch difference curve")
     cumulative = np.cumsum(difference, dtype=np.float64)
