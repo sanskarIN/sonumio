@@ -81,7 +81,7 @@ class PercussionModel(nn.Module):
         modal=self.modal(hidden).reshape(count,3,MODES)
         frequency=self.low_frequency+(self.high_frequency-self.low_frequency)*torch.sigmoid(modal[:,0])
         decay=.005+.245*torch.sigmoid(modal[:,1])
-        sweep=frequency*.8*torch.sigmoid(modal[:,2])
+        sweep=torch.minimum(frequency*.8,11000.-frequency)*torch.sigmoid(modal[:,2])
         nd=.003+.147*torch.sigmoid(self.noise_decay(hidden))
         edge=self.edge(hidden)
         attack=1.+127.*torch.sigmoid(edge[:,0])
