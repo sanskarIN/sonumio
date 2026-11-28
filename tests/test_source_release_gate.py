@@ -394,3 +394,111 @@ def test_pack_smoke_cross_checks_actual_archive_and_selection(tmp_path):
     target.write_bytes(select_asset(raw, "rain", 1).wav)
     with pytest.raises(RuntimeError, match="differs from archive"):
         gate._check_pack_smoke(created, verified, selected, archive, target)
+
+
+def _write_test_source_member(archive, candidate, format, name, payload):
+    """Write an isolated source entry without relying on the host filesystem."""
+    full_name = candidate.prefix + name
+    if format == "zip":
+        with zipfile.ZipFile(archive, "w") as writer:
+            writer.writestr(full_name, payload)
+    else:
+        with tarfile.open(archive, "w:gz") as writer:
+            member = tarfile.TarInfo(full_name)
+            member.size = len(payload)
+            writer.addfile(member, io.BytesIO(payload))
+
+
+@pytest.mark.parametrize("format", ["tar.gz", "zip"])
+@pytest.mark.parametrize("filename", [
+    "CON", "docs/con.txt", "docs/PRN.md", "aux/source.py",
+    "NUL.anything.txt", "COM1.txt", "lpt9.py", "COM¹.txt",
+    "LPT².txt", "COM³.txt", "conin$.txt", "conout$/main.py",
+    "docs/AUX .txt", "docs/what?.py", "docs/a*b.py",
+    'docs/a"b.py', "docs/a<b.py", "docs/a>b.py", "docs/a|b.py",
+    "docs/a:b.py", "docs/a\u0085b.py", "docs/cafe\u0301.md",
+])
+def test_archive_rejects_nonportable_paths(tmp_path, filename, format):
+    candidate = gate.SourceCandidate("a" * 40, "0.0.2")
+    archive = tmp_path / ("unsafe." + format)
+    _write_test_source_member(archive, candidate, format, filename, b"source")
+    with pytest.raises(RuntimeError, match="Unsafe archive path"):
+        gate._read_archive(archive, candidate, format)
+
+
+@pytest.mark.parametrize("format", ["tar.gz", "zip"])
+@pytest.mark.parametrize("filename", [
+    "docs/console.md", "docs/auxiliary.md", "docs/COM10.txt",
+    "docs/LPT0.txt", "docs/café.md", "docs/中文.md", "docs/a b.py",
+])
+def test_archive_accepts_portable_near_matches(tmp_path, filename, format):
+    candidate = gate.SourceCandidate("a" * 40, "0.0.2")
+    archive = tmp_path / ("safe." + format)
+    _write_test_source_member(archive, candidate, format, filename, b"source")
+    assert gate._read_archive(archive, candidate, format).files == {filename: b"source"}
+
+
+def _pe_example():
+    payload = bytearray(80)
+    payload[:2] = b"MZ"
+    payload[60:64] = (64).to_bytes(4, "little")
+    payload[64:68] = b"PE\x00\x00"
+    return bytes(payload)
+
+
+@pytest.mark.parametrize("format", ["tar.gz", "zip"])
+@pytest.mark.parametrize("payload", [
+    b"\x1f\x8b\x08" + bytes(32),
+    b"BZh9" + bytes(32),
+    b"\xfd7zXZ\x00" + bytes(32),
+    b"7z\xbc\xaf\x27\x1c" + bytes(32),
+    b"Rar!\x1a\x07" + bytes(32),
+    b"\x7fELF" + bytes(32),
+    b"\x89HDF\r\n\x1a\n" + bytes(32),
+    b"SQLite format 3\x00" + bytes(32),
+    b"\x1a\x45\xdf\xa3" + bytes(32),
+    b"\xfe\xed\xfa\xce" + bytes(32),
+    b"\xce\xfa\xed\xfe" + bytes(32),
+    b"\xfe\xed\xfa\xcf" + bytes(32),
+    b"\xcf\xfa\xed\xfe" + bytes(32),
+    b"FORM" + bytes(4) + b"AIFF" + bytes(32),
+    b"FORM" + bytes(4) + b"AIFC" + bytes(32),
+    b"\x00\x00\x00\x18ftypM4A " + bytes(32),
+    bytes(257) + b"ustar\x00" + bytes(32),
+    _pe_example(),
+])
+def test_archive_refuses_additional_disguised_artifacts(tmp_path, payload, format):
+    candidate = gate.SourceCandidate("a" * 40, "0.0.2")
+    archive = tmp_path / ("disguised." + format)
+    _write_test_source_member(archive, candidate, format, "docs/report.txt", payload)
+    with pytest.raises(RuntimeError, match="Binary artifact signature"):
+        gate._read_archive(archive, candidate, format)
+
+
+@pytest.mark.parametrize("suffix", [
+    ".zip", ".tar", ".gz", ".tgz", ".bz2", ".xz", ".7z", ".rar",
+    ".aiff", ".aif", ".m4a", ".aac", ".webm", ".mkv", ".opus",
+    ".whl", ".msi", ".dmg", ".iso", ".obj", ".o", ".lib", ".a",
+])
+def test_more_artifact_extensions_refused_before_read(suffix):
+    candidate = gate.SourceCandidate("a" * 40, "0.0.2")
+    entries = gate.SourceEntries(candidate)
+
+    def forbidden():
+        pytest.fail("Artifact contents must not be read")
+
+    with pytest.raises(RuntimeError, match="Binary or sensitive artifact"):
+        entries.accept(candidate.prefix + "docs/artifact" + suffix.upper(),
+                       directory=False, regular=True, size=1, read=forbidden)
+
+
+@pytest.mark.parametrize("source", [
+    b'MZ is a documented executable header.',
+    b'FORM is a container identifier.',
+    b'# Formats\n- ustar\n- ftyp\n',
+    b'PE\x00\x00',  # Signature without a DOS header is not a PE image.
+    b'MZ' + bytes(58) + b'\xff\xff\xff\xff',
+    b'MZ' + bytes(58) + (4).to_bytes(4, "little"),
+])
+def test_partial_signatures_do_not_classify_source_as_artifacts(source):
+    gate.reject_artifact_contents("docs/format.md", source)
