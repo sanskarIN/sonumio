@@ -21,6 +21,8 @@ from .publish import PublicationOptions, publish_midi, publish_score
 from .quantize import HumanizeSettings, QuantizeGrid, humanize_score, quantize_score
 from .raw_edit import MidiTransformSettings, transform_midi
 from .lint import LintSettings, lint_midi
+from .score_preview import ScorePreviewOptions, export_score_preview
+from .wavetable_bridge import WavetableBridgeSettings
 from .score import Score, from_midi, to_midi
 from .score_io import load_score, parse_score_snapshot
 from .smf import read_smf, validate_roundtrip
@@ -111,6 +113,28 @@ def make_parser() -> argparse.ArgumentParser:
     _source_digest(midi_transform)
     _destination(midi_transform)
 
+    preview = sub.add_parser(
+        "score-preview-wav",
+        help="Render an original symbolic score through Sonumio audio_core wavetable",
+    )
+    preview.add_argument("source", type=Path)
+    preview.add_argument("--sample-rate", type=int, default=24000)
+    preview.add_argument("--channels", type=int, default=2)
+    preview.add_argument("--waveform", choices=("sine", "saw", "square", "triangle"),
+                         default="triangle")
+    preview.add_argument("--table-size", type=int, default=2048)
+    preview.add_argument("--max-harmonics", type=int, default=64)
+    preview.add_argument("--master-gain", type=float, default=.15)
+    preview.add_argument("--attack-frames", type=int, default=64)
+    preview.add_argument("--decay-frames", type=int, default=256)
+    preview.add_argument("--sustain-level", type=float, default=.7)
+    preview.add_argument("--release-frames", type=int, default=512)
+    preview.add_argument("--include-muted", action="store_true")
+    preview.add_argument("--output-bits", type=int, choices=(8, 16, 24, 32), default=16)
+    preview.add_argument("--dither-seed", type=int)
+    _source_digest(preview)
+    _destination(preview)
+
     score_inspect = sub.add_parser("score-inspect", help="Inspect score metrics and chord hypotheses")
     score_inspect.add_argument("source", type=Path)
     score_inspect.add_argument("--window-ticks", type=int)
@@ -200,6 +224,38 @@ def _midi_import(args) -> dict:
         "result_score_sha256": score.sha256,
         "publication": publication.as_dict(),
         "conversion": ledger,
+    }
+
+
+def _score_preview_wav(args) -> dict:
+    source = load_score(args.source, expected_sha256=args.expected_sha256)
+    bridge = WavetableBridgeSettings(
+        sample_rate=args.sample_rate,
+        channels=args.channels,
+        waveform=args.waveform,
+        table_size=args.table_size,
+        max_harmonics=args.max_harmonics,
+        master_gain=args.master_gain,
+        attack_frames=args.attack_frames,
+        decay_frames=args.decay_frames,
+        sustain_level=args.sustain_level,
+        release_frames=args.release_frames,
+        include_muted=args.include_muted,
+    )
+    result = export_score_preview(
+        source.score, args.output,
+        ScorePreviewOptions(
+            bridge=bridge, output_bits=args.output_bits,
+            dither_seed=args.dither_seed,
+            overwrite=args.overwrite, create_parent=args.create_parent,
+            expected_output_sha256=args.expected_output_sha256,
+        ),
+        source_path=args.source,
+    )
+    return {
+        "protocol": "sonumio-workstation-preview-receipt-v1",
+        "source": source.as_dict(),
+        "preview": result.as_dict(),
     }
 
 
@@ -321,6 +377,7 @@ _DISPATCH = {
     "midi-export": _midi_export,
     "midi-transform": _midi_transform,
     "midi-lint": _midi_lint,
+    "score-preview-wav": _score_preview_wav,
     "score-inspect": _score_inspect,
     "score-quantize": _score_quantize,
     "score-humanize": _score_humanize,

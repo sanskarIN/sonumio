@@ -114,3 +114,30 @@ require a whole-score selection and choose a minimal-accidental enharmonic
 spelling. Without that flag, transposition retains original key-signature
 metadata and exposes that fact in the receipt. Publication is atomic,
 SHA-256-pinned, no-clobber by default, and never overwrites an input file.
+
+## Hash-verified score-to-WAV preview
+
+The opt-in `score-preview-wav` command renders a Sonumio symbolic workstation
+score through the existing `sonumio.audio_core.wavetable` synthesizer. It does
+not train or call a generative model, load third-party recordings or execute
+MIDI SysEx. The synthesizer uses original finite-Fourier waveforms; audio
+quality is not established by correctness tests.
+
+```bash
+python -m sonumio.midi_workstation score-preview-wav original-score.json --output preview.wav
+python -m sonumio.midi_workstation score-preview-wav original-score.json --output preview.wav --sample-rate 24000 --channels 2 --waveform sine --master-gain 0.12 --output-bits 24 --dither-seed 2026
+```
+
+The score's exact rational tempo clock determines sample frames. Only active
+pitched notes render by default; percussion notes are excluded because this
+is not a drum sampler. Use `--include-muted` only when intentionally rendering
+muted tracks. The preview enforces a 24 MiB float32 intermediate budget,
+integer PCM bits 8/16/24/32, an explicit optional 32-bit deterministic dither
+seed, a 64 MiB WAV transport bound and a peak limit of 1.0 before quantization.
+
+The existing local generated-WAV atomic publisher enforces no-clobber by
+default, checksum-pinned output, and symlink refusal. Score and output paths
+must be distinct. The JSON receipt identifies the canonical source score,
+output WAV SHA-256, float audio digest, sample clock, peak, RMS, rendered notes,
+and whether any percussion notes were skipped. Wavetable render and real-WAV
+round-trip tests run against Sonumio's actual audio core in full-repo CI.
