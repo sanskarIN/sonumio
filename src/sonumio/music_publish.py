@@ -14,6 +14,7 @@ import tempfile
 from .atomic_cli_wav import _ensure_safe_parent, _check_existing_target
 from .music_score_io import MAX_SCORE_BYTES
 from .music_midi import MAX_MIDI_BYTES
+from .music_score_patch import MAX_PATCH_BYTES
 from .errors import GenerationError
 
 MAX_STEM_PACK_BYTES = 50 * 1024 * 1024
@@ -29,6 +30,7 @@ class ArtifactReceipt:
 def publish_music_artifact(path,data,*,kind,overwrite=False,expected_sha256=None):
     formats = {"score": (MAX_SCORE_BYTES, ".json"),
                "midi": (MAX_MIDI_BYTES, ".mid"),
+               "patch": (MAX_PATCH_BYTES, ".json"),
                "stems": (MAX_STEM_PACK_BYTES, ".zip")}
     if type(kind) is not str or kind not in formats or type(overwrite) is not bool:
         raise GenerationError("Invalid music artifact publication mode")
