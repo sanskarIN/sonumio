@@ -141,3 +141,46 @@ must be distinct. The JSON receipt identifies the canonical source score,
 output WAV SHA-256, float audio digest, sample clock, peak, RMS, rendered notes,
 and whether any percussion notes were skipped. Wavetable render and real-WAV
 round-trip tests run against Sonumio's actual audio core in full-repo CI.
+
+## Strict workstation-to-arrangement export
+
+The MIDI workstation score and the existing Sonumio long-form arrangement are
+**different document formats**. An arrangement has template-owned sections,
+harmony, root/mode and a fixed eighth-beat grid. It cannot faithfully encode
+workstation track IDs, programs/banks, release velocities, arbitrary meter or
+tempo maps, repeated same-pitch overlaps, unrestricted polyphony, or fractional
+eighth-beat note endpoints. The opt-in \`arrangement-export\` command requires an
+existing canonical arrangement template, with all source tracks mapped to
+legacy instruments explicitly. It never invents sections or harmony.
+
+\`\`\`bash
+python -m sonumio.midi_workstation arrangement-export \
+  original-workstation-score.json \
+  --template existing-arrangement.json \
+  --route synth:lead \
+  --route drums:kick \
+  --output new-arrangement.json
+\`\`\`
+
+Only a score with one constant tempo exactly matching the template BPM, one
+4/4 meter point, zero template swing and identical duration is accepted.
+Every note onset and end must align exactly to the arrangement eighth-beat
+grid: the bridge refuses rounding and quantization. The bridge refuses an
+incomplete or redundant route mapping, MIDI percussion/tonal role mismatches,
+pitches outside 24..96, scale mismatches, duplicate notes, invalid polyphony,
+notes over the legacy duration limit, and more than 4096 events. Transposition
+may be explicit per route, e.g. \`--route synth:lead:12\`, but is validated
+against the legacy pitch and scale constraints.
+
+By default muted tracks are ignored, while explicit \`--include-muted\` converts
+all mapped note-bearing tracks. Default note pan maps 7-bit score pan into
+[-1,+1] with exact center at MIDI 64; \`--center-pan\` forces every legacy event
+to pan=0. Note-on velocity maps to \`velocity/127\`. The resulting receipt
+records every dropped semantic field, the template's and source score's SHA,
+and the generated canonical arrangement digest. A source or template SHA may
+be pinned; output bytes can be separately SHA-pinned. Publication is atomic
+and refuses to overwrite inputs, symlinks or existing output by default.
+
+The complete repository's tests verify canonical legacy encode/decode, the
+strict clock, track routing and fail-closed conversion with real
+\`sonumio.arrangement\` and \`sonumio.music_score_io\` rather than a test stub.

@@ -29,6 +29,7 @@ from .smf import read_smf, validate_roundtrip
 from .tempo import tempo_summary
 from .score_commands import add_score_commands, COMMANDS as SCORE_COMMANDS
 from .history_cli import register_history_commands, COMMANDS as HISTORY_COMMANDS
+from .arrangement_bridge_cli import register_arrangement_bridge, COMMANDS as BRIDGE_COMMANDS
 
 
 def _source_digest(parser):
@@ -168,6 +169,7 @@ def make_parser() -> argparse.ArgumentParser:
     _destination(new)
     add_score_commands(sub)
     register_history_commands(sub)
+    register_arrangement_bridge(sub)
     return parser
 
 
@@ -384,6 +386,7 @@ _DISPATCH = {
     "score-new": _score_new,
     **SCORE_COMMANDS,
     **HISTORY_COMMANDS,
+    **BRIDGE_COMMANDS,
 }
 
 
