@@ -187,9 +187,9 @@ def _preflight(
         raise AudioContractError("Mono output cannot pan")
     if source.channels == 2 and any(t.pan != 0 for t in triggers):
         raise AudioContractError("Stereo source pan is not implicitly remapped")
-    output_spec = AudioSpec(source.sample_rate,
-                            AudioLayout.for_channels(settings.channels),
-                            settings.frames)
+    layout = (source.spec.layout if settings.channels == source.channels
+              else AudioLayout.for_channels(settings.channels))
+    output_spec = AudioSpec(source.sample_rate, layout, settings.frames)
     intervals = []
     work = 0
     for trigger in triggers:
@@ -277,7 +277,8 @@ def render_sampler(
         raise AudioLimitError("Sampler output exceeds finite float32 range")
     result = make_buffer(
         output.astype(np.float32), source.sample_rate,
-        layout=AudioLayout.for_channels(settings.channels),
+        layout=(source.spec.layout if settings.channels == source.channels
+                else AudioLayout.for_channels(settings.channels)),
         source_note="non-destructive sample-clock slicer",
     )
     report = SamplerReport(
