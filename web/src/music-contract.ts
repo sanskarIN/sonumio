@@ -1,4 +1,5 @@
 /** Local original-music controls shared by the studio and its API client. */
+import type { AutomationInput } from './music-automation-contract';
 import { parseNoteEvents, validateEditShape, type NoteEdits, type NoteEvent } from './music-note-editor';
 export const TRACKS = ['keys', 'pad', 'bass', 'lead', 'pluck', 'kick', 'snare', 'hat'] as const;
 export type Track = typeof TRACKS[number];
@@ -17,7 +18,7 @@ export type MusicMix = {
   gains: number[]; mute: Track[]; solo: Track[]; room: number; peak_ceiling: number;
 };
 export type MusicScoreInput = { composition: Composition; expected_score_sha256?: string; note_edits?: NoteEdits };
-export type MusicRenderInput = MusicScoreInput & { mix: MusicMix };
+export type MusicRenderInput = MusicScoreInput & { mix: MusicMix; automation?: AutomationInput };
 export type Section = { kind: string; first_bar: number; bars: number };
 export type TrackSummary = { events: number; active_fraction: number; pitch_min: number | null; pitch_max: number | null; max_polyphony: number };
 export type MusicPlan = {
