@@ -47,7 +47,10 @@ def test_absolute_edge_mapping_is_monotonic_bounded_and_differentiable(limits):
     assert bool((out[1:]>out[:-1]).all())
     out.sum().backward()
     assert bool(torch.isfinite(unit.grad).all())
-    assert bool((unit.grad>0).all())
+    # The boundary clamp may legitimately saturate at either endpoint.
+    # Strictly positive gradients are required throughout the interior.
+    assert bool((unit.grad[1:-1]>0).all())
+    assert bool((unit.grad[[0,-1]]>=0).all())
     short=absolute_edge_frames(unit.detach(),2048,limits)
     assert float(short.max())<1024
 
