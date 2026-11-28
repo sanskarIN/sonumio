@@ -39,8 +39,12 @@ errors or weakening test coverage.
 - Source-only build gate passes all Linux/Windows matrix jobs, both
   archive formats and clean installation with expected version 0.0.3.
 - Archive gate rejects known private/binary formats by suffix and
-  recognizable content signature, even when mislabeled. This is not
-  a comprehensive secret scanner.
+  recognizable content signature, even when mislabeled, including nested
+  compressed archives, executable headers and additional audio containers.
+  ZIP and tar paths must also use portable NFC names without Windows device
+  names, reserved characters or control characters. These are deliberately
+  conservative source-export rules, not a comprehensive secret scanner,
+  binary classifier or proof of safety for arbitrary untrusted archives.
 - No model weights, private data, generated audio, binary installers
   or model-quality claims are included. Experimental category generation
   is not an open-vocabulary Sonumio-1 model.
