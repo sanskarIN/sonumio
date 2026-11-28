@@ -1,0 +1,77 @@
+{
+  "format": "sonumio-mix-automation-v1",
+  "lanes": [
+    {
+      "track": "pad",
+      "parameter": "gain",
+      "keys": [
+        {
+          "tick": 0,
+          "value": 0.15,
+          "law": "smoothstep"
+        },
+        {
+          "tick": 32,
+          "value": 1
+        },
+        {
+          "tick": 96,
+          "value": 1,
+          "law": "smoothstep"
+        },
+        {
+          "tick": 128,
+          "value": 0.3
+        }
+      ]
+    },
+    {
+      "track": "lead",
+      "parameter": "gain",
+      "keys": [
+        {
+          "tick": 0,
+          "value": 0.2,
+          "law": "smoothstep"
+        },
+        {
+          "tick": 32,
+          "value": 1.15
+        },
+        {
+          "tick": 96,
+          "value": 1.15,
+          "law": "smoothstep"
+        },
+        {
+          "tick": 128,
+          "value": 0.5
+        }
+      ]
+    },
+    {
+      "track": "lead",
+      "parameter": "balance",
+      "keys": [
+        {
+          "tick": 0,
+          "value": -0.4,
+          "law": "smoothstep"
+        },
+        {
+          "tick": 64,
+          "value": 0.4,
+          "law": "smoothstep"
+        },
+        {
+          "tick": 128,
+          "value": 0
+        }
+      ]
+    }
+  ],
+  "mix": {
+    "room": 0.15,
+    "peak_ceiling": 0.9
+  }
+}
