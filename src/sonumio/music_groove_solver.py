@@ -8,8 +8,6 @@ hit counts are hard constraints, not postprocessing heuristics.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from itertools import combinations
-import math
 
 from .errors import GenerationError
 from .arrangement import integer
