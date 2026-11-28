@@ -257,7 +257,8 @@ def cancel_job(job_id: str) -> dict:
 # Audio synthesis goes through the existing shared single-worker job queue.
 from .music_studio import (
     MusicScoreRequest, MusicRenderRequest, prepare_score, describe_score,
-    export_score, render_preview,
+    export_score, render_preview, prepare_automation, describe_automation,
+    export_automation, render_automated_preview,
 )
 
 
@@ -290,14 +291,37 @@ def enqueue_music(request: MusicRenderRequest, job_id: RequestedJobId = None) ->
     score = _music_score(request)
     try:
         mix = request.mix.to_plan()
+        automation = prepare_automation(request, score) if request.automation is not None else None
     except GenerationError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     store = _store_for(OUTPUT_DIR)
 
     def produce():
-        wav, result = render_preview(score, mix)
+        wav, result = (render_preview(score, mix) if automation is None
+                       else render_automated_preview(score, automation))
         identifier = _store_audio(wav, store)
         return {**result, "id": identifier,
                 "audio_url": f"/v1/generations/{identifier}/audio"}
 
     return _enqueue("music", request, produce, store, job_id)
+
+
+def _music_automation(request):
+    score = _music_score(request)
+    try:
+        return score, prepare_automation(request, score)
+    except GenerationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.post("/v1/music/automation/plan")
+def music_automation_plan(request: MusicRenderRequest):
+    score, automation = _music_automation(request)
+    return describe_automation(score, automation)
+
+
+@app.post("/v1/music/automation/export")
+def music_automation_export(request: MusicRenderRequest):
+    score, automation = _music_automation(request)
+    data, headers = export_automation(score, automation)
+    return Response(content=data, media_type="application/json", headers=headers)
