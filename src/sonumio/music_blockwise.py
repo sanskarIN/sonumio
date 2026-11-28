@@ -244,67 +244,82 @@ def _trace_update(trace, start, data):
     trace.update(np.ascontiguousarray(data, dtype="<f8").tobytes())
 
 
-def generate_blockwise_music(score, mix=None, *, block_frames=DEFAULT_BLOCK):
-    """Return canonical stereo WAV bytes and a verified two-pass receipt.
+def _encode_replayed_blocks(frames, peak_ceiling, make_blocks):
+    """Two-pass bounded encoder shared by static and automated music mixers.
 
-    The first pass computes global peak and stem statistics. The second
-    recomputes the identical unscaled stream, checks its SHA256 and encodes
-    globally attenuated PCM16 into the bounded WAV buffer. No disk temporary
-    PCM, full-song float stems, or trained model is required.
+    The block factory receives True during peak/statistics collection and
+    False during final encoding. Each pass must cover the full absolute
+    clock exactly once and replay the same float64 stream.
     """
-    frames = _validate(score, block_frames)
-    mix = MixPlan() if mix is None else mix
-    if not isinstance(mix, MixPlan):
-        raise GenerationError("Expected MixPlan")
-    tracks = {track: _Stats() for track in TRACKS}
-    trace = hashlib.sha256()
-    pre_peak = 0.
-    first_count = 0
-    for start, wet in iter_wet_blocks(score, mix, block_frames, track_stats=tracks):
-        _trace_update(trace, start, wet)
-        pre_peak = max(pre_peak, float(np.max(np.abs(wet))))
-        first_count += wet.shape[1]
-    if first_count != frames:
-        raise GenerationError("Incomplete first music render pass")
-    scale = min(1., mix.peak_ceiling / max(pre_peak, 1e-15))
-    first_digest = trace.hexdigest()
-    second = hashlib.sha256()
-    stats = _Stats()
-    output = io.BytesIO()
-    encoded_frames = 0
-    with wave.open(output, "wb") as writer:
+    if (type(frames) is not int or not 1<=frames<=MAX_FRAMES
+            or type(peak_ceiling) not in (int,float) or not .05<=peak_ceiling<=.99
+            or not callable(make_blocks)):
+        raise GenerationError("Invalid blockwise encoding contract")
+
+    def verified_blocks(first):
+        cursor=0
+        for start,wet in make_blocks(first):
+            if (type(start) is not int or start!=cursor
+                    or not isinstance(wet,np.ndarray) or wet.dtype!=np.float64
+                    or wet.ndim!=2 or wet.shape[0]!=2 or not 1<=wet.shape[1]<=MAX_BLOCK
+                    or cursor+wet.shape[1]>frames or not np.isfinite(wet).all()):
+                raise GenerationError("Invalid or noncontiguous blockwise PCM stream")
+            cursor+=wet.shape[1]
+            yield start,wet
+        if cursor!=frames:
+            raise GenerationError("Incomplete blockwise PCM stream")
+
+    trace=hashlib.sha256()
+    pre_peak=0.
+    for start,wet in verified_blocks(True):
+        _trace_update(trace,start,wet)
+        pre_peak=max(pre_peak,float(np.max(np.abs(wet))))
+    scale=min(1.,peak_ceiling/max(pre_peak,1e-15))
+    first_digest=trace.hexdigest()
+    second=hashlib.sha256()
+    stats=_Stats()
+    output=io.BytesIO()
+    with wave.open(output,"wb") as writer:
         writer.setnchannels(2)
         writer.setsampwidth(2)
         writer.setframerate(SAMPLE_RATE)
         writer.setnframes(frames)
-        for start, wet in iter_wet_blocks(score, mix, block_frames):
-            _trace_update(second, start, wet)
-            if start != encoded_frames:
-                raise GenerationError("Noncontiguous blockwise PCM encoding")
-            audio = (wet * scale).astype(np.float32)
+        for start,wet in verified_blocks(False):
+            _trace_update(second,start,wet)
+            audio=(wet*scale).astype(np.float32)
             stats.add(audio)
-            pcm = (np.clip(audio, -1., 1.) * 32767.).round().astype("<i2")
+            pcm=(np.clip(audio,-1.,1.)*32767.).round().astype("<i2")
             writer.writeframesraw(pcm.T.tobytes(order="C"))
-            encoded_frames += audio.shape[1]
-    if encoded_frames != frames or second.hexdigest() != first_digest:
+    if second.hexdigest()!=first_digest:
         raise GenerationError("Blockwise music replay differs from peak pass")
-    wav = output.getvalue()
-    if len(wav) != 44 + frames * 4:
+    wav=output.getvalue()
+    if len(wav)!=44+frames*4:
         raise GenerationError("Blockwise WAV byte geometry mismatch")
-    report = {
-        "protocol": PROTOCOL, "sample_rate": SAMPLE_RATE, "channels": 2, "frames": frames,
-        "score_sha256": arrangement_digest(score), "wav_sha256": hashlib.sha256(wav).hexdigest(),
-        "pre_master_peak": pre_peak, "master_attenuation": scale,
-        "room_amount": float(mix.room), "peak_ceiling": float(mix.peak_ceiling),
-        "metrics": stats.metrics(),
-        "tracks": {track: {"active": mix.active(track), "gain": float(gain),
-                           "dry_peak": tracks[track].peak, "dry_rms": tracks[track].rms}
-                   for track, gain in zip(TRACKS, mix.gains, strict=True)},
-        "block_frames": block_frames, "render_passes": 2,
-        "unscaled_stream_sha256": first_digest, "replay_verified": True,
-        "retains_full_float_stems": False, "retains_final_wav_bytes": True,
-        "max_active_note_limit": MAX_ACTIVE_NOTES, "room_history_frames": ROOM_HISTORY,
-        "true_peak_measured": False, "lufs_measured": False,
-        "learned_model": False, "external_recordings_used": False,
-    }
-    return wav, report
+    return wav,{"sample_rate":SAMPLE_RATE,"channels":2,"frames":frames,
+        "wav_sha256":hashlib.sha256(wav).hexdigest(),"pre_master_peak":pre_peak,
+        "master_attenuation":scale,"peak_ceiling":float(peak_ceiling),"metrics":stats.metrics(),
+        "render_passes":2,"unscaled_stream_sha256":first_digest,"replay_verified":True,
+        "retains_full_float_stems":False,"retains_final_wav_bytes":True,
+        "max_active_note_limit":MAX_ACTIVE_NOTES,"room_history_frames":ROOM_HISTORY,
+        "true_peak_measured":False,"lufs_measured":False,"learned_model":False,
+        "external_recordings_used":False}
+
+
+def generate_blockwise_music(score, mix=None, *, block_frames=DEFAULT_BLOCK):
+    """Return canonical stereo WAV bytes and a verified two-pass receipt."""
+    frames=_validate(score,block_frames)
+    mix=MixPlan() if mix is None else mix
+    if not isinstance(mix,MixPlan):
+        raise GenerationError("Expected MixPlan")
+    tracks={track:_Stats() for track in TRACKS}
+
+    def blocks(first):
+        return iter_wet_blocks(score,mix,block_frames,track_stats=tracks if first else None)
+
+    wav,report=_encode_replayed_blocks(frames,mix.peak_ceiling,blocks)
+    report.update({"protocol":PROTOCOL,"score_sha256":arrangement_digest(score),
+                   "room_amount":float(mix.room),"block_frames":block_frames,
+                   "tracks":{track:{"active":mix.active(track),"gain":float(gain),
+                                    "dry_peak":tracks[track].peak,"dry_rms":tracks[track].rms}
+                             for track,gain in zip(TRACKS,mix.gains,strict=True)}})
+    return wav,report
