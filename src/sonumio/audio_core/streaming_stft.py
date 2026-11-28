@@ -117,7 +117,9 @@ class StreamingStft:
             raise AudioLimitError("Streaming STFT exceeds bounded duration")
         # A valid partial input must fit even if users push the entire source
         # as one call; no state is modified before this preflight.
-        _geometry(self._channels, self._rate, total, self._cfg)
+        if (self._cfg.center or self._cfg.pad_end
+                or total >= self._cfg.n_fft):
+            _geometry(self._channels, self._rate, total, self._cfg)
         if data.nbytes + self._buffer.nbytes > MAX_BYTES:
             raise AudioLimitError("Streaming STFT input allocation exceeds budget")
         self._buffer = np.concatenate(
