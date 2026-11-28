@@ -304,3 +304,92 @@ def read_patch(path,*,expected_sha256=None):
     with open(path,"rb") as stream:
         data=stream.read(MAX_PATCH_BYTES+1)
     return decode_patch(data,expected_sha256=expected_sha256)
+
+@dataclass(frozen=True,slots=True)
+class MergeConflict:
+    domain: str
+    reason: str
+
+
+def _track_events(score,track):
+    return tuple(e for e in score.events if e.track==track)
+
+
+def _identities(events):
+    return tuple(_event_identity(e) for e in events)
+
+
+def merge_scores(base,left,right):
+    """Conservative three-way merge of independently edited scores.
+
+    Each track is an atomic conflict domain. Two different edits within
+    a track require explicit resolution, even when their tick ranges
+    are disjoint. A global metadata edit conflicts with unrelated
+    concurrent track edits because clock, key and section semantics may
+    have changed. No source or intermediate score is mutated.
+    """
+    from .arrangement import TRACKS
+    for score in (base,left,right):
+        if not isinstance(score,Arrangement):
+            raise GenerationError("Expected three validated scores")
+    base_id,left_id,right_id=(arrangement_digest(s) for s in (base,left,right))
+    if left_id==right_id:
+        return left,{"conflicts":[],"merged":True,"result_score_sha256":left_id,
+                     "track_sources":dict.fromkeys(TRACKS,"both"),"metadata_source":"both"}
+    if left_id==base_id:
+        return right,{"conflicts":[],"merged":True,"result_score_sha256":right_id,
+                      "track_sources":dict.fromkeys(TRACKS,"right"),"metadata_source":"right"}
+    if right_id==base_id:
+        return left,{"conflicts":[],"merged":True,"result_score_sha256":left_id,
+                     "track_sources":dict.fromkeys(TRACKS,"left"),"metadata_source":"left"}
+    bm,lm,rm=(ScoreMetadata.from_score(s) for s in (base,left,right))
+    lc=lm.identity!=bm.identity
+    rc=rm.identity!=bm.identity
+    conflicts=[]
+    if lc and rc and lm.identity!=rm.identity:
+        conflicts.append(MergeConflict("metadata","different score-wide metadata edits"))
+    selected={}
+    owners={}
+    left_changes=[]
+    right_changes=[]
+    for track in TRACKS:
+        b,l,r=(_track_events(s,track) for s in (base,left,right))
+        bi,li,ri=(_identities(events) for events in (b,l,r))
+        if li!=bi:
+            left_changes.append(track)
+        if ri!=bi:
+            right_changes.append(track)
+        if li==ri:
+            selected[track]=l
+            owners[track]="both" if li!=bi else "base"
+        elif li==bi:
+            selected[track]=r
+            owners[track]="right"
+        elif ri==bi:
+            selected[track]=l
+            owners[track]="left"
+        else:
+            conflicts.append(MergeConflict(track,"both branches changed this track differently"))
+    # If only one branch changed global metadata, reject unrelated changes
+    # by the other branch rather than assuming that their note coordinates
+    # still mean the same thing in the new clock or tonality.
+    if lc and not rc and any(t for t in right_changes if owners.get(t)!="both"):
+        conflicts.append(MergeConflict("metadata","left metadata edit overlaps right track changes"))
+    if rc and not lc and any(t for t in left_changes if owners.get(t)!="both"):
+        conflicts.append(MergeConflict("metadata","right metadata edit overlaps left track changes"))
+    if conflicts:
+        return None,{"merged":False,"conflicts":[asdict(c) for c in conflicts],
+                     "result_score_sha256":None,"track_sources":owners,"metadata_source":None}
+    metadata=lm if lc else rm if rc else bm
+    try:
+        merged=metadata.with_events(e for track in TRACKS for e in selected[track])
+    except GenerationError:
+        conflict=MergeConflict("arrangement","combined edits violate arrangement validation")
+        return None,{"merged":False,"conflicts":[asdict(conflict)],"result_score_sha256":None,
+                     "track_sources":owners,"metadata_source":None}
+    # Replay the resulting delta before returning a merged score.
+    patch=make_patch(base,merged)
+    apply_patch(base,patch)
+    return merged,{"merged":True,"conflicts":[],"result_score_sha256":arrangement_digest(merged),
+                   "track_sources":owners,"metadata_source":"both" if lc and rc else
+                   "left" if lc else "right" if rc else "base","patch_sha256":patch.sha256}

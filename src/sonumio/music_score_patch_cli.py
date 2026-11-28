@@ -9,12 +9,12 @@ import sys
 from .errors import GenerationError
 from .music_score_io import read_score,encode_score
 from .music_score_patch import (
-    MAX_CHAIN,make_patch,apply_with_receipt,inspect_patch,chain_patches,read_patch,encode_patch,
+    MAX_CHAIN,make_patch,apply_with_receipt,inspect_patch,chain_patches,read_patch,encode_patch,merge_scores,
 )
 from .music_publish import publish_music_artifact
 
 COMMANDS=("music-score-diff","music-patch-inspect","music-patch-apply",
-          "music-patch-reverse","music-patch-chain")
+          "music-patch-reverse","music-patch-chain","music-score-merge")
 
 
 def _score_arg(parser,name):
@@ -52,6 +52,10 @@ def register_score_patch_commands(sub):
     _score_arg(chain,"source")
     chain.add_argument("patches",type=Path,nargs="+")
     _output(chain)
+    merge=sub.add_parser("music-score-merge",help="Merge independent track edits against a common score")
+    for name in ("base","left","right"):
+        _score_arg(merge,name)
+    _output(merge)
 
 
 def _different(paths,target):
@@ -78,6 +82,16 @@ def run_score_patch_command(args):
             patch=make_patch(source,target)
             _,report=apply_with_receipt(source,patch)
             _publish(args,encode_patch(patch),"patch",report)
+        elif args.command=="music-score-merge":
+            _different((args.base,args.left,args.right),args.output)
+            base=read_score(args.base,expected_sha256=args.expected_base_sha256)
+            left=read_score(args.left,expected_sha256=args.expected_left_sha256)
+            right=read_score(args.right,expected_sha256=args.expected_right_sha256)
+            result,report=merge_scores(base,left,right)
+            if result is None:
+                print(json.dumps(report,sort_keys=True,allow_nan=False))
+                return 2
+            _publish(args,encode_score(result),"score",report)
         elif args.command=="music-patch-chain":
             if not 1<=len(args.patches)<=MAX_CHAIN:
                 raise GenerationError("Score patch chain exceeds length budget")
