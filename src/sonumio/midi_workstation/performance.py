@@ -177,6 +177,7 @@ class Performance:
 
 @dataclass(slots=True)
 class _OpenNote:
+    origin_track: int
     start: int
     pitch: int
     velocity: int
@@ -233,7 +234,7 @@ def reconstruct_performance(
     def state_key(track: int, event: MidiEvent) -> tuple[int, int]:
         return (track if settings.isolate_tracks else 0, event.channel_number)
 
-    def emit(track: int, channel: int, entry: _OpenNote, stop: int) -> None:
+    def emit(channel: int, entry: _OpenNote, stop: int) -> None:
         nonlocal zero
         release = stop if entry.release is None else entry.release
         if stop < entry.start or release < entry.start:
@@ -241,7 +242,10 @@ def reconstruct_performance(
         if stop == entry.start and not settings.count_zero_duration:
             zero += 1
             return
-        notes.append(NoteSpan(track, channel, entry.pitch, entry.velocity,
+        # Shared channel state must not erase the track that actually
+        # originated the note: its key-off, pedal or forced close may
+        # legitimately arrive in another format-1 MIDI track.
+        notes.append(NoteSpan(entry.origin_track, channel, entry.pitch, entry.velocity,
                               entry.start, release, stop, entry.release_velocity,
                               entry.program, entry.bank_msb, entry.bank_lsb,
                               entry.release is not None and stop > entry.release))
@@ -254,7 +258,7 @@ def reconstruct_performance(
         if state.held:
             sustain_releases += len(state.held)
         for entry in state.held:
-            emit(key[0], key[1], entry, tick)
+            emit(key[1], entry, tick)
         state.held.clear()
 
     for tick, track, _, event in messages:
@@ -279,7 +283,7 @@ def reconstruct_performance(
                 for pitch, entries in list(state.active.items()):
                     for entry in entries:
                         entry.release = tick
-                        emit(key[0], channel, entry, tick)
+                        emit(channel, entry, tick)
                         forced += 1
                 state.active.clear()
                 release_held(key, tick)
@@ -297,7 +301,7 @@ def reconstruct_performance(
                 overlapping += 1
                 if settings.same_pitch == "reject":
                     raise MidiFormatError("Overlapping same-pitch note requires overlap policy")
-            active.append(_OpenNote(tick, pitch, velocity, state.program,
+            active.append(_OpenNote(track, tick, pitch, velocity, state.program,
                                     state.bank_msb, state.bank_lsb))
         elif kind == 0x8 or kind == 0x9 and event.data[1] == 0:
             physical_off += 1
@@ -315,7 +319,7 @@ def reconstruct_performance(
             if state.sustain:
                 state.held.append(entry)
             else:
-                emit(key[0], channel, entry, tick)
+                emit(channel, entry, tick)
             if not entries:
                 del state.active[pitch]
 
@@ -333,10 +337,10 @@ def reconstruct_performance(
         for entries in state.active.values():
             for entry in entries:
                 entry.release = end
-                emit(track, channel, entry, end)
+                emit(channel, entry, end)
                 forced += 1
         for entry in state.held:
-            emit(track, channel, entry, end)
+            emit(channel, entry, end)
             forced += 1
 
     ordered = tuple(sorted(notes, key=lambda n: (

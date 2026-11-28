@@ -46,7 +46,7 @@ Every mutation requires an explicit destination and refuses to overwrite by defa
 3. All event times use integer ticks and all audio transport scheduling uses explicit rational time conversion.
 4. SMPTE MIDI timing is supported for inspection and timing analysis, but not losslessly represented in the separate PPQN-based editable `Score` object. This is an explicit limitation.
 5. Imported MIDI CC, aftertouch and SysEx are never silently interpreted as equivalent symbolic score events. MIDI program changes are refused by default. An explicit `midi-import --allow-patch-rechannel` option can preserve note/program groups by assigning additional fixed patches to unused non-percussion MIDI channels; it records every reassignment, refuses drum-kit changes and refuses channel exhaustion. Such reassignment changes channel routing and is not a byte-identical MIDI roundtrip.
-6. A key-on/key-off interval and a sustain-extended audible interval are distinct.
+6. A key-on/key-off interval and a sustain-extended audible interval are distinct. In explicitly shared-channel performance mode, the originating MIDI track is retained even when a different track sends key-off, sustain release or channel-wide stop messages.
 7. A decoded score or model is never proof that a melody is original, licensed or free of copyright. Pattern generator inputs are supplied by the user.
 8. SHA-256 chains provide corruption detection, not authorship proof or authentication.
 
