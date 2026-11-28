@@ -1,0 +1,43 @@
+{
+  "protocol": "sonumio-original-plucked-score-v1",
+  "plan": {
+    "sample_rate": 24000,
+    "frames": 48000,
+    "channels": 2,
+    "gain": 0.15,
+    "voice": {
+      "damping": 0.996,
+      "brightness": 0.55,
+      "pluck_position": 0.22,
+      "attack_frames": 8,
+      "release_frames": 300,
+      "excitation_smoothing": 3
+    }
+  },
+  "notes": [
+    {
+      "start_frame": 0,
+      "duration_frames": 12000,
+      "midi_note": 60,
+      "velocity": 0.8,
+      "pan": -0.5,
+      "seed": 100
+    },
+    {
+      "start_frame": 8000,
+      "duration_frames": 12000,
+      "midi_note": 64,
+      "velocity": 0.7,
+      "pan": 0,
+      "seed": 101
+    },
+    {
+      "start_frame": 16000,
+      "duration_frames": 12000,
+      "midi_note": 67,
+      "velocity": 0.7,
+      "pan": 0.5,
+      "seed": 102
+    }
+  ]
+}
