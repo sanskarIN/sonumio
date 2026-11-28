@@ -22,6 +22,8 @@ from .music_midi import encode_midi
 from .music_mix import DEFAULT_LEVELS, MixPlan, generate_arrangement_audio
 from .music_score_io import encode_score
 from .music_note_edits import NoteEdits, apply_note_edits
+from .music_studio_automation import StudioAutomationRequest, describe_automation
+from .music_automation import AutomationPlan, generate_automated_music, encode_automation
 
 MAX_PREVIEW_SECONDS = 30
 MAX_PREVIEW_FRAMES = SAMPLE_RATE * MAX_PREVIEW_SECONDS
@@ -75,6 +77,7 @@ class MusicScoreRequest(StudioModel):
 
 class MusicRenderRequest(MusicScoreRequest):
     mix: MusicMixRequest = Field(default_factory=MusicMixRequest)
+    automation: StudioAutomationRequest | None = None
 
 
 def prepare_score(request: MusicScoreRequest) -> Arrangement:
@@ -156,4 +159,47 @@ def render_preview(score: Arrangement, mix: MixPlan):
         "learned_model": False,
         "external_recordings_used": False,
         "disclaimer": DISCLAIMER,
+    }
+
+
+def prepare_automation(request, score):
+    if not isinstance(request, MusicRenderRequest):
+        raise GenerationError("Expected music render request")
+    mix = request.mix.to_plan()
+    if request.automation is None:
+        return AutomationPlan((), mix)
+    return request.automation.to_plan(score, mix)
+
+
+def export_automation(score, plan):
+    data = encode_automation(plan)
+    return data, {
+        "Content-Disposition": 'attachment; filename="sonumio-automation.json"',
+        "X-Sonumio-Score-SHA256": arrangement_digest(score),
+        "X-Sonumio-Automation-SHA256": plan.sha256,
+        "X-Sonumio-Content-SHA256": sha256(data).hexdigest(),
+        "Cache-Control": "no-store",
+    }
+
+
+def render_automated_preview(score, plan):
+    if score.plan.frame(score.plan.ticks) > MAX_PREVIEW_FRAMES:
+        raise GenerationError("Music preview must not exceed 30 seconds")
+    wav, report = generate_automated_music(score, plan)
+    frames = score.plan.frame(score.plan.ticks)
+    if (report["score_sha256"] != arrangement_digest(score)
+            or report["automation_sha256"] != plan.sha256
+            or report["wav_sha256"] != sha256(wav).hexdigest()
+            or report["frames"] != frames or report["sample_rate"] != SAMPLE_RATE
+            or report["channels"] != 2 or len(wav) != 44 + frames * 4):
+        raise GenerationError("Automated music renderer returned an inconsistent receipt")
+    return wav, {
+        "engine_id": ENGINE_ID, "model_id": ENGINE_ID,
+        "score_sha256": report["score_sha256"], "automation_sha256": plan.sha256,
+        "wav_sha256": report["wav_sha256"], "duration_seconds": frames / SAMPLE_RATE,
+        "sample_rate": SAMPLE_RATE, "channels": 2, "frames": frames,
+        "metrics": report["metrics"], "track_metrics": report["tracks"],
+        "master_attenuation": report["master_attenuation"],
+        "automation_lanes": len(plan.lanes),
+        "learned_model": False, "external_recordings_used": False, "disclaimer": DISCLAIMER,
     }
