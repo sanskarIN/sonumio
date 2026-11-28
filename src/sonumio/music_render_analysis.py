@@ -16,6 +16,7 @@ import numpy as np
 from .arrangement import Arrangement, TRACKS, arrangement_digest, TICKS_PER_BAR
 from .audio import SAMPLE_RATE
 from .audio_core.wave_reader import _decode_canonical_header
+from .audio_core.errors import AudioContractError
 from .errors import GenerationError
 
 PROTOCOL = "sonumio-score-clock-audio-diagnostics-v1"
@@ -57,7 +58,7 @@ def pcm_view(score,data):
         raise GenerationError("Analysis WAV length differs from score clock")
     try:
         geometry=_decode_canonical_header(data[:44],len(data))
-    except ValueError as exc:
+    except (ValueError, AudioContractError) as exc:
         raise GenerationError("Invalid canonical analysis WAV header") from exc
     if (geometry.sample_rate,geometry.channels,geometry.bits_per_sample,geometry.frames)!=(SAMPLE_RATE,2,16,frames):
         raise GenerationError("Analysis WAV geometry differs from score")
