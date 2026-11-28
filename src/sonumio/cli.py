@@ -22,6 +22,7 @@ from .audio_core.mastering_cli import register_mastering_commands, run_mastering
 from .audio_core.postproduction_cli import register_postproduction_command, run_postproduction_command
 from .audio_core.granular_cli import register_granular_command, run_granular_command
 from .audio_core.contact_cli import register_contact_command, run_contact_command
+from .music_stem_cli import register_stem_commands, run_stem_command
 from .audio_core.spatial_cli import register_spatial_command, run_spatial_command
 from .audio_core.asset_pack_cli import register_asset_pack_commands, run_asset_pack_command
 from .music_automation_cli import register_automation_command, run_automation_command
@@ -140,6 +141,7 @@ def main(argv: list[str] | None = None) -> int:
     register_postproduction_command(sub)
     register_granular_command(sub)
     register_contact_command(sub)
+    register_stem_commands(sub)
     register_spatial_command(sub)
     register_asset_pack_commands(sub)
     register_automation_command(sub)
@@ -166,6 +168,8 @@ def main(argv: list[str] | None = None) -> int:
         return run_mastering_command(args)
     if args.command == "wav-transform":
         return run_transform_command(args)
+    if args.command in ("music-stems", "music-stems-verify", "music-stem-select"):
+        return run_stem_command(args)
     if args.command == "models":
         for model in list_models():
             print(f"{model['id']} | {model['model_kind']} | {model['license']}")
