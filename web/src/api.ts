@@ -207,7 +207,7 @@ function jobPath(jobId: string): string {
   }
   return '/v1/jobs/' + jobId;
 }
-function validateJob(job: AudioJob, expectedId?: string): AudioJob {
+export function validateJob(job: AudioJob, expectedId?: string): AudioJob {
   const path = jobPath(job.id);
   if (job.status_url !== path || job.cancel_url !== path) {
     throw new Error('API returned an invalid local job URL');
@@ -222,7 +222,7 @@ function validateJob(job: AudioJob, expectedId?: string): AudioJob {
 
 export const JOB_ACTION_TIMEOUT_MS = 10_000;
 
-async function withJobDeadline<T>(
+export async function withJobDeadline<T>(
   signal: AbortSignal | undefined, action: (signal: AbortSignal) => Promise<T>,
 ): Promise<T> {
   signal?.throwIfAborted();
