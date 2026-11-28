@@ -1,3 +1,4 @@
+import { validateStemInput, parseStemPlan, parseStemResult, verifyStemWav, type StemInput, type StemPlan } from './music-stem-contract';
 import { validateAutomation, parseAutomationReceipt, MAX_AUTOMATION_BYTES, type AutomationReceipt } from './music-automation-contract';
 import { validateScoreInput, validateMusicMix, parseMusicPlan, isDigest, type MusicScoreInput, type MusicRenderInput, type MusicPlan } from './music-contract';
 /** Typed same-origin client for the Sonumio local audio API. */
@@ -245,7 +246,7 @@ export function isRejectedJobSubmission(error: unknown): error is ApiError {
 }
 
 async function submitJob(
-  kind: 'generations' | 'scenes' | 'music', input: GenerationInput | SceneInput | MusicRenderInput,
+  kind: 'generations' | 'scenes' | 'music' | 'music-stem', input: GenerationInput | SceneInput | MusicRenderInput,
   { id, signal }: JobSubmissionOptions,
 ): Promise<AudioJob> {
   if (id !== undefined && !isClientJobId(id)) throw new Error('Invalid client job identifier');
@@ -464,5 +465,47 @@ export async function exportMusicAutomation(input:MusicRenderInput,signal?:Abort
       .map(x=>x.toString(16).padStart(2,'0')).join('');
     if(digest!==response.headers.get('X-Sonumio-Content-SHA256'))throw new Error('Automation export checksum mismatch.');
     return new Blob([buffer],{type:'application/json'});
+  });
+}
+
+export function submitStemJob(input: StemInput, options: JobSubmissionOptions = {}): Promise<AudioJob> {
+  validateStemInput(input);
+  return submitJob('music-stem', input, options);
+}
+
+export async function planStem(input: StemInput, signal?: AbortSignal): Promise<StemPlan> {
+  validateStemInput(input);
+  return withJobDeadline(signal, async pending => parseStemPlan(await request<unknown>('/v1/music/stem/plan', {
+    method: 'POST', body: JSON.stringify(input), signal: pending, redirect: 'error',
+  }), input));
+}
+
+export async function downloadStem(audio: JobAudio, plan: StemPlan, signal?: AbortSignal): Promise<Blob> {
+  const receipt = parseStemResult(audio, plan);
+  return withJobDeadline(signal, async pending => {
+    const response = await fetch(validateAudioPath(audio.audio_url), {
+      signal: pending, redirect: 'error', cache: 'no-store', credentials: 'omit',
+    });
+    if (!response.ok) throw new ApiError('Stem audio unavailable (HTTP ' + response.status + ')', response.status);
+    const size = 44 + 4 * plan.frames;
+    if (response.headers.get('content-length') !== String(size) || !response.body)
+      throw new Error('Unexpected stem audio length.');
+    const reader = response.body.getReader();
+    const bytes = new Uint8Array(size);
+    let offset = 0;
+    try {
+      while (true) {
+        pending.throwIfAborted();
+        const {done, value} = await reader.read();
+        if (done) break;
+        if (!value || offset + value.length > size) throw new Error('Stem audio exceeded its expected length.');
+        bytes.set(value, offset);
+        offset += value.length;
+      }
+    } finally { await reader.cancel().catch(() => {}); reader.releaseLock(); }
+    if (offset !== size) throw new Error('Stem audio was truncated.');
+    await verifyStemWav(bytes, plan, receipt.wav_sha256);
+    pending.throwIfAborted();
+    return new Blob([bytes], {type: 'audio/wav'});
   });
 }
