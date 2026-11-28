@@ -1,0 +1,5 @@
+.render-recipe-workspace{display:grid;gap:1rem;margin-block:1rem}
+.render-recipe-workspace fieldset{min-width:0;display:grid;gap:.75rem}
+.recipe-source{display:grid;gap:.4rem;min-width:0}
+.recipe-source input[type=file],.render-recipe-workspace input[type=file]{max-width:100%;font-size:.85rem}
+.recipe-source .hint{overflow-wrap:anywhere}
