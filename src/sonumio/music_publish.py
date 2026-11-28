@@ -14,6 +14,8 @@ import tempfile
 from .atomic_cli_wav import _ensure_safe_parent, _check_existing_target
 from .music_score_io import MAX_SCORE_BYTES
 from .music_midi import MAX_MIDI_BYTES
+from .music_automation import MAX_PLAN_BYTES
+from .music_project import MAX_PROJECT_BYTES
 from .music_score_patch import MAX_PATCH_BYTES
 from .errors import GenerationError
 
@@ -30,6 +32,8 @@ class ArtifactReceipt:
 def publish_music_artifact(path,data,*,kind,overwrite=False,expected_sha256=None):
     formats = {"score": (MAX_SCORE_BYTES, ".json"),
                "midi": (MAX_MIDI_BYTES, ".mid"),
+               "project": (MAX_PROJECT_BYTES, ".sonumio"),
+               "automation": (MAX_PLAN_BYTES, ".json"),
                "patch": (MAX_PATCH_BYTES, ".json"),
                "stems": (MAX_STEM_PACK_BYTES, ".zip")}
     if type(kind) is not str or kind not in formats or type(overwrite) is not bool:
