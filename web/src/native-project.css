@@ -1,0 +1,7 @@
+
+/* Native project workspace */
+.native-project-workspace{display:grid;gap:1rem;margin-block:1rem}
+.native-project-workspace fieldset{min-width:0;display:grid;gap:.65rem}
+.native-project-workspace input[type=file]{max-width:100%;overflow:hidden;font-size:.85rem}
+.project-summary{padding:.9rem;border:1px solid var(--line,#39414b);border-radius:8px}
+.project-summary dl{display:grid;gap:.35rem}.project-summary dd{margin:0;overflow-wrap:anywhere}
