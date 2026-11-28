@@ -18,9 +18,8 @@ from .contracts import AudioSpec, AudioLayout, MAX_CHANNELS
 from .dither import QuantizationSettings
 from .errors import AudioContractError, AudioFormatError, AudioLimitError
 from .hashing import canonical_json_bytes, digest_audio, parse_canonical_json, strict_sha256
-from .matrix_convolution import convolve_matrix
 from .room_response import (
-    Point3D, ShoeboxRoom, RoomConfig, build_room_response,
+    Point3D, ShoeboxRoom, RoomConfig, build_room_response, room_convolver,
 )
 from .wave_snapshot import read_verified_pcm
 from .waveio import encode_wav_bytes
@@ -153,20 +152,28 @@ class RoomExport:
     path_count: int
     peak: float
     dither_seed: int | None
+    engine: str = "matrix"
 
     def as_dict(self):
-        return {"protocol": "sonumio-verified-room-wav-v1",
-                **asdict(self), "model_inference": False}
+        data = asdict(self)
+        # Preserve the original receipt shape for existing matrix consumers.
+        protocol = "sonumio-verified-room-wav-v1"
+        if self.engine == "matrix":
+            data.pop("engine")
+        else:
+            protocol = "sonumio-verified-room-wav-v2"
+        return {"protocol": protocol, **data, "model_inference": False}
 
 
 def export_room_plan(plan, source, destination, *, expected_source_sha256=None,
                      expected_output_sha256=None, output_bits=16,
                      dither_seed=None, packet_frames=8192,
-                     overwrite=False, create_parent=False):
+                     overwrite=False, create_parent=False, engine="matrix"):
     """Verify source bytes, render bounded PCM, publish one complete WAV."""
     from ..atomic_cli_wav import publish_generated_wav
     if not isinstance(plan, RoomPlan):
         raise AudioContractError("Expected RoomPlan")
+    convolver = room_convolver(engine)
     if type(overwrite) is not bool or type(create_parent) is not bool:
         raise AudioContractError("Invalid room publication flags")
     if expected_output_sha256 is not None:
@@ -192,7 +199,7 @@ def export_room_plan(plan, source, destination, *, expected_source_sha256=None,
     spec = AudioSpec(audio.sample_rate, layout, frames)
     if spec.byte_count > MAX_OUTPUT_PCM_BYTES:
         raise AudioLimitError("Room output exceeds offline PCM budget")
-    rendered = convolve_matrix(audio, response.impulse, include_tail=plan.include_tail,
+    rendered = convolver(audio, response.impulse, include_tail=plan.include_tail,
                                output_layout=layout)
     # Explicit attenuation only; do not silently clip or normalize.
     if plan.output_gain != 1:
@@ -212,5 +219,5 @@ def export_room_plan(plan, source, destination, *, expected_source_sha256=None,
         plan.sha256, {**snapshot.as_dict(), "source_pcm_sha256": digest_audio(audio)},
         publication.wav_sha256, digest_audio(rendered), publication.bytes_written,
         output_bits, rendered.frames, rendered.channels, response.impulse.geometry.taps,
-        len(response.paths), peak, dither_seed,
+        len(response.paths), peak, dither_seed, engine,
     )

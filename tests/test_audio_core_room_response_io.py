@@ -150,3 +150,65 @@ def test_cli_plan_cannot_be_output(tmp_path, capsys):
     assert main(["room-response", "--plan", str(plan), "--source", str(source),
                  "--output", str(plan), "--overwrite"]) == 2
     assert plan.read_bytes() == raw
+
+
+def test_explicit_partitioned_export_replay_and_legacy_receipt(tmp_path):
+    source = wav(tmp_path / "source.wav")
+    plan = example_plan()
+    baseline = tmp_path / "matrix.wav"
+    candidate = tmp_path / "partitioned.wav"
+    replay = tmp_path / "replay.wav"
+    old = export_room_plan(plan, source, baseline)
+    new = export_room_plan(plan, source, candidate, engine="partitioned")
+    assert old.as_dict()["protocol"] == "sonumio-verified-room-wav-v1"
+    assert "engine" not in old.as_dict()
+    assert new.as_dict()["protocol"] == "sonumio-verified-room-wav-v2"
+    assert new.as_dict()["engine"] == "partitioned"
+    assert old.plan_sha256 == new.plan_sha256
+    assert old.output_frames == new.output_frames
+    assert old.output_channels == new.output_channels
+    np.testing.assert_allclose(read_wav_file(baseline).samples,
+                               read_wav_file(candidate).samples, atol=1 / 32768)
+    export_room_plan(plan, source, replay, engine="partitioned",
+                     expected_output_sha256=new.output_sha256)
+    assert candidate.read_bytes() == replay.read_bytes()
+
+
+def test_invalid_backend_does_not_touch_output(tmp_path):
+    source = wav(tmp_path / "source.wav")
+    target = tmp_path / "output.wav"
+    target.write_bytes(b"old bytes")
+    with pytest.raises(AudioContractError, match="Unknown room convolution engine"):
+        export_room_plan(example_plan(), source, target,
+                         engine="auto", overwrite=True)
+    assert target.read_bytes() == b"old bytes"
+
+
+def test_partitioned_cli_receipt(tmp_path, capsys):
+    source = wav(tmp_path / "source.wav")
+    plan = tmp_path / "room.json"
+    plan.write_bytes(example_plan().to_bytes())
+    output = tmp_path / "render.wav"
+    args = ["room-response", "--plan", str(plan), "--source", str(source),
+            "--output", str(output), "--engine", "partitioned"]
+    assert main(args) == 0
+    receipt = json.loads(capsys.readouterr().out)
+    assert receipt["engine"] == "partitioned"
+    assert receipt["protocol"] == "sonumio-verified-room-wav-v2"
+    assert receipt["output_sha256"] == hashlib.sha256(output.read_bytes()).hexdigest()
+
+
+@pytest.mark.parametrize("tail", [False, True])
+def test_room_api_backend_parity(tail):
+    from sonumio.audio_core.room_response import render_room
+    plan = example_plan()
+    audio = make_buffer(np.random.default_rng(98).normal(0, .1, 211), 8000)
+    old = render_room(audio, plan.room, plan.sources, plan.receivers,
+                      plan.config, include_tail=tail)
+    new = render_room(audio, plan.room, plan.sources, plan.receivers,
+                      plan.config, include_tail=tail, engine="partitioned")
+    assert old.spec == new.spec
+    np.testing.assert_allclose(old.samples, new.samples, atol=1e-7)
+    with pytest.raises(AudioContractError, match="Unknown room convolution engine"):
+        render_room(audio, plan.room, plan.sources, plan.receivers,
+                    plan.config, engine=None)
