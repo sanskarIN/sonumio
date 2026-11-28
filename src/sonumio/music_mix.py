@@ -53,6 +53,14 @@ def _validate_stem(stem,frames):
 
 
 def render_stems(score):
+    """Render all notes with the original procedural instruments."""
+    return _render_stems(score, render_event)
+
+
+def _render_stems(score, renderer):
+    """Shared accumulation path for the original engine and local research."""
+    if not callable(renderer):
+        raise GenerationError("Expected callable note renderer")
     if not isinstance(score,Arrangement):
         raise GenerationError("Expected Arrangement")
     frames=score.plan.frame(score.plan.ticks)
@@ -62,7 +70,11 @@ def render_stems(score):
     for event in score.events:
         start=score.plan.frame(event.tick)
         stop=score.plan.frame(event.tick+event.length)
-        mono=render_event(event,stop-start,score.plan.seed)
+        mono=renderer(event,stop-start,score.plan.seed)
+        if (not isinstance(mono,np.ndarray) or mono.dtype not in (np.float32,np.float64)
+                or mono.shape!=(stop-start,) or not np.isfinite(mono).all()
+                or np.max(np.abs(mono))>1.000001):
+            raise GenerationError("Invalid bounded note renderer output")
         pan=(event.pan+1)*math.pi/4
         stems[event.track][0,start:stop]+=(mono*math.cos(pan)).astype(np.float32)
         stems[event.track][1,start:stop]+=(mono*math.sin(pan)).astype(np.float32)
