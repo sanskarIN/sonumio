@@ -43,7 +43,7 @@ describe('music export downloads', () => {
     { 'content-type': 'text/html' },
   ])('rejects inconsistent download metadata %j', async headers => {
     vi.stubGlobal('crypto', webcrypto);
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response(headers)));
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response(Object.fromEntries(Object.entries(headers).filter((entry): entry is [string, string] => typeof entry[1] === 'string')))));
     await expect(exportMusic(input, 'midi')).rejects.toThrow();
   });
   it('rejects missing score pin without contacting the server', async () => {
