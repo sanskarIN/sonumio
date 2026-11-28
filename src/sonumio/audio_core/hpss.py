@@ -218,8 +218,8 @@ def separate_spectrogram(
     harmonic_mask, percussive_mask = _mask_from_estimates(
         harmonic, percussive, settings,
     )
-    a = complex_mask(spectrum, harmonic_mask, maximum_gain=1.)
-    b = complex_mask(spectrum, percussive_mask, maximum_gain=1.)
+    a = complex_mask(spectrum, harmonic_mask)
+    b = complex_mask(spectrum, percussive_mask)
     # The public gain map is not a writable alias of internal scratch.
     mask = np.frombuffer(harmonic_mask.tobytes(), dtype=np.float64)
     return a, b, mask.reshape(harmonic_mask.shape)
