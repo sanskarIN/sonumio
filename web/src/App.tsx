@@ -1,3 +1,4 @@
+import { MusicStudio } from './MusicStudio';
 import { useEffect, useRef, useState, type ChangeEvent, type FormEvent } from 'react';
 import {
   submitGenerationJob, submitSceneJob, awaitJob, cancelJob, getHealth, getModels, validateScene,
@@ -329,6 +330,7 @@ export function App() {
           </section>
         </aside>
       </div>
+      <MusicStudio connected={connected}/>
     </main>
     <footer><span>SONUMIO / IMAGINE IT. HEAR IT.</span><span>Open source · Local-first · Development preview</span></footer>
   </div>;
