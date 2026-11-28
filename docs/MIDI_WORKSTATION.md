@@ -224,3 +224,63 @@ choices, and whether swing was discarded. Canonical output uses Sonumio's
 normal no-clobber atomic workstation-score publisher, with optional SHA-256
 input/output guards. Full GitHub CI exercises this against both real schema
 implementations; metadata loss is never described as an exact roundtrip.
+
+## Explicit multi-instrument WAV preview
+
+The standalone `multitrack-preview-wav` command supplies a separate,
+original mathematical wavetable patch for **each** audible note-bearing
+pitched track. Its purpose is reliable local score audition, not faithful
+General MIDI sound-bank emulation. MIDI programs do not select external
+samples or opaque plugins. Patches are explicitly sorted by track ID before
+rendering for a deterministic summation order.
+
+```bash
+python -m sonumio.midi_workstation multitrack-preview-wav original-score.json \
+  --patch bass:square:0.04 --patch lead:sine:0.09 \
+  --output original-mix.wav --sample-rate 24000 --channels 2 \
+  --output-bits 24 --dither-seed 2026
+```
+
+The four available mathematical waveforms are sine, square, saw and triangle;
+the typed Python API additionally controls ADSR, table size and harmonic
+limits per track. The renderer delegates individual voices to Sonumio's
+existing `audio_core.wavetable.render_wavetable`, mixes in float64 and casts
+only the final PCM once. A receipt reports per-track original-waveform
+settings, note counts, peak, RMS, immutable float-PCM SHA-256 digests and
+final output integrity. Stems are *reported*, not published as separate
+files. Global polyphony is capped at 64 voices, with explicit note, sample
+work, output byte and per-track limits.
+
+The default policy fails on any unrendered percussion; use
+`--allow-skip-percussion` to acknowledge this loss. Muted tracks stay silent
+unless explicitly included, and mono playback requires centered pan. A mix
+above the declared peak fails rather than clipping or silently compressing,
+unless `--normalization peak` is selected, in which case the uniform scale
+is recorded. WAV publication is atomic and no-clobber by default.
+
+### SHA-pinned multi-instrument patch recipes
+
+For repeatable offline renders, `MultitrackRecipe(score.sha256, settings)`
+creates a canonical, strict `sonumio-multitrack-patch-recipe-v1` JSON
+document from typed `MultiTrackPreviewSettings`. The recipe stores only a
+source score SHA, numerical waveform/voice envelope settings and complete
+explicit patch routing; it contains no executable code, paths, network
+endpoints, model checkpoints or sample library references. At most 16
+patches and 32 KiB of UTF-8 JSON are allowed. Duplicate keys, unknown
+properties, nonfinite values, shuffled patch IDs and checksum mismatches
+are rejected before any rendering.
+
+```sh
+python -m sonumio.midi_workstation multitrack-recipe-inspect patches.json
+python -m sonumio.midi_workstation multitrack-preview-from-recipe original-score.json \
+  --recipe patches.json --output preview.wav \
+  --expected-recipe-sha256 <hex-sha256-of-recipe-file> \
+  --output-bits 24 --dither-seed 2026
+```
+
+The score's *canonical* digest must match the bound recipe SHA before
+synthesis. The recipe's raw-file SHA can be pinned separately. Both inputs
+are protected against output-path aliases and hardlinks, and the WAV
+publisher verifies its full generated content checksum before committing.
+These outputs use original deterministic synthesis; no trained-model
+inference, licensed sample content or perceptual quality proof is implied.

@@ -31,6 +31,8 @@ from .score_commands import add_score_commands, COMMANDS as SCORE_COMMANDS
 from .history_cli import register_history_commands, COMMANDS as HISTORY_COMMANDS
 from .arrangement_bridge_cli import register_arrangement_bridge, COMMANDS as BRIDGE_COMMANDS
 from .arrangement_import_cli import register_arrangement_import, COMMANDS as IMPORT_COMMANDS
+from .multitrack_preview_cli import register_multitrack_preview, COMMANDS as MULTITRACK_COMMANDS
+from .multitrack_recipe_cli import register_multitrack_recipe, COMMANDS as MULTITRACK_RECIPE_COMMANDS
 
 
 def _source_digest(parser):
@@ -172,6 +174,8 @@ def make_parser() -> argparse.ArgumentParser:
     register_history_commands(sub)
     register_arrangement_bridge(sub)
     register_arrangement_import(sub)
+    register_multitrack_preview(sub)
+    register_multitrack_recipe(sub)
     return parser
 
 
@@ -390,6 +394,8 @@ _DISPATCH = {
     **HISTORY_COMMANDS,
     **BRIDGE_COMMANDS,
     **IMPORT_COMMANDS,
+    **MULTITRACK_COMMANDS,
+    **MULTITRACK_RECIPE_COMMANDS,
 }
 
 
