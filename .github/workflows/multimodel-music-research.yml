@@ -1,0 +1,46 @@
+name: Multi-model music reconstruction
+on:
+  pull_request:
+    paths:
+      - 'research/multimodel_music_*.py'
+      - 'research/instrument_*.py'
+      - 'research/percussion_*.py'
+      - 'research/hybrid_music_*.py'
+      - 'research/weight_ema.py'
+      - 'src/sonumio/music*.py'
+      - 'src/sonumio/arrangement.py'
+      - 'tests/test_multimodel_music_research.py'
+      - '.github/workflows/multimodel-music-research.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'research/multimodel_music_*.py'
+      - 'research/instrument_*.py'
+      - 'research/percussion_*.py'
+      - 'research/hybrid_music_*.py'
+      - 'research/weight_ema.py'
+      - 'src/sonumio/music*.py'
+      - 'src/sonumio/arrangement.py'
+      - 'tests/test_multimodel_music_research.py'
+      - '.github/workflows/multimodel-music-research.yml'
+permissions:
+  contents: read
+jobs:
+  multimodel:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      OMP_NUM_THREADS: '2'
+      MKL_NUM_THREADS: '2'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python -m pip install -e '.[test]'
+      - run: python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+      - run: python -m pytest -q tests/test_multimodel_music_research.py
+      - name: Evaluate complete multi-model score study
+        run: |
+          python -m research.multimodel_music_study > /tmp/multimodel-report.json
+          python -c "import json; r=json.load(open('/tmp/multimodel-report.json')); print(json.dumps({'family_summary':r['family_summary'],'coverage':[c['coverage'] for c in r['replicates'][0]['cases']]}, sort_keys=True, allow_nan=False))"
