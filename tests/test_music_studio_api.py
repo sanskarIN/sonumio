@@ -241,3 +241,104 @@ def test_music_journal_recovers_only_audio_reference(tmp_path):
         assert restored.get(item["id"])["result"] == reference
     finally:
         restored.shutdown()
+
+def edited_request(client):
+    plan = client.post("/v1/music/plan", json=body()).json()
+    index = next(i for i, note in enumerate(plan["note_events"]) if note["track"] == "lead")
+    old = plan["note_events"][index]
+    replacement = old | {"velocity": .21}
+    edits = {"base_score_sha256": plan["score_sha256"],
+             "remove": [], "replace": [{"index": index, "note": replacement}], "add": []}
+    return plan, index, replacement, body() | {"note_edits": edits}
+
+
+def test_edited_music_plan_export_and_render_remain_digest_pinned(client):
+    from dataclasses import asdict
+    base, index, replacement, request = edited_request(client)
+    original = compose_arrangement(ArrangementPlan(**request["composition"]))
+    assert base["note_events"] == [asdict(event) for event in original.events]
+    response = client.post("/v1/music/plan", json=request)
+    assert response.status_code == 200
+    edited = response.json()
+    assert edited["score_sha256"] != base["score_sha256"]
+    assert edited["events"] == base["events"]
+    assert replacement in edited["note_events"]
+    pinned = request | {"expected_score_sha256": edited["score_sha256"]}
+    score = client.post("/v1/music/score", json=pinned)
+    midi = client.post("/v1/music/midi", json=pinned)
+    assert score.status_code == midi.status_code == 200
+    decoded = decode_score(score.content, expected_sha256=edited["score_sha256"])
+    assert [asdict(event) for event in decoded.events] == edited["note_events"]
+    for exported in (score, midi):
+        assert exported.headers["x-sonumio-score-sha256"] == edited["score_sha256"]
+        assert exported.headers["x-sonumio-content-sha256"] == sha256(exported.content).hexdigest()
+    identifier = str(uuid4())
+    accepted = client.post("/v1/jobs/music", json=pinned, headers={"X-Sonumio-Job-Id": identifier})
+    assert accepted.status_code == 202
+    final = wait(client, identifier)
+    assert final["status"] == "succeeded", final
+    assert final["result"]["score_sha256"] == edited["score_sha256"]
+    assert client.post("/v1/music/plan", json=body()).json() == base
+    stale = request | {"expected_score_sha256": base["score_sha256"]}
+    assert client.post("/v1/music/score", json=stale).status_code == 422
+
+
+def test_atomic_remove_replace_add_transaction(client):
+    base, index, replacement, request = edited_request(client)
+    original = base["note_events"][index]
+    edits = request["note_edits"]
+    # Replace a source note by removing it and adding another note at
+    # the same geometry. The transaction validates only the final score.
+    edits["replace"] = []
+    edits["remove"] = [index]
+    edits["add"] = [replacement]
+    response = client.post("/v1/music/plan", json=request)
+    assert response.status_code == 200
+    plan = response.json()
+    assert original not in plan["note_events"]
+    assert replacement in plan["note_events"]
+    assert plan["events"] == base["events"]
+
+
+@pytest.mark.parametrize("case", [
+    "stale_base", "empty", "duplicate_remove", "duplicate_replace", "remove_replace",
+    "index_outside_score", "overlap", "invalid_scale", "outside_score", "extra_field",
+    "too_many", "bool_index", "noncanonical", "invalid_velocity",
+])
+def test_invalid_note_transactions_rejected_before_queue_or_publication(client, case):
+    base, index, replacement, request = edited_request(client)
+    edits = request["note_edits"]
+    if case == "stale_base":
+        edits["base_score_sha256"] = "0" * 64
+    elif case == "empty":
+        edits["replace"] = []
+    elif case == "duplicate_remove":
+        edits["remove"] = [0, 0]
+    elif case == "duplicate_replace":
+        edits["replace"] *= 2
+    elif case == "remove_replace":
+        edits["remove"] = [index]
+    elif case == "index_outside_score":
+        edits["replace"][0]["index"] = 4095
+    elif case == "overlap":
+        edits["add"] = [replacement | {"velocity": .3}]
+    elif case == "invalid_scale":
+        edits["replace"][0]["note"]["pitch"] = 61
+    elif case == "outside_score":
+        edits["replace"][0]["note"]["tick"] = 127
+        edits["replace"][0]["note"]["length"] = 2
+    elif case == "extra_field":
+        edits["replace"][0]["note"]["file"] = "external.wav"
+    elif case == "too_many":
+        edits["remove"] = list(range(128))
+    elif case == "bool_index":
+        edits["replace"][0]["index"] = True
+    elif case == "noncanonical":
+        edits["remove"] = [3, 2]
+    elif case == "invalid_velocity":
+        edits["replace"][0]["note"]["velocity"] = 2
+    for endpoint in ("/v1/music/plan", "/v1/music/score", "/v1/music/midi", "/v1/jobs/music"):
+        response = client.post(endpoint, json=request)
+        assert response.status_code == 422, (case, endpoint, response.text)
+    assert not api.JOBS._jobs
+    assert not (api.OUTPUT_DIR / ".sonumio-api-audio").exists()
