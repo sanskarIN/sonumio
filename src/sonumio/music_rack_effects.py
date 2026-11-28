@@ -144,7 +144,7 @@ class Insert:
             raise GenerationError("Invalid rack bypass")
 
     @classmethod
-    def create(cls, kind, *, wet=1., bypass=False, **parameters):
+    def create(cls, kind, /, *, wet=1., bypass=False, **parameters):
         return cls(kind, tuple(parameters.items()), wet, bypass)
 
     @property
