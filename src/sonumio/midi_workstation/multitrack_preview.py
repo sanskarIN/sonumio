@@ -14,7 +14,10 @@ from typing import Any
 
 import numpy as np
 
-from .contracts import MidiLimitError, MidiWorkstationError, integer, finite, sha256
+from .contracts import (
+    MidiIntegrityError, MidiLimitError, MidiWorkstationError,
+    integer, finite, sha256,
+)
 from .score import Score, NOTE_ID_RE
 from .transport import TransportSettings, build_schedule
 from .publish import _distinct
@@ -243,6 +246,10 @@ def export_multitrack_preview(
         from sonumio.audio_core.dither import QuantizationSettings
         from sonumio.audio_core.waveio import encode_wav_bytes
         from sonumio.atomic_cli_wav import publish_generated_wav
+        from sonumio.audio_core.errors import (
+            AudioIntegrityError, AudioLimitError, AudioContractError,
+            AudioProcessingError,
+        )
     except ImportError as exc:
         raise MidiWorkstationError("Sonumio audio_core is required for multitrack WAV") from exc
 
@@ -256,19 +263,26 @@ def export_multitrack_preview(
         _distinct(protected,destination)
     if type(overwrite) is not bool or type(create_parent) is not bool:
         raise MidiWorkstationError("Output publication flags must be boolean")
-    q=QuantizationSettings(bits=output_bits,dither=dither_seed is not None,
-                           seed=dither_seed)
-    result=render_multitrack_preview(score,settings)
-    wav=encode_wav_bytes(result.audio,settings=q)
-    if len(wav)>64*1024*1024:
-        raise MidiLimitError("Multitrack PCM exceeds WAV publication byte budget")
-    _distinct(source_path,destination)
-    for protected in protected_paths:
-        _distinct(protected,destination)
-    publication=publish_generated_wav(
-        destination,wav,overwrite=overwrite,create_parent=create_parent,
-        expected_sha256=expected_output_sha256,
-    )
+    try:
+        q=QuantizationSettings(bits=output_bits,dither=dither_seed is not None,
+                               seed=dither_seed)
+        result=render_multitrack_preview(score,settings)
+        wav=encode_wav_bytes(result.audio,settings=q)
+        if len(wav)>64*1024*1024:
+            raise MidiLimitError("Multitrack PCM exceeds WAV publication byte budget")
+        _distinct(source_path,destination)
+        for protected in protected_paths:
+            _distinct(protected,destination)
+        publication=publish_generated_wav(
+            destination,wav,overwrite=overwrite,create_parent=create_parent,
+            expected_sha256=expected_output_sha256,
+        )
+    except AudioIntegrityError as exc:
+        raise MidiIntegrityError(f"Generated WAV integrity check: {exc}") from exc
+    except AudioLimitError as exc:
+        raise MidiLimitError(f"Multitrack audio resource budget: {exc}") from exc
+    except (AudioContractError, AudioProcessingError) as exc:
+        raise MidiWorkstationError(f"Multitrack audio publication: {exc}") from exc
     return {
         "protocol":"sonumio-multitrack-preview-publication-v1",
         "render":result.report,
