@@ -124,6 +124,32 @@ def encode_assembly(plan):
     return data
 
 
+def _parse_recipe(raw):
+    raw=_object(raw,("plan","sources","segments"))
+    for key,limit in (("sources",MAX_SOURCES),("segments",MAX_SEGMENTS)):
+        if type(raw[key]) is not list or not 1<=len(raw[key])<=limit:
+            raise GenerationError("Invalid assembly recipe "+key)
+    return AssemblyPlan(_construct(ArrangementPlan,raw["plan"]),
+                        tuple(_construct(SourcePin,x) for x in raw["sources"]),
+                        tuple(_construct(Segment,x) for x in raw["segments"]))
+
+
+def decode_draft(data):
+    """An unsigned human-authored recipe can be pinned explicitly."""
+    if type(data) is not bytes or not 1<=len(data)<=MAX_RECIPE_BYTES:
+        raise GenerationError("Invalid assembly draft byte count")
+    try:
+        obj=json.loads(data.decode("utf-8"),object_pairs_hook=_unique,parse_constant=_nonfinite)
+        _object(obj,("format","assembly"))
+        if obj["format"]!=FORMAT:
+            raise GenerationError("Unsupported assembly draft format")
+        return _parse_recipe(obj["assembly"])
+    except (UnicodeError,RecursionError,TypeError,OverflowError,ValueError) as exc:
+        if isinstance(exc,GenerationError):
+            raise
+        raise GenerationError("Malformed assembly draft") from exc
+
+
 def decode_assembly(data,*,expected_sha256=None):
     if type(data) is not bytes or not 1<=len(data)<=MAX_RECIPE_BYTES:
         raise GenerationError("Invalid assembly recipe byte count")
@@ -134,13 +160,7 @@ def decode_assembly(data,*,expected_sha256=None):
         _object(obj,("format","sha256","assembly"))
         if obj["format"]!=FORMAT:
             raise GenerationError("Unsupported assembly recipe format")
-        raw=_object(obj["assembly"],("plan","sources","segments"))
-        for key,limit in (("sources",MAX_SOURCES),("segments",MAX_SEGMENTS)):
-            if type(raw[key]) is not list or not 1<=len(raw[key])<=limit:
-                raise GenerationError("Invalid assembly recipe "+key)
-        plan=AssemblyPlan(_construct(ArrangementPlan,raw["plan"]),
-                          tuple(_construct(SourcePin,x) for x in raw["sources"]),
-                          tuple(_construct(Segment,x) for x in raw["segments"]))
+        plan=_parse_recipe(obj["assembly"])
         if obj["sha256"]!=plan.sha256 or (expected_sha256 is not None and expected_sha256!=plan.sha256):
             raise GenerationError("Assembly recipe digest mismatch")
         return plan
