@@ -22,7 +22,7 @@ from .music_project import (
     describe_project, decode_project, encode_project, verify_revision, render_project,
 )
 from .music_score_io import MAX_SCORE_BYTES, decode_score, _unique, _nonfinite
-from .music_studio import MAX_PREVIEW_FRAMES, ENGINE_ID, DISCLAIMER, describe_score, export_score
+from .music_studio import MAX_PREVIEW_FRAMES, ENGINE_ID, DISCLAIMER, describe_score, export_score, MusicMixRequest
 
 MAX_MUTATION_BYTES = 5 * 1024 * 1024
 Digest = Annotated[str, Field(min_length=64, max_length=64, pattern=r"^[0-9a-f]{64}$")]
@@ -49,6 +49,9 @@ class ReviseProjectRequest(ProjectModel):
     note_edits: NoteEdits | None = None
     automation_document: str | None = Field(default=None, max_length=MAX_PLAN_BYTES)
     expected_automation_sha256: Digest | None = None
+
+
+    mix: MusicMixRequest | None = None
 
 
 class ProjectRenderIdentity(ProjectModel):
@@ -132,6 +135,10 @@ def revision_from_request(request):
             raise GenerationError("Score pin requires a replacement or note transaction")
         score=None
     automation=_automation(request.automation_document,request.expected_automation_sha256)
+    if request.mix is not None:
+        if automation is not None:
+            raise GenerationError("Choose automation document replacement or static mixer edits, not both")
+        automation=AutomationPlan(parent.automation.lanes,request.mix.to_plan())
     child=revise_project(parent,title=request.title,score=score,automation=automation)
     verify_revision(parent,child)
     return parent,child
@@ -199,3 +206,17 @@ def render_project_preview(project):
         "track_metrics":report["tracks"],"master_attenuation":report["master_attenuation"],
         "learned_model":False,"external_recordings_used":False,
     }
+
+
+def inspect_score_document(data):
+    score=decode_score(data)
+    frames=score.plan.frame(score.plan.ticks)
+    return {"score_sha256":arrangement_digest(score),"frames":frames,
+            "bars":score.plan.bars,"events":len(score.events),
+            "preview_supported":score.plan.bars<=16 and frames<=MAX_PREVIEW_FRAMES}
+
+
+def inspect_automation_document(data):
+    plan=decode_automation(data)
+    return {"automation_sha256":plan.sha256,"lanes":len(plan.lanes),
+            "keys":sum(len(lane.keys) for lane in plan.lanes)}
