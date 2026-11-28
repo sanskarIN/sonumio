@@ -1,3 +1,4 @@
+import { validateScoreInput, validateMusicMix, parseMusicPlan, isDigest, type MusicScoreInput, type MusicRenderInput, type MusicPlan } from './music-contract';
 /** Typed same-origin client for the Sonumio local audio API. */
 export type ModelEntry = {
   id: string; origin: string; model_kind: string; tasks: string[];
@@ -190,7 +191,7 @@ export type JobStatus = 'queued' | 'running' | 'cancelling' | 'succeeded' | 'fai
 // An optional journal restores the audio reference without renderer metadata.
 export type JobAudio = Pick<GeneratedAudio, 'id' | 'audio_url'> & Partial<GeneratedAudio>;
 export type AudioJob = {
-  id: string; kind: 'generation' | 'scene'; status: JobStatus;
+  id: string; kind: 'generation' | 'scene' | 'music'; status: JobStatus;
   status_url: string; cancel_url: string;
   result: JobAudio | null; error: string | null;
 };
@@ -243,7 +244,7 @@ export function isRejectedJobSubmission(error: unknown): error is ApiError {
 }
 
 async function submitJob(
-  kind: 'generations' | 'scenes', input: GenerationInput | SceneInput,
+  kind: 'generations' | 'scenes' | 'music', input: GenerationInput | SceneInput | MusicRenderInput,
   { id, signal }: JobSubmissionOptions,
 ): Promise<AudioJob> {
   if (id !== undefined && !isClientJobId(id)) throw new Error('Invalid client job identifier');
@@ -343,4 +344,66 @@ export async function awaitJob(jobId: string, signal: AbortSignal,
     signal.removeEventListener('abort', onAbort);
     pending.abort();
   }
+}
+
+export function submitMusicJob(input: MusicRenderInput, options: JobSubmissionOptions = {}): Promise<AudioJob> {
+  validateScoreInput(input);
+  const error = validateMusicMix(input.mix);
+  if (error) throw new Error(error);
+  return submitJob('music', input, options);
+}
+
+export async function planMusic(input: MusicScoreInput, signal?: AbortSignal): Promise<MusicPlan> {
+  validateScoreInput(input);
+  return withJobDeadline(signal, async pending => {
+    const value = await request<unknown>('/v1/music/plan', {
+      method: 'POST', body: JSON.stringify(input), signal: pending, redirect: 'error', cache: 'no-store',
+    });
+    return parseMusicPlan(value, input);
+  });
+}
+
+/** A digest-pinned binary download, never a server-provided URL. */
+export async function exportMusic(input: MusicScoreInput, format: 'json' | 'midi', signal?: AbortSignal): Promise<Blob> {
+  validateScoreInput(input);
+  if (!input.expected_score_sha256) throw new Error('Plan the music before exporting.');
+  if (format !== 'json' && format !== 'midi') throw new Error('Unsupported music export.');
+  return withJobDeadline(signal, async pending => {
+    const response = await fetch('/v1/music/' + (format === 'json' ? 'score' : 'midi'), {
+      method: 'POST', body: JSON.stringify(input), signal: pending, redirect: 'error', cache: 'no-store',
+      credentials: 'omit', headers: { 'Content-Type': 'application/json' },
+    });
+    if (!response.ok) throw new ApiError('Music export failed (HTTP ' + response.status + ')', response.status);
+    const type = format === 'json' ? 'application/json' : 'audio/midi';
+    if (response.headers.get('content-type')?.split(';')[0] !== type ||
+        response.headers.get('X-Sonumio-Score-SHA256') !== input.expected_score_sha256 ||
+        !isDigest(response.headers.get('X-Sonumio-Content-SHA256')))
+      throw new Error('Invalid music export receipt.');
+    const limit = 1024 * 1024;
+    const size = Number(response.headers.get('content-length'));
+    if (!Number.isInteger(size) || size < 1 || size > limit || !response.body)
+      throw new Error('Invalid music export length.');
+    const reader = response.body.getReader();
+    const buffer = new Uint8Array(size);
+    let offset = 0;
+    try {
+      while (true) {
+        pending.throwIfAborted();
+        const { value, done } = await reader.read();
+        if (done) break;
+        if (offset + value.byteLength > size) throw new Error('Music export exceeds its declared size.');
+        buffer.set(value, offset);
+        offset += value.byteLength;
+      }
+    } finally {
+      try { await reader.cancel(); } catch { /* stream may have already failed */ }
+      reader.releaseLock();
+    }
+    if (offset !== size) throw new Error('Truncated music export.');
+    const digest = [...new Uint8Array(await crypto.subtle.digest('SHA-256', buffer))]
+      .map(byte => byte.toString(16).padStart(2, '0')).join('');
+    if (digest !== response.headers.get('X-Sonumio-Content-SHA256'))
+      throw new Error('Music export checksum mismatch.');
+    return new Blob([buffer], { type });
+  });
 }
