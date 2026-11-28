@@ -25,6 +25,7 @@ from .audio_core.contact_cli import register_contact_command, run_contact_comman
 from .music_stem_cli import register_stem_commands, run_stem_command
 from .audio_core.spatial_cli import register_spatial_command, run_spatial_command
 from .audio_core.room_response_cli import register_room_command, run_room_command
+from .audio_core.wavetable_score_cli import register_wavetable_command, run_wavetable_command
 from .audio_core.analysis_cli import register_audio_analysis_commands, run_audio_analysis_command
 from .audio_core.asset_pack_cli import register_asset_pack_commands, run_asset_pack_command
 from .music_automation_cli import register_automation_command, run_automation_command
@@ -149,6 +150,7 @@ def main(argv: list[str] | None = None) -> int:
     register_stem_commands(sub)
     register_spatial_command(sub)
     register_room_command(sub)
+    register_wavetable_command(sub)
     register_audio_analysis_commands(sub)
     register_asset_pack_commands(sub)
     register_automation_command(sub)
@@ -171,6 +173,8 @@ def main(argv: list[str] | None = None) -> int:
         return run_contact_command(args)
     if args.command in ("wav-rhythm", "wav-pitch", "wav-chroma"):
         return run_audio_analysis_command(args)
+    if args.command == "wavetable-render":
+        return run_wavetable_command(args)
     if args.command == "room-response":
         return run_room_command(args)
     if args.command == "spatial-scene":
