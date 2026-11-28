@@ -48,11 +48,17 @@ def encode_bundle(recipe, wav, report):
     contents = {"recipe.json": encode_recipe(recipe),
                 "receipt.json": encode_receipt(report), "audio.wav": wav}
     contents["manifest.json"] = _canonical(_manifest(recipe, report, contents))
+    return _pack_members(contents, MEMBERS, MAX_BUNDLE_BYTES)
+
+
+def _pack_members(contents, members, max_bytes):
+    if set(contents) != set(members):
+        raise GenerationError("Unexpected render bundle contents")
     target = io.BytesIO()
     with zipfile.ZipFile(target, "w", compression=zipfile.ZIP_STORED, allowZip64=False) as archive:
-        for name in MEMBERS:
+        for name in members:
             data = contents[name]
-            if not 1 <= len(data) <= MEMBERS[name]:
+            if not 1 <= len(data) <= members[name]:
                 raise GenerationError("Render bundle member exceeds byte budget")
             info = zipfile.ZipInfo(name, date_time=(1980,1,1,0,0,0))
             info.compress_type = zipfile.ZIP_STORED
@@ -60,7 +66,7 @@ def encode_bundle(recipe, wav, report):
             info.external_attr = (stat.S_IFREG | 0o644) << 16
             archive.writestr(info, data)
     data = target.getvalue()
-    if len(data) > MAX_BUNDLE_BYTES:
+    if len(data) > max_bytes:
         raise GenerationError("Render bundle exceeds byte budget")
     return data
 
@@ -70,25 +76,25 @@ def create_bundle(recipe):
     return encode_bundle(recipe, wav, report)
 
 
-def _read_members(data):
-    if type(data) is not bytes or not 1 <= len(data) <= MAX_BUNDLE_BYTES:
+def _read_members(data, members=MEMBERS, max_bytes=MAX_BUNDLE_BYTES):
+    if type(data) is not bytes or not 1 <= len(data) <= max_bytes:
         raise GenerationError("Invalid render bundle byte count")
     try:
         with zipfile.ZipFile(io.BytesIO(data), "r") as archive:
             infos = archive.infolist()
-            if (len(infos) != len(MEMBERS) or {info.filename for info in infos} != set(MEMBERS)
+            if (len(infos) != len(members) or {info.filename for info in infos} != set(members)
                     or archive.comment):
                 raise GenerationError("Unexpected render bundle members")
             result = {}
             for info in infos:
                 if (info.is_dir() or info.flag_bits & 1 or info.compress_type != zipfile.ZIP_STORED
                         or info.compress_size != info.file_size
-                        or not 1 <= info.file_size <= MEMBERS[info.filename]
+                        or not 1 <= info.file_size <= members[info.filename]
                         or info.extra or info.comment
                         or stat.S_IFMT(info.external_attr >> 16) != stat.S_IFREG):
                     raise GenerationError("Invalid bounded render bundle member")
                 with archive.open(info, "r") as stream:
-                    payload = stream.read(MEMBERS[info.filename]+1)
+                    payload = stream.read(members[info.filename]+1)
                     if len(payload) != info.file_size or stream.read(1):
                         raise GenerationError("Render bundle member size mismatch")
                     result[info.filename] = payload
