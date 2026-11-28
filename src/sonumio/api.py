@@ -325,3 +325,35 @@ def music_automation_export(request: MusicRenderRequest):
     score, automation = _music_automation(request)
     data, headers = export_automation(score, automation)
     return Response(content=data, media_type="application/json", headers=headers)
+
+
+# Individual stem auditions use the same bounded single-worker queue.
+from .music_studio_stems import (
+    MusicStemRequest, prepare_stem, describe_stem, render_stem_preview,
+)
+
+
+def _music_stem(request: MusicStemRequest):
+    try:
+        return prepare_stem(request)
+    except GenerationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.post("/v1/music/stem/plan")
+def music_stem_plan(request: MusicStemRequest):
+    return describe_stem(_music_stem(request))
+
+
+@app.post("/v1/jobs/music-stem", status_code=202)
+def enqueue_music_stem(request: MusicStemRequest, job_id: RequestedJobId = None):
+    recipe = _music_stem(request)
+    store = _store_for(OUTPUT_DIR)
+
+    def produce():
+        wav, report = render_stem_preview(recipe)
+        identifier = _store_audio(wav, store)
+        return {**report, "id": identifier,
+                "audio_url": f"/v1/generations/{identifier}/audio"}
+
+    return _enqueue("music", request, produce, store, job_id)
