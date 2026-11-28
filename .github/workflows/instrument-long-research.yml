@@ -1,0 +1,40 @@
+name: Sustained harmonic instrument reconstruction
+on:
+  pull_request:
+    paths:
+      - 'research/instrument_*.py'
+      - 'research/weight_ema.py'
+      - 'src/sonumio/music_instruments.py'
+      - 'src/sonumio/arrangement.py'
+      - 'tests/test_instrument_long_research.py'
+      - '.github/workflows/instrument-long-research.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'research/instrument_*.py'
+      - 'research/weight_ema.py'
+      - 'src/sonumio/music_instruments.py'
+      - 'src/sonumio/arrangement.py'
+      - 'tests/test_instrument_long_research.py'
+      - '.github/workflows/instrument-long-research.yml'
+permissions:
+  contents: read
+jobs:
+  sustained:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      OMP_NUM_THREADS: '2'
+      MKL_NUM_THREADS: '2'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python -m pip install -e '.[test]'
+      - run: python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+      - run: python -m pytest -q tests/test_instrument_long_research.py tests/test_instrument_harmonic_research.py
+      - name: Train and evaluate sustained instruments
+        run: |
+          python -m research.instrument_long_study > /tmp/sustained-report.json
+          python -c "import json; r=json.load(open('/tmp/sustained-report.json')); print(json.dumps({'source':r['source'],'summary':r['summary'],'training':[x['training'] for x in r['results']]}, sort_keys=True, allow_nan=False))"
