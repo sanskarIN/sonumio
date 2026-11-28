@@ -1,4 +1,4 @@
-"""Atomic local publication of bounded score JSON and MIDI artifacts.
+"""Atomic local publication of bounded score JSON, MIDI and stem packages.
 
 Each command publishes one file, not a multi-file transaction. This
 local filesystem helper is not a hostile multi-user sandbox.
@@ -16,6 +16,8 @@ from .music_score_io import MAX_SCORE_BYTES
 from .music_midi import MAX_MIDI_BYTES
 from .errors import GenerationError
 
+MAX_STEM_PACK_BYTES = 50 * 1024 * 1024
+
 
 @dataclass(frozen=True,slots=True)
 class ArtifactReceipt:
@@ -25,9 +27,12 @@ class ArtifactReceipt:
 
 
 def publish_music_artifact(path,data,*,kind,overwrite=False,expected_sha256=None):
-    if kind not in ("score","midi") or type(overwrite) is not bool:
+    formats = {"score": (MAX_SCORE_BYTES, ".json"),
+               "midi": (MAX_MIDI_BYTES, ".mid"),
+               "stems": (MAX_STEM_PACK_BYTES, ".zip")}
+    if type(kind) is not str or kind not in formats or type(overwrite) is not bool:
         raise GenerationError("Invalid music artifact publication mode")
-    limit,suffix=(MAX_SCORE_BYTES,".json") if kind=="score" else (MAX_MIDI_BYTES,".mid")
+    limit, suffix = formats[kind]
     if type(data) is not bytes or not 1<=len(data)<=limit:
         raise GenerationError("Invalid bounded music artifact bytes")
     path=Path(path)
@@ -52,8 +57,17 @@ def publish_music_artifact(path,data,*,kind,overwrite=False,expected_sha256=None
             stream.flush()
             os.fsync(stream.fileno())
             stream.seek(0)
-            replay=stream.read(limit+1)
-            if len(replay)!=len(data) or hashlib.sha256(replay).hexdigest()!=digest:
+            staged_hash = hashlib.sha256()
+            staged_bytes = 0
+            while True:
+                block = stream.read(1024 * 1024)
+                if not block:
+                    break
+                staged_bytes += len(block)
+                if staged_bytes > limit:
+                    raise GenerationError("Music artifact staging exceeds byte limit")
+                staged_hash.update(block)
+            if staged_bytes != len(data) or staged_hash.hexdigest() != digest:
                 raise GenerationError("Music artifact staging verification failed")
         _ensure_safe_parent(path,create_parent=False)
         _check_existing_target(path,overwrite=overwrite)
