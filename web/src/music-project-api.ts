@@ -15,7 +15,7 @@ type ProjectDownload={document:string;id:string;score:string;automation:string;c
 
 const decode=(bytes:Uint8Array)=>new TextDecoder('utf-8',{fatal:true,ignoreBOM:true}).decode(bytes);
 
-async function responseBytes(response:Response,limit:number,signal:AbortSignal):Promise<Uint8Array<ArrayBuffer>> {
+export async function responseBytes(response:Response,limit:number,signal:AbortSignal):Promise<Uint8Array<ArrayBuffer>> {
   const declared=response.headers.get('content-length');
   const size=declared===null?null:Number(declared);
   if(size!==null&&(!/^[0-9]+$/.test(declared!)||!Number.isInteger(size)||size<1||size>limit))
@@ -43,7 +43,7 @@ async function responseBytes(response:Response,limit:number,signal:AbortSignal):
   return buffer;
 }
 
-async function fail(response:Response,signal:AbortSignal):Promise<never>{
+export async function fail(response:Response,signal:AbortSignal):Promise<never>{
   let detail='Project request failed (HTTP '+response.status+').';
   try{
     const raw:unknown=JSON.parse(decode(await responseBytes(response,8192,signal)));
@@ -69,16 +69,16 @@ async function post(path:string,body:string,signal:AbortSignal,options:LocalOpti
   return response;
 }
 
-async function jsonResponse(response:Response,limit:number,signal:AbortSignal):Promise<unknown>{
+export async function jsonResponse(response:Response,limit:number,signal:AbortSignal):Promise<unknown>{
   if(response.headers.get('content-type')?.split(';')[0]!=='application/json')
     throw new Error('Unexpected project response type.');
   return JSON.parse(decode(await responseBytes(response,limit,signal)));
 }
-async function checksum(bytes:Uint8Array<ArrayBuffer>):Promise<string>{
+export async function checksum(bytes:Uint8Array<ArrayBuffer>):Promise<string>{
   return [...new Uint8Array(await crypto.subtle.digest('SHA-256',bytes))]
     .map(x=>x.toString(16).padStart(2,'0')).join('');
 }
-async function downloadBytes(response:Response,media:string,limit:number,signal:AbortSignal):Promise<Uint8Array<ArrayBuffer>>{
+export async function downloadBytes(response:Response,media:string,limit:number,signal:AbortSignal):Promise<Uint8Array<ArrayBuffer>>{
   const digest=response.headers.get('X-Sonumio-Content-SHA256');
   if(response.headers.get('content-type')?.split(';')[0]!==media||
     !isDigest(digest)||response.headers.get('content-length')===null)

@@ -73,7 +73,7 @@ export function parseStemResult(value:unknown,plan:StemPlan):StemResult {
     throw new Error('Invalid stem WAV receipt.');
   return value as StemResult;
 }
-export async function verifyStemWav(bytes:Uint8Array<ArrayBuffer>,plan:StemPlan,expected:string):Promise<void>{
+export async function verifyStemWav(bytes:Uint8Array<ArrayBuffer>,plan:Pick<StemPlan,'frames'>,expected:string):Promise<void>{
   if(bytes.length!==44+4*plan.frames||!isDigest(expected))
     throw new Error('Invalid stem WAV geometry.');
   const view=new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength);
