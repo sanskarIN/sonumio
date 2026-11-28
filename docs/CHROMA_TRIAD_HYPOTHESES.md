@@ -83,3 +83,20 @@ in arbitrary commercial recordings. Compare to hand-annotated,
 properly licensed recordings before publishing accuracy metrics.
 The report explicitly marks its chord classifications as hypotheses,
 with no trained-model or perceptual-quality claims.
+
+## Verified WAV inspection command
+
+```sh
+sonumio wav-chroma local-recording.wav --fft-frames 4096 --summary-only
+```
+
+The CLI checks source WAV geometry and optional
+`--expected-sha256` using Sonumio's verified local packet reader.
+It writes a single JSON document containing source provenance,
+a 12-class chroma summary, candidate chord segments and explicit
+uncertainty metadata. Omit `--summary-only` to include each
+analysis-frame hypothesis.
+
+The WAV file is never altered; invalid input returns a nonzero
+status without a JSON success receipt. The command provides no
+automatic copyright clearance, model weights or trained transcription.
