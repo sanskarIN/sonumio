@@ -363,3 +363,10 @@ def enqueue_music_stem(request: MusicStemRequest, job_id: RequestedJobId = None)
                 "audio_url": f"/v1/generations/{identifier}/audio"}
 
     return _enqueue("music", request, produce, store, job_id)
+
+
+# Integrated native project rendering shares the existing local audio queue.
+from .music_render_recipe_api import install_recipe_routes
+
+install_recipe_routes(app, enqueue=_enqueue, store_for_current=lambda: _store_for(OUTPUT_DIR),
+                      store_audio=_store_audio, requested_job_id=_requested_job_id)

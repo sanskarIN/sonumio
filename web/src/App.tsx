@@ -1,5 +1,6 @@
 import { MusicStudio } from './MusicStudio';
 import { NativeProjectWorkspace } from './NativeProjectWorkspace';
+import { RenderRecipeWorkspace } from './RenderRecipeWorkspace';
 import { useEffect, useRef, useState, type ChangeEvent, type FormEvent } from 'react';
 import {
   submitGenerationJob, submitSceneJob, awaitJob, cancelJob, getHealth, getModels, validateScene,
@@ -333,6 +334,7 @@ export function App() {
       </div>
       <MusicStudio connected={connected}/>
       <NativeProjectWorkspace connected={connected}/>
+      <RenderRecipeWorkspace connected={connected}/>
     </main>
     <footer><span>SONUMIO / IMAGINE IT. HEAR IT.</span><span>Open source · Local-first · Development preview</span></footer>
   </div>;
