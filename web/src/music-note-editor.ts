@@ -31,7 +31,9 @@ const HISTORY_LIMIT = 64;
 
 export function scoreFrame(c: Composition, tick: number): number {
   const beat = Math.floor(tick/8), sub = tick%8;
-  const swing = Math.round(c.swing*1000);
+  const rawSwing=c.swing*1000;
+  const floor=Math.floor(rawSwing);
+  const swing=rawSwing-floor===.5?(floor%2===0?floor:floor+1):Math.round(rawSwing);
   const scaled = sub <= 4 ? sub*(1000+swing) : 4*(1000+swing)+(sub-4)*(1000-swing);
   const numerator = (beat*8000+scaled)*60*24000;
   const denominator = c.bpm*8000;
